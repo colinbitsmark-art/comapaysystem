@@ -1,6 +1,7 @@
 import React, { type Dispatch, type FormEvent, type SetStateAction } from "react";
 import type { OrderStatus } from "../../types";
 import { CustomerSelect } from "../common/CustomerSelect";
+import { CurrencyPairSwapButton } from "./CurrencyPairSwapButton";
 
 type Customer = { id: number; name: string };
 type Currency = { id: number; code: string; active?: boolean | number };
@@ -17,7 +18,6 @@ type OrderFormState = {
 
 type OnlineOrderModalProps = {
   isOpen: boolean;
-  isFlexOrderMode: boolean;
   editingOrderId: number | null;
   isSaving: boolean;
   form: OrderFormState;
@@ -35,7 +35,6 @@ type OnlineOrderModalProps = {
 
 export default function OnlineOrderModal({
   isOpen,
-  isFlexOrderMode,
   editingOrderId,
   isSaving,
   form,
@@ -52,11 +51,7 @@ export default function OnlineOrderModal({
 }: OnlineOrderModalProps) {
   if (!isOpen) return null;
 
-  const title = editingOrderId
-    ? t("orders.editOrderTitle")
-    : isFlexOrderMode
-      ? t("orders.createFlexOrder")
-      : t("orders.createOrderTitle");
+  const title = editingOrderId ? t("orders.editOrderTitle") : t("orders.createOrderTitle");
 
   return (
     <div className="fixed top-0 left-0 right-0 bottom-0 w-full h-full z-[9999] flex items-center justify-center bg-black bg-opacity-50" style={{ margin: 0, padding: 0 }}>
@@ -106,9 +101,9 @@ export default function OnlineOrderModal({
               {t("orders.createNewCustomer")}
             </button>
           </div>
-          <div className="col-span-full grid grid-cols-2 gap-3">
+          <div className="col-span-full flex flex-col gap-3 sm:flex-row sm:items-end">
             <select
-              className="rounded-lg border border-slate-200 px-3 py-2"
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2"
               value={form.fromCurrency}
               onChange={(e) =>
                 setForm((p) => ({ ...p, fromCurrency: e.target.value }))
@@ -124,8 +119,21 @@ export default function OnlineOrderModal({
                   </option>
                 ))}
             </select>
+            <div className="flex justify-center sm:pb-0.5">
+              <CurrencyPairSwapButton
+                label={t("orders.swapCurrencies")}
+                disabled={!form.fromCurrency && !form.toCurrency}
+                onClick={() =>
+                  setForm((p) => ({
+                    ...p,
+                    fromCurrency: p.toCurrency,
+                    toCurrency: p.fromCurrency,
+                  }))
+                }
+              />
+            </div>
             <select
-              className="rounded-lg border border-slate-200 px-3 py-2"
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2"
               value={form.toCurrency}
               onChange={(e) =>
                 setForm((p) => ({ ...p, toCurrency: e.target.value }))

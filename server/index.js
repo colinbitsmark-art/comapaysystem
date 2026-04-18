@@ -5,6 +5,7 @@ const PORT = process.env.PORT || 4000;
 
 const server = app.listen(PORT, () => {
   console.log(`API ready on http://localhost:${PORT}`);
+  console.log("Orders: DELETE /api/orders/:id uses direct delete (approval workflow removed). Restart this process after server code changes.");
 });
 
 // Wallet Auto-Refresh Configuration

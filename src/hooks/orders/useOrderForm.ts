@@ -19,13 +19,12 @@ const initialFormState: OrderFormState = {
   amountBuy: "",
   amountSell: "",
   rate: "",
-  status: "pending",
+  status: "saved",
 };
 
 export function useOrderForm(currencies: Currency[]) {
   const [form, setForm] = useState<OrderFormState>(initialFormState);
   const [calculatedField, setCalculatedField] = useState<"buy" | "sell" | null>(null);
-  const [isFlexOrderMode, setIsFlexOrderMode] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -38,7 +37,6 @@ export function useOrderForm(currencies: Currency[]) {
     resetForm();
     setIsModalOpen(false);
     setEditingOrderId(null);
-    setIsFlexOrderMode(false);
   }, [resetForm]);
 
   // Auto-calculate amount when rate or source amount changes
@@ -115,8 +113,6 @@ export function useOrderForm(currencies: Currency[]) {
     setForm,
     calculatedField,
     setCalculatedField,
-    isFlexOrderMode,
-    setIsFlexOrderMode,
     editingOrderId,
     setEditingOrderId,
     isModalOpen,

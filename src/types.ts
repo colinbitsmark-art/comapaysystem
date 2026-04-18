@@ -47,7 +47,7 @@ export interface Role {
   updatedAt?: string;
 }
 
-export type OrderStatus = "pending" | "under_process" | "completed" | "cancelled" | "pending_amend" | "pending_delete";
+export type OrderStatus = "saved" | "completed" | "cancelled";
 export type PaymentFlow = "receive_first" | "pay_first";
 
 export interface Tag {
@@ -60,26 +60,6 @@ export interface Tag {
 export interface TagInput {
   name: string;
   color: string;
-}
-
-export interface ApprovalRequest {
-  id: number;
-  entityType: "order" | "expense" | "transfer";
-  entityId: number;
-  requestType: "delete" | "edit";
-  requestedBy: number;
-  requestedByName?: string;
-  requestedAt: string;
-  approvedBy?: number;
-  approvedByName?: string;
-  approvedAt?: string;
-  rejectedBy?: number;
-  rejectedByName?: string;
-  rejectedAt?: string;
-  status: "pending" | "approved" | "rejected";
-  requestData?: any; // For edit requests, contains the amended order/expense/transfer data
-  reason: string;
-  entity?: Order | Expense | Transfer; // The original entity (for comparison)
 }
 
 export interface Order {
@@ -118,7 +98,6 @@ export interface Order {
   actualAmountBuy?: number;
   actualAmountSell?: number;
   actualRate?: number;
-  isFlexOrder?: boolean;
   serviceChargeAmount?: number | null;
   serviceChargeCurrency?: string | null;
   serviceChargeAccountId?: number | null;
@@ -206,7 +185,9 @@ export interface CustomerBeneficiary {
 }
 
 export interface OrderInput {
-  customerId: number;
+  /** When set without customerId, server finds or creates customer by name */
+  customerName?: string;
+  customerId?: number;
   fromCurrency: string;
   toCurrency: string;
   amountBuy: number;
@@ -216,7 +197,6 @@ export interface OrderInput {
   buyAccountId?: number;
   sellAccountId?: number;
   paymentFlow?: PaymentFlow;
-  isFlexOrder?: boolean;
   serviceChargeAmount?: number | null;
   serviceChargeCurrency?: string | null;
   serviceChargeAccountId?: number | null;

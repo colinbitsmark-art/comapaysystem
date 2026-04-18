@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import type { OrderReceipt } from "../../types";
 
 interface ReceiptDisplayProps {
@@ -8,6 +8,9 @@ interface ReceiptDisplayProps {
   getFileType: (imagePath: string) => 'image' | 'pdf' | null;
   onViewImage: (src: string, type: 'image' | 'pdf', title: string) => void;
   onViewPdf: (dataUri: string) => void;
+  /** When set with a draft receipt that already has a file, shows Replace (PUT receipt with new file). */
+  canReplaceDraftUpload?: boolean;
+  onReplaceUploadedFile?: (file: File) => Promise<void>;
   t: (key: string) => string | undefined;
 }
 
@@ -18,8 +21,18 @@ export const ReceiptDisplay: React.FC<ReceiptDisplayProps> = ({
   getFileType,
   onViewImage,
   onViewPdf,
+  canReplaceDraftUpload = false,
+  onReplaceUploadedFile,
   t,
 }) => {
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const hasPreviewableFile = getFileType(receipt.imagePath) !== null;
+  const showReplace =
+    receipt.status === "draft" &&
+    canReplaceDraftUpload &&
+    !!onReplaceUploadedFile &&
+    hasPreviewableFile;
+
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between mb-2">
@@ -29,7 +42,37 @@ export const ReceiptDisplay: React.FC<ReceiptDisplayProps> = ({
           </span>
         )}
         {receipt.status === 'draft' && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 justify-end">
+            {showReplace ? (
+              <>
+                <input
+                  ref={replaceInputRef}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.currentTarget.value = "";
+                    if (!file || !onReplaceUploadedFile) return;
+                    try {
+                      await onReplaceUploadedFile(file);
+                    } catch (error: unknown) {
+                      console.error("Error replacing receipt file:", error);
+                      const err = error as { data?: { message?: string }; message?: string };
+                      alert(err?.data?.message || err?.message || t("orders.failedToReplaceUpload"));
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  title={t("orders.replaceUploadTooltip")}
+                  onClick={() => replaceInputRef.current?.click()}
+                  className="px-3 py-1 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors"
+                >
+                  {t("orders.replaceUpload")}
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               onClick={async () => {

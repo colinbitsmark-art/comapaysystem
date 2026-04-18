@@ -280,7 +280,6 @@ export default function AppLayout() {
     { to: "/tags", labelKey: "nav.tags", section: "tags" },
     { to: "/profit", labelKey: "nav.profit", section: "profit" },
     { to: "/wallets", labelKey: "nav.wallets", section: "wallets" },
-    { to: "/approval-requests", labelKey: "nav.approvalRequests", section: "approval_requests" },
     { to: "/settings", labelKey: "nav.settings", adminOnly: true },
   ];
 

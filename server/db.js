@@ -33,7 +33,7 @@ export const resetDbInstance = () => {
   return db;
 };
 
-const SECTIONS = ["dashboard", "currencies", "customers", "users", "roles", "orders", "transfers", "accounts", "expenses", "profit", "approval_requests", "wallets"];
+const SECTIONS = ["dashboard", "currencies", "customers", "users", "roles", "orders", "transfers", "accounts", "expenses", "profit", "wallets"];
 
 const ensureSchema = () => {
   db.prepare(
@@ -119,7 +119,7 @@ const ensureSchema = () => {
       amountBuy REAL NOT NULL,
       amountSell REAL NOT NULL,
       rate REAL NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
+      status TEXT NOT NULL DEFAULT 'saved',
       handlerId INTEGER,
       paymentType TEXT,
       networkChain TEXT,
@@ -456,7 +456,7 @@ const ensureSchema = () => {
       approvedAt TEXT,
       rejectedBy INTEGER,
       rejectedAt TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
+      status TEXT NOT NULL DEFAULT 'saved',
       requestData TEXT,
       originalEntityData TEXT,
       reason TEXT NOT NULL,
@@ -672,12 +672,9 @@ const seedData = () => {
             createOrder: true,
             createCurrency: true,
             updateCurrency: true,
-            processOrder: true,
             cancelOrder: true,
             deleteOrder: true,
             deleteManyOrders: true,
-            approveOrderDelete: true,
-            approveOrderEdit: true,
           },
         },
       },
@@ -691,7 +688,6 @@ const seedData = () => {
             createOrder: true,
             createCurrency: true,
             updateCurrency: true,
-            processOrder: true,
             cancelOrder: true,
           },
         },
@@ -827,6 +823,14 @@ const migrateDatabase = () => {
       db.prepare("ALTER TABLE orders ADD COLUMN createdBy INTEGER REFERENCES users(id)").run();
     }
 
+    // Best-effort: older rows had NULL createdBy; copy handler user when present so "Created by" can resolve.
+    const ordersColNames = db.prepare("PRAGMA table_info(orders)").all().map((col) => col.name);
+    if (ordersColNames.includes("createdBy") && ordersColNames.includes("handlerId")) {
+      db.prepare(
+        "UPDATE orders SET createdBy = handlerId WHERE createdBy IS NULL AND handlerId IS NOT NULL",
+      ).run();
+    }
+
     // Check customers table for remarks column
     const customerTableInfo = db.prepare("PRAGMA table_info(customers)").all();
     const customerColumnNames = customerTableInfo.map((col) => col.name);
@@ -898,6 +902,38 @@ const migrateDatabase = () => {
     // Check profit_calculations table for isDefault column
     if (!profitCalcColumnNames.includes("isDefault")) {
       db.prepare("ALTER TABLE profit_calculations ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0").run();
+    }
+
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS order_changes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        orderId INTEGER NOT NULL,
+        changedBy INTEGER,
+        changedAt TEXT NOT NULL,
+        beforeJson TEXT,
+        afterJson TEXT,
+        FOREIGN KEY(orderId) REFERENCES orders(id) ON DELETE CASCADE,
+        FOREIGN KEY(changedBy) REFERENCES users(id)
+      );`,
+    ).run();
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS _schema_migrations (key TEXT PRIMARY KEY);`).run();
+    const underProcessMigrated = db
+      .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
+      .get("merge_under_process_to_pending_v1");
+    if (!underProcessMigrated) {
+      db.prepare("UPDATE orders SET status = 'pending' WHERE status = 'under_process'").run();
+      db.prepare("INSERT INTO _schema_migrations (key) VALUES ('merge_under_process_to_pending_v1')").run();
+    }
+
+    const ordersThreeStatus = db
+      .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
+      .get("orders_three_status_v1");
+    if (!ordersThreeStatus) {
+      db.prepare(
+        `UPDATE orders SET status = 'saved' WHERE status IN ('pending', 'under_process', 'pending_amend', 'pending_delete')`,
+      ).run();
+      db.prepare("INSERT INTO _schema_migrations (key) VALUES ('orders_three_status_v1')").run();
     }
 
     // Migrate existing roles to include "profit" and "wallets" sections if not present

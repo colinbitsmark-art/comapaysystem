@@ -11,6 +11,49 @@ import { getUserIdFromHeader } from "../utils/auth.js";
 import { createNotification } from "../services/notification/notificationService.js";
 import { getUserPermissions, isAdmin, canModifyOrder } from "../utils/orderPermissions.js";
 
+const ORDER_AUDIT_FIELDS = [
+  "customerId",
+  "fromCurrency",
+  "toCurrency",
+  "amountBuy",
+  "amountSell",
+  "rate",
+  "status",
+  "remarks",
+  "buyAccountId",
+  "sellAccountId",
+  "handlerId",
+  "orderType",
+];
+
+function pickOrderAuditSnapshot(row) {
+  if (!row) return null;
+  const out = {};
+  for (const k of ORDER_AUDIT_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(row, k)) {
+      out[k] = row[k];
+    }
+  }
+  return out;
+}
+
+function insertOrderChange(orderId, userId, beforeRow, afterRow) {
+  try {
+    db.prepare(
+      `INSERT INTO order_changes (orderId, changedBy, changedAt, beforeJson, afterJson)
+       VALUES (?, ?, ?, ?, ?);`,
+    ).run(
+      orderId,
+      userId || null,
+      new Date().toISOString(),
+      JSON.stringify(pickOrderAuditSnapshot(beforeRow)),
+      JSON.stringify(pickOrderAuditSnapshot(afterRow)),
+    );
+  } catch (e) {
+    console.error("[insertOrderChange]", e);
+  }
+}
+
 // Helper function to calculate amountSell from amountBuy using the same logic as order creation (OrdersPage.tsx lines 298-365)
 const calculateAmountSell = (amountBuy, rate, fromCurrency, toCurrency) => {
   // Determine which side is the "stronger" currency so we know which way to apply the rate.
@@ -200,10 +243,12 @@ export const listOrders = (req, res) => {
   // Build main query with pagination
   const query = `
     SELECT o.*, c.name as customerName, u.name as handlerName,
+           COALESCE(cu.name, u.name) as createdByName,
            buyAcc.name as buyAccountName, sellAcc.name as sellAccountName
     FROM orders o
     LEFT JOIN customers c ON c.id = o.customerId
     LEFT JOIN users u ON u.id = o.handlerId
+    LEFT JOIN users cu ON cu.id = o.createdBy
     LEFT JOIN accounts buyAcc ON buyAcc.id = o.buyAccountId
     LEFT JOIN accounts sellAcc ON sellAcc.id = o.sellAccountId
     ${whereClause}
@@ -334,7 +379,6 @@ export const listOrders = (req, res) => {
         walletAddresses: order.walletAddresses ? JSON.parse(order.walletAddresses) : null,
         bankDetails: order.bankDetails ? JSON.parse(order.bankDetails) : null,
         hasBeneficiaries,
-        isFlexOrder: order.isFlexOrder === 1 || order.isFlexOrder === true,
         buyAccounts: buyAccounts.length > 0 ? buyAccounts : null,
         sellAccounts: sellAccounts.length > 0 ? sellAccounts : null,
         tags: tags.length > 0 ? tags : [],
@@ -392,7 +436,6 @@ export const listOrders = (req, res) => {
         walletAddresses: null,
         bankDetails: null,
         hasBeneficiaries: false,
-        isFlexOrder: order.isFlexOrder === 1 || order.isFlexOrder === true,
         buyAccounts: null,
         sellAccounts: null,
         tags: tags.length > 0 ? tags : [],
@@ -506,10 +549,12 @@ export const exportOrders = (req, res) => {
   // Build query without pagination
   const query = `
     SELECT o.*, c.name as customerName, u.name as handlerName,
+           COALESCE(cu.name, u.name) as createdByName,
            buyAcc.name as buyAccountName, sellAcc.name as sellAccountName
     FROM orders o
     LEFT JOIN customers c ON c.id = o.customerId
     LEFT JOIN users u ON u.id = o.handlerId
+    LEFT JOIN users cu ON cu.id = o.createdBy
     LEFT JOIN accounts buyAcc ON buyAcc.id = o.buyAccountId
     LEFT JOIN accounts sellAcc ON sellAcc.id = o.sellAccountId
     ${whereClause}
@@ -576,7 +621,6 @@ export const exportOrders = (req, res) => {
         walletAddresses: order.walletAddresses ? JSON.parse(order.walletAddresses) : null,
         bankDetails: order.bankDetails ? JSON.parse(order.bankDetails) : null,
         hasBeneficiaries,
-        isFlexOrder: order.isFlexOrder === 1 || order.isFlexOrder === true,
         buyAccounts: buyAccounts.length > 0 ? buyAccounts : null,
         sellAccounts: sellAccounts.length > 0 ? sellAccounts : null,
         tags: tags.length > 0 ? tags : [],
@@ -598,7 +642,6 @@ export const exportOrders = (req, res) => {
         walletAddresses: null,
         bankDetails: null,
         hasBeneficiaries: false,
-        isFlexOrder: order.isFlexOrder === 1 || order.isFlexOrder === true,
         buyAccounts: null,
         sellAccounts: null,
         tags: tags.length > 0 ? tags : [],
@@ -619,13 +662,29 @@ export const createOrder = async (req, res, next) => {
       return res.status(401).json({ message: "User ID is required" });
     }
 
-    // Validate handler (required for imported orders)
-    if (orderData.handlerId === undefined || orderData.handlerId === null) {
-      return res.status(400).json({ message: "Handler is required" });
+    let resolvedCustomerId = orderData.customerId != null ? Number(orderData.customerId) : null;
+    const rawName = orderData.customerName != null ? String(orderData.customerName).trim() : "";
+    if ((!resolvedCustomerId || Number.isNaN(resolvedCustomerId)) && rawName) {
+      const existingCustomer = db
+        .prepare("SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1")
+        .get(rawName);
+      if (existingCustomer) {
+        resolvedCustomerId = existingCustomer.id;
+      } else {
+        const ins = db.prepare("INSERT INTO customers (name) VALUES (?)").run(rawName);
+        resolvedCustomerId = ins.lastInsertRowid;
+      }
     }
-    const handler = db.prepare("SELECT id, name FROM users WHERE id = ?").get(orderData.handlerId);
-    if (!handler) {
-      return res.status(400).json({ message: "Handler not found" });
+    if (!resolvedCustomerId || Number.isNaN(resolvedCustomerId)) {
+      return res.status(400).json({ message: "Customer name or customer ID is required" });
+    }
+    orderData.customerId = resolvedCustomerId;
+
+    if (orderData.handlerId !== undefined && orderData.handlerId !== null && orderData.handlerId !== "") {
+      const handler = db.prepare("SELECT id, name FROM users WHERE id = ?").get(orderData.handlerId);
+      if (!handler) {
+        return res.status(400).json({ message: "Handler not found" });
+      }
     }
 
     // Validate buy/sell accounts only if provided (allow creating pending orders without accounts)
@@ -693,7 +752,6 @@ export const createOrder = async (req, res, next) => {
          handlerId,
          buyAccountId,
          sellAccountId,
-         isFlexOrder,
          orderType,
          profitAmount,
          profitCurrency,
@@ -714,7 +772,6 @@ export const createOrder = async (req, res, next) => {
          @handlerId,
          @buyAccountId,
          @sellAccountId,
-         @isFlexOrder,
          @orderType,
          @profitAmount,
          @profitCurrency,
@@ -726,14 +783,19 @@ export const createOrder = async (req, res, next) => {
          @createdAt
        );`,
     );
+    const rowForInsert = { ...orderData };
+    delete rowForInsert.customerName;
+    delete rowForInsert.remarks;
     const result = stmt.run({
-      ...orderData,
-      status: orderData.status || "pending",
+      ...rowForInsert,
+      status: orderData.status || "saved",
       handlerId: orderData.handlerId ?? null,
       buyAccountId: orderData.buyAccountId ?? null,
       sellAccountId: orderData.sellAccountId ?? null,
-      isFlexOrder: orderData.isFlexOrder ? 1 : 0,
-      orderType: orderData.orderType || "online",
+      orderType:
+        orderData.orderType === undefined || orderData.orderType === null || orderData.orderType === ""
+          ? null
+          : orderData.orderType,
       profitAmount: orderData.profitAmount ?? null,
       profitCurrency: orderData.profitCurrency ?? null,
       profitAccountId: orderData.profitAccountId ?? null,
@@ -746,12 +808,11 @@ export const createOrder = async (req, res, next) => {
     
     const orderId = result.lastInsertRowid;
     
-    // For OTC orders, create profit/service charge entries in separate tables if provided
-    // Only create confirmed entries if order is completed (imported), otherwise create drafts
-    // This matches the pattern of receipts/payments - drafts until order is completed
-    if (orderData.orderType === "otc") {
+    // Create profit/service charge entries in separate tables when saving a non-completed order
+    // (legacy OTC-only path; unified clients omit orderType and still get drafts here)
+    if ((orderData.status || "saved") !== "completed") {
       // Check if this is an imported order (status is "completed" from the start)
-      const isImported = (orderData.status || "pending") === "completed";
+      const isImported = (orderData.status || "saved") === "completed";
       const importedSuffix = isImported ? " (Imported)" : "";
       const profitServiceChargeStatus = isImported ? "confirmed" : "draft";
       
@@ -884,7 +945,7 @@ export const createOrder = async (req, res, next) => {
     // This handles imported orders that are already completed
     // Query the actual order from database to get the real status and account IDs
     const actualOrder = db.prepare("SELECT status, buyAccountId, sellAccountId FROM orders WHERE id = ?;").get(orderId);
-    const finalStatus = actualOrder?.status || orderData.status || "pending";
+    const finalStatus = actualOrder?.status || orderData.status || "saved";
     const actualBuyAccountId = actualOrder?.buyAccountId || orderData.buyAccountId;
     const actualSellAccountId = actualOrder?.sellAccountId || orderData.sellAccountId;
     
@@ -995,33 +1056,15 @@ export const updateOrder = (req, res, next) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    // Check permissions
-    if (userId) {
-      const userPermissions = getUserPermissions(userId);
-      const isUserAdmin = isAdmin(userPermissions);
-      
-      // For completed orders, non-admin users must create approval request
-      if (existingOrder.status === "completed" && !isUserAdmin) {
-        if (!canModifyOrder(existingOrder, userId)) {
-          return res.status(403).json({ 
-            message: "Only the order creator, handler, or admin can edit orders" 
-          });
-        }
-        // Creator/handler must create approval request for completed orders
-        return res.status(400).json({ 
-          message: "Please use the approval request system to edit completed orders",
-          requiresApproval: true
-        });
-      }
-      
-      // For non-completed orders, check if user is creator/handler/admin
-      if (!isUserAdmin && !canModifyOrder(existingOrder, userId)) {
-        return res.status(403).json({ 
-          message: "Only the order creator, handler, or admin can edit orders" 
-        });
-      }
-    } else {
+    const beforeAuditRow = db.prepare("SELECT * FROM orders WHERE id = ?").get(id);
+
+    if (!userId) {
       return res.status(401).json({ message: "User ID is required" });
+    }
+    if (!canModifyOrder(existingOrder, userId)) {
+      return res.status(403).json({
+        message: "You are not allowed to edit this order",
+      });
     }
 
     // Fields that can only be updated when order is pending
@@ -1052,14 +1095,9 @@ export const updateOrder = (req, res, next) => {
       }
     });
 
-    // If trying to update pending-only fields, check status
-    if (Object.keys(pendingOnlyUpdates).length > 0 && existingOrder.status !== "pending") {
-      return res.status(400).json({ message: "Only pending orders can have their core fields edited" });
-    }
-
-    // Service charges and profit can be updated for any status except "completed"
-    if (Object.keys(alwaysUpdatableUpdates).length > 0 && existingOrder.status === "completed") {
-      return res.status(400).json({ message: "Cannot update service charges or profit for completed orders" });
+    // Core amounts/currencies/customer only while order is still Saved
+    if (Object.keys(pendingOnlyUpdates).length > 0 && existingOrder.status !== "saved") {
+      return res.status(400).json({ message: "Core fields can only be edited when order status is Saved" });
     }
 
     // Validate service charge and profit currency fields
@@ -1107,39 +1145,55 @@ export const updateOrder = (req, res, next) => {
     let createdProfitId = null;
     let createdServiceChargeId = null;
     
-    // If profit fields are provided, handle profit draft
-    if (profitAmount !== undefined || profitAccountId !== undefined || profitCurrency !== undefined) {
+    const allowProfitScDrafts =
+      existingOrder.status !== "completed" && existingOrder.status !== "cancelled";
+
+    // If profit fields are provided, handle profit draft (saved / in-progress orders only)
+    if (
+      allowProfitScDrafts &&
+      (profitAmount !== undefined || profitAccountId !== undefined || profitCurrency !== undefined)
+    ) {
       // Delete any existing draft profit for this order
       const deleteResult = db.prepare("DELETE FROM order_profits WHERE orderId = ? AND status = 'draft';").run(id);
       profitDraftDeleted = deleteResult.changes > 0;
-      
+
       // Create new draft profit if all required fields are provided and amount is valid
       if (profitAmount !== null && profitAmount !== undefined && profitCurrency && profitAccountId) {
         const amount = Number(profitAmount);
         if (!isNaN(amount) && amount > 0) {
           const profitResult = db.prepare(
             `INSERT INTO order_profits (orderId, amount, currencyCode, accountId, status, createdAt)
-             VALUES (?, ?, ?, ?, 'draft', ?);`
+             VALUES (?, ?, ?, ?, 'draft', ?);`,
           ).run(id, amount, profitCurrency, profitAccountId, new Date().toISOString());
           profitDraftCreated = true;
           createdProfitId = profitResult.lastInsertRowid;
         }
       }
     }
-    
+
     // If service charge fields are provided, handle service charge draft
-    if (serviceChargeAmount !== undefined || serviceChargeAccountId !== undefined || serviceChargeCurrency !== undefined) {
+    if (
+      allowProfitScDrafts &&
+      (serviceChargeAmount !== undefined ||
+        serviceChargeAccountId !== undefined ||
+        serviceChargeCurrency !== undefined)
+    ) {
       // Delete any existing draft service charge for this order
       const deleteResult = db.prepare("DELETE FROM order_service_charges WHERE orderId = ? AND status = 'draft';").run(id);
       serviceChargeDraftDeleted = deleteResult.changes > 0;
-      
+
       // Create new draft service charge if all required fields are provided and amount is valid
-      if (serviceChargeAmount !== null && serviceChargeAmount !== undefined && serviceChargeCurrency && serviceChargeAccountId) {
+      if (
+        serviceChargeAmount !== null &&
+        serviceChargeAmount !== undefined &&
+        serviceChargeCurrency &&
+        serviceChargeAccountId
+      ) {
         const amount = Number(serviceChargeAmount);
         if (!isNaN(amount) && amount !== 0) {
           const serviceChargeResult = db.prepare(
             `INSERT INTO order_service_charges (orderId, amount, currencyCode, accountId, status, createdAt)
-             VALUES (?, ?, ?, ?, 'draft', ?);`
+             VALUES (?, ?, ?, ?, 'draft', ?);`,
           ).run(id, amount, serviceChargeCurrency, serviceChargeAccountId, new Date().toISOString());
           serviceChargeDraftCreated = true;
           createdServiceChargeId = serviceChargeResult.lastInsertRowid;
@@ -1239,11 +1293,35 @@ export const updateOrder = (req, res, next) => {
          ORDER BY t.name ASC;`
       )
       .all(id);
-    
+
+    const afterAuditRow = db.prepare("SELECT * FROM orders WHERE id = ?").get(id);
+    if (beforeAuditRow && afterAuditRow) {
+      insertOrderChange(Number(id), userId, beforeAuditRow, afterAuditRow);
+    }
+
     res.json({
       ...responseData,
       tags: tags.length > 0 ? tags : [],
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getOrderChanges = (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const rows = db
+      .prepare(
+        `SELECT oc.id, oc.orderId, oc.changedBy, oc.changedAt, oc.beforeJson, oc.afterJson,
+                u.name as changedByName
+         FROM order_changes oc
+         LEFT JOIN users u ON u.id = oc.changedBy
+         WHERE oc.orderId = ?
+         ORDER BY oc.changedAt DESC, oc.id DESC;`,
+      )
+      .all(id);
+    res.json(rows);
   } catch (error) {
     next(error);
   }
@@ -1258,10 +1336,15 @@ export const updateOrderStatus = async (req, res, next) => {
     if (!status) {
       return res.status(400).json({ message: "Status is required" });
     }
+
+    const allowedStatuses = ["saved", "completed", "cancelled"];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ message: `Invalid status. Allowed: ${allowedStatuses.join(", ")}` });
+    }
     
     // Get the current status before updating
     const currentOrder = db
-      .prepare("SELECT id, createdBy, handlerId, status, buyAccountId, sellAccountId, orderType, isFlexOrder FROM orders WHERE id = ?;")
+      .prepare("SELECT id, createdBy, handlerId, status, buyAccountId, sellAccountId, orderType FROM orders WHERE id = ?;")
       .get(id);
     if (!currentOrder) {
       return res.status(404).json({ message: "Order not found" });
@@ -1271,28 +1354,7 @@ export const updateOrderStatus = async (req, res, next) => {
     if (!userId) {
       return res.status(401).json({ message: "User ID is required" });
     }
-    
-    const userPermissions = getUserPermissions(userId);
-    const isUserAdmin = isAdmin(userPermissions);
-    
-    // For canceling orders, only creator/handler/admin can cancel
-    if (status === "cancelled") {
-      if (!isUserAdmin && !canModifyOrder(currentOrder, userId)) {
-        return res.status(403).json({ 
-          message: "Only the order creator, handler, or admin can cancel orders" 
-        });
-      }
-    }
-    
-    // For completing orders or changing from completed, check if user is creator/handler/admin
-    if (status === "completed" || currentOrder.status === "completed") {
-      if (!isUserAdmin && !canModifyOrder(currentOrder, userId)) {
-        return res.status(403).json({ 
-          message: "Only the order creator, handler, or admin can change order status" 
-        });
-      }
-    }
-    
+
     // Update the status
     db.prepare(`UPDATE orders SET status = @status WHERE id = @id;`).run({ id, status });
     
@@ -1305,7 +1367,11 @@ export const updateOrderStatus = async (req, res, next) => {
       const hasConfirmedPayment = db
         .prepare("SELECT id FROM order_payments WHERE orderId = ? AND status = 'confirmed' LIMIT 1;")
         .get(id);
-      const isOtcOrder = currentOrder.orderType === "otc";
+      const isOtcOrder =
+        currentOrder.orderType === "otc" ||
+        currentOrder.orderType === null ||
+        currentOrder.orderType === undefined ||
+        currentOrder.orderType === "";
 
       // Only run the direct balance update when there are no confirmed receipt/payment entries
       // (typical for imported orders without detailed entries) and it's not an OTC order
@@ -1316,25 +1382,6 @@ export const updateOrderStatus = async (req, res, next) => {
     
     // When order is completed, confirm all draft profit and service charge entries
     if (status === "completed" && currentOrder.status !== "completed") {
-      // For flex orders, update amountBuy and amountSell to match actual receipt and payment totals
-      if (currentOrder.isFlexOrder === 1) {
-        const receipts = db.prepare("SELECT * FROM order_receipts WHERE orderId = ? AND status = 'confirmed';").all(id);
-        const payments = db.prepare("SELECT * FROM order_payments WHERE orderId = ? AND status = 'confirmed';").all(id);
-        
-        const totalReceiptAmount = receipts.reduce((sum, r) => sum + r.amount, 0);
-        const totalPaymentAmount = payments.reduce((sum, p) => sum + p.amount, 0);
-        
-        // Update amountBuy and amountSell to match the actual totals
-        if (receipts.length > 0 || payments.length > 0) {
-          db.prepare(
-            `UPDATE orders 
-             SET amountBuy = ?,
-                 amountSell = ?
-             WHERE id = ?;`
-          ).run(totalReceiptAmount, totalPaymentAmount, id);
-        }
-      }
-      
       // Confirm all draft profit entries
       const draftProfits = db.prepare("SELECT * FROM order_profits WHERE orderId = ? AND status = 'draft';").all(id);
       for (const profit of draftProfits) {
@@ -1473,38 +1520,24 @@ export const updateOrderStatus = async (req, res, next) => {
 
 export const deleteOrder = async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const { id: idRaw } = req.params;
+    const id = parseInt(String(idRaw), 10);
+    if (!Number.isFinite(id) || id < 1) {
+      return res.status(400).json({ message: "Invalid order id" });
+    }
     const userId = getUserIdFromHeader(req);
-    
+    console.log(`[deleteOrder] orderId=${id} userId=${userId ?? "none"}`);
+
     // Check if order exists and get profit/service charge data, and account info
     const order = db.prepare("SELECT id, createdBy, handlerId, profitAmount, profitAccountId, serviceChargeAmount, serviceChargeAccountId, buyAccountId, sellAccountId, amountBuy, amountSell, status FROM orders WHERE id = ?;").get(id);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    // Check permissions: Admin can delete directly, creator/handler must request approval
-    if (userId) {
-      const userPermissions = getUserPermissions(userId);
-      const isUserAdmin = isAdmin(userPermissions);
-      
-      if (!isUserAdmin) {
-        // Non-admin users must be creator or handler to request deletion
-        if (!canModifyOrder(order, userId)) {
-          return res.status(403).json({ 
-            message: "Only the order creator, handler, or admin can delete orders" 
-          });
-        }
-        // Creator/handler must create approval request instead of direct delete
-        return res.status(400).json({ 
-          message: "Please use the approval request system to delete this order",
-          requiresApproval: true
-        });
-      }
-      // Admin can delete directly (continue with deletion)
-    } else {
+    if (!userId) {
       return res.status(401).json({ message: "User ID is required" });
     }
-    
+
     // Get all confirmed receipts with accountId and amount for reversing balances (only reverse confirmed ones)
     const receipts = db.prepare("SELECT accountId, amount, imagePath, status FROM order_receipts WHERE orderId = ? AND status = 'confirmed';").all(id);
     // Get all confirmed payments with accountId and amount for reversing balances (only reverse confirmed ones)
@@ -1722,6 +1755,9 @@ export const deleteOrder = async (req, res, next) => {
     ).get(id);
     const userName = db.prepare("SELECT name FROM users WHERE id = ?").get(userId);
     
+    // Legacy approval rows (no FK) — remove so they never block cleanup
+    db.prepare("DELETE FROM approval_requests WHERE entityType = 'order' AND entityId = ?").run(id);
+
     // Delete the order (this will cascade delete receipts and payments due to foreign key constraints)
     const stmt = db.prepare(`DELETE FROM orders WHERE id = ?;`);
     const result = stmt.run(id);
@@ -1729,19 +1765,22 @@ export const deleteOrder = async (req, res, next) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    // Send notification to all users about order deletion
-    const allUsers = db.prepare("SELECT id FROM users").all();
-    const allUserIds = allUsers.map(u => u.id);
-    
-    await createNotification({
-      userId: allUserIds,
-      type: 'order_deleted',
-      title: 'Order Deleted',
-      message: `Order #${id} - ${orderDetails?.customerName || 'Customer'} has been deleted by ${userName?.name || 'User'}`,
-      entityType: 'order',
-      entityId: id,
-      actionUrl: `/orders`,
-    });
+    // Send notification to all users about order deletion (must not fail the HTTP delete)
+    try {
+      const allUsers = db.prepare("SELECT id FROM users").all();
+      const allUserIds = allUsers.map(u => u.id);
+      await createNotification({
+        userId: allUserIds,
+        type: 'order_deleted',
+        title: 'Order Deleted',
+        message: `Order #${id} - ${orderDetails?.customerName || 'Customer'} has been deleted by ${userName?.name || 'User'}`,
+        entityType: 'order',
+        entityId: id,
+        actionUrl: `/orders`,
+      });
+    } catch (notifyErr) {
+      console.error("[deleteOrder] notification failed (order was deleted):", notifyErr);
+    }
 
     res.json({ 
       success: true,
@@ -1757,9 +1796,11 @@ export const getOrderDetails = (req, res, next) => {
     const { id } = req.params;
     const order = db
       .prepare(
-        `SELECT o.*, c.name as customerName, u.name as handlerName FROM orders o
+        `SELECT o.*, c.name as customerName, u.name as handlerName,
+                COALESCE(cu.name, u.name) as createdByName FROM orders o
          LEFT JOIN customers c ON c.id = o.customerId
          LEFT JOIN users u ON u.id = o.handlerId
+         LEFT JOIN users cu ON cu.id = o.createdBy
          WHERE o.id = ?;`,
       )
       .get(id);
@@ -1822,27 +1863,8 @@ export const getOrderDetails = (req, res, next) => {
     const receiptBalance = order.amountBuy - totalReceiptAmount;
     const paymentBalance = order.amountSell - totalPaymentAmount;
 
-    // For flex orders, calculate balances based on actual amounts
-    let receiptBalanceCalc = receiptBalance;
-    let paymentBalanceCalc = paymentBalance;
-    
-    if (order.isFlexOrder === 1) {
-      const expectedReceiptAmount = order.actualAmountBuy || order.amountBuy;
-      // For payment balance, calculate expected payment based on actual receipts received
-      // This ensures excess payments show as negative balance
-      // Use the rate to calculate what payment should be based on receipts
-      const effectiveRate = order.actualRate || order.rate;
-      const expectedPaymentBasedOnReceipts = calculateAmountSell(
-        totalReceiptAmount,
-        effectiveRate,
-        order.fromCurrency,
-        order.toCurrency
-      );
-      // Payment balance = expected payment (based on receipts) - actual payment
-      // This will be negative when there's excess payment
-      receiptBalanceCalc = expectedReceiptAmount - totalReceiptAmount;
-      paymentBalanceCalc = expectedPaymentBasedOnReceipts - totalPaymentAmount;
-    }
+    const receiptBalanceCalc = receiptBalance;
+    const paymentBalanceCalc = paymentBalance;
     
     // Convert file paths to URLs for receipts and payments
     const receiptsWithUrls = receipts.map(r => ({
@@ -1898,7 +1920,6 @@ export const getOrderDetails = (req, res, next) => {
         ...order,
         walletAddresses: order.walletAddresses ? JSON.parse(order.walletAddresses) : null,
         bankDetails: order.bankDetails ? JSON.parse(order.bankDetails) : null,
-        isFlexOrder: order.isFlexOrder === 1 || order.isFlexOrder === true,
         tags: tags.length > 0 ? tags : [],
       },
       receipts: receiptsWithUrls,
@@ -1934,18 +1955,15 @@ export const processOrder = (req, res, next) => {
       return res.status(400).json({ message: "Handler ID is required" });
     }
 
-    // Check if order exists and get its type
-    const existingOrder = db.prepare("SELECT id, isFlexOrder FROM orders WHERE id = ?").get(id);
+    const existingOrder = db.prepare("SELECT id FROM orders WHERE id = ?").get(id);
     if (!existingOrder) {
       console.error("processOrder error: Order not found", id);
       return res.status(404).json({ message: "Order not found" });
     }
 
-    // Determine status based on order type
-    // Both flex orders and regular orders now go to "under_process" status
-    let status = "under_process";
+    const status = "saved";
 
-    console.log("processOrder: Updating order", { id, handlerId, paymentFlow, status, isFlexOrder: existingOrder.isFlexOrder });
+    console.log("processOrder: Updating order", { id, handlerId, paymentFlow, status });
 
     // Update order with handler and status
     // Both flex orders and regular orders now follow the same flow
@@ -1970,9 +1988,11 @@ export const processOrder = (req, res, next) => {
 
     const order = db
       .prepare(
-        `SELECT o.*, c.name as customerName, u.name as handlerName FROM orders o
+        `SELECT o.*, c.name as customerName, u.name as handlerName,
+                COALESCE(cu.name, u.name) as createdByName FROM orders o
          LEFT JOIN customers c ON c.id = o.customerId
          LEFT JOIN users u ON u.id = o.handlerId
+         LEFT JOIN users cu ON cu.id = o.createdBy
          WHERE o.id = ?;`,
       )
       .get(id);
@@ -2036,7 +2056,7 @@ export const addReceipt = (req, res, next) => {
     }
 
     // Check if order exists first and get paymentFlow and status
-    const order = db.prepare("SELECT id, createdBy, handlerId, fromCurrency, toCurrency, amountBuy, amountSell, paymentFlow, buyAccountId, isFlexOrder, status, orderType FROM orders WHERE id = ?;").get(id);
+    const order = db.prepare("SELECT id, createdBy, handlerId, fromCurrency, toCurrency, amountBuy, amountSell, paymentFlow, buyAccountId, status, orderType FROM orders WHERE id = ?;").get(id);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -2055,22 +2075,12 @@ export const addReceipt = (req, res, next) => {
       return res.status(401).json({ message: "User ID is required" });
     }
 
-    const paymentFlow = order.paymentFlow || "receive_first";
-    const isFlexOrder = order.isFlexOrder === 1;
-    const isOtcOrder = order.orderType === "otc";
-    
-    // For OTC orders, imagePath is not required. Use placeholder if missing.
-    // For regular orders, imagePath is required.
-    if (!isOtcOrder && !imagePath) {
-      return res.status(400).json({ message: "File/image is required for non-OTC orders" });
+    // Receipt attachment is optional; use placeholder when none uploaded.
+    if (!imagePath) {
+      imagePath = "OTC_NO_IMAGE";
     }
     if (amount === undefined) {
       return res.status(400).json({ message: "Amount is required" });
-    }
-    
-    // Use placeholder for OTC orders if no image
-    if (isOtcOrder && !imagePath) {
-      imagePath = "OTC_NO_IMAGE";
     }
     
     // Account ID is required
@@ -2130,44 +2140,6 @@ export const addReceipt = (req, res, next) => {
     if (receiptAccountId && !order.buyAccountId) {
       db.prepare("UPDATE orders SET buyAccountId = ? WHERE id = ?;").run(receiptAccountId, id);
     }
-
-    // Check if total confirmed receipts match expected amount (only count confirmed)
-    const receipts = db
-      .prepare("SELECT * FROM order_receipts WHERE orderId = ? AND status = 'confirmed';")
-      .all(id);
-    const totalAmount = receipts.reduce((sum, r) => sum + r.amount, 0);
-    
-    // For flex orders, automatically update actualAmountBuy and actualAmountSell when receipts are uploaded
-    if (isFlexOrder) {
-      const currentOrder = db.prepare("SELECT actualRate, rate, fromCurrency, toCurrency FROM orders WHERE id = ?;").get(id);
-      const effectiveRate = currentOrder?.actualRate || currentOrder?.rate || order.rate;
-      const calculatedAmountSell = calculateAmountSell(totalAmount, effectiveRate, order.fromCurrency, order.toCurrency);
-      
-      // Update actualAmountBuy and actualAmountSell immediately
-      db.prepare(
-        `UPDATE orders 
-         SET actualAmountBuy = @actualAmountBuy,
-             actualAmountSell = @actualAmountSell,
-             actualRate = @actualRate
-         WHERE id = @id;`
-      ).run({
-        id: Number(id),
-        actualAmountBuy: totalAmount,
-        actualAmountSell: calculatedAmountSell,
-        actualRate: effectiveRate,
-      });
-    }
-    
-    // For flex orders, use actualAmountBuy if set, otherwise use original amountBuy
-    // For regular orders, use the original amountBuy from order creation
-    let expectedAmount = order.amountBuy;
-    const orderWithActual = db.prepare("SELECT actualAmountBuy FROM orders WHERE id = ?;").get(id);
-    if (isFlexOrder && orderWithActual?.actualAmountBuy !== null && orderWithActual?.actualAmountBuy !== undefined) {
-      expectedAmount = orderWithActual.actualAmountBuy;
-    }
-
-    // For orders in "under_process" status (both flex and regular), don't auto-advance status - let user proceed manually
-    // Status should only change when manually completing the order
 
     res.json(receiptWithUrl);
   } catch (error) {
@@ -2383,8 +2355,7 @@ export const addPayment = (req, res, next) => {
       }
     }
 
-    // Check if order exists first and get paymentFlow
-    const order = db.prepare("SELECT id, createdBy, handlerId, toCurrency, amountSell, paymentFlow, sellAccountId, isFlexOrder, actualAmountBuy, actualAmountSell, actualRate, rate, orderType FROM orders WHERE id = ?;").get(id);
+    const order = db.prepare("SELECT id, createdBy, handlerId, toCurrency, amountSell, paymentFlow, sellAccountId, rate, orderType FROM orders WHERE id = ?;").get(id);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -2403,22 +2374,12 @@ export const addPayment = (req, res, next) => {
       return res.status(401).json({ message: "User ID is required" });
     }
 
-    const paymentFlow = order.paymentFlow || "receive_first";
-    const isFlexOrder = order.isFlexOrder === 1;
-    const isOtcOrder = order.orderType === "otc";
-    
-    // For OTC orders, imagePath is not required. Use placeholder if missing.
-    // For regular orders, imagePath is required.
-    if (!isOtcOrder && !imagePath) {
-      return res.status(400).json({ message: "File/image is required for non-OTC orders" });
+    // Payment attachment is optional; use placeholder when none uploaded.
+    if (!imagePath) {
+      imagePath = "OTC_NO_IMAGE";
     }
     if (amount === undefined) {
       return res.status(400).json({ message: "Amount is required" });
-    }
-    
-    // Use placeholder for OTC orders if no image
-    if (isOtcOrder && !imagePath) {
-      imagePath = "OTC_NO_IMAGE";
     }
     
     // Account ID is required
@@ -2479,185 +2440,9 @@ export const addPayment = (req, res, next) => {
       db.prepare("UPDATE orders SET sellAccountId = ? WHERE id = ?;").run(paymentAccountId, id);
     }
 
-    // Check if total confirmed payments match expected amount (only count confirmed)
-    const payments = db
-      .prepare("SELECT * FROM order_payments WHERE orderId = ? AND status = 'confirmed';")
-      .all(id);
-    const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
-    
-    // For flex orders, use actualAmountSell if set, otherwise calculate from actualAmountBuy and rate
-    // For regular orders, use the original amountSell from order creation
-    let expectedAmount = order.amountSell;
-    if (isFlexOrder) {
-      const orderWithActual = db.prepare("SELECT actualAmountBuy, actualAmountSell, actualRate, rate FROM orders WHERE id = ?;").get(id);
-      const effectiveRate = orderWithActual?.actualRate || orderWithActual?.rate || order.rate;
-      const effectiveAmountBuy = orderWithActual?.actualAmountBuy || order.actualAmountBuy;
-      
-      if (orderWithActual?.actualAmountSell !== null && orderWithActual?.actualAmountSell !== undefined) {
-        expectedAmount = orderWithActual.actualAmountSell;
-      } else if (effectiveAmountBuy !== null && effectiveAmountBuy !== undefined) {
-        expectedAmount = effectiveAmountBuy * effectiveRate;
-      }
-    }
-
-    // For flex orders, check for excess payments
-    if (isFlexOrder && totalAmount > expectedAmount) {
-      const excessAmount = totalAmount - expectedAmount;
-      const orderWithActual = db.prepare("SELECT actualRate, rate, actualAmountBuy FROM orders WHERE id = ?;").get(id);
-      const effectiveRate = orderWithActual?.actualRate || orderWithActual?.rate || order.rate;
-      
-      // Get total confirmed receipts to use as current actualAmountBuy if not set
-      const receipts = db.prepare("SELECT * FROM order_receipts WHERE orderId = ? AND status = 'confirmed';").all(id);
-      const totalReceiptAmount = receipts.reduce((sum, r) => sum + r.amount, 0);
-      
-      // Calculate additional receipts needed using reverse calculation
-      const additionalReceiptsNeeded = calculateAmountBuy(excessAmount, effectiveRate, order.fromCurrency, order.toCurrency);
-      
-      // Update actualAmountSell to total payment amount
-      // Update actualAmountBuy to current actualAmountBuy (or total receipts if not set) + additional receipts needed
-      const currentActualAmountBuy = orderWithActual?.actualAmountBuy !== null && orderWithActual?.actualAmountBuy !== undefined 
-        ? orderWithActual.actualAmountBuy 
-        : totalReceiptAmount;
-      const newActualAmountBuy = currentActualAmountBuy + additionalReceiptsNeeded;
-      
-      db.prepare(
-        `UPDATE orders 
-         SET actualAmountSell = @actualAmountSell,
-             actualAmountBuy = @actualAmountBuy,
-             actualRate = @actualRate
-         WHERE id = @id;`
-      ).run({
-        id: Number(id),
-        actualAmountSell: totalAmount,
-        actualAmountBuy: newActualAmountBuy,
-        actualRate: effectiveRate,
-      });
-      
-      // Don't complete order if there's excess - user needs to upload more receipts
-      // Status will be handled by frontend logic or a separate endpoint
-      return res.json({
-        ...payment,
-        flexOrderExcess: {
-          excessAmount,
-          additionalReceiptsNeeded,
-          effectiveRate,
-        },
-      });
-    }
-
-    // For orders in "under_process" status, don't auto-advance status - let user proceed manually
-    // Status should only change when manually completing the order
-
     res.json(paymentWithUrl);
   } catch (error) {
     console.error("Error adding payment:", error);
-    next(error);
-  }
-};
-
-export const proceedWithPartialReceipts = (req, res, next) => {
-  try {
-    const { id } = req.params;
-    
-    // Check if order exists and is a flex order
-    const order = db.prepare("SELECT id, isFlexOrder, paymentFlow, rate, actualRate, fromCurrency, toCurrency FROM orders WHERE id = ?;").get(id);
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" });
-    }
-    
-    if (order.isFlexOrder !== 1) {
-      return res.status(400).json({ message: "This endpoint is only for flex orders" });
-    }
-    
-    // Get total confirmed receipts
-    const receipts = db.prepare("SELECT * FROM order_receipts WHERE orderId = ? AND status = 'confirmed';").all(id);
-    const totalReceiptAmount = receipts.reduce((sum, r) => sum + r.amount, 0);
-    
-    if (totalReceiptAmount <= 0) {
-      return res.status(400).json({ message: "No confirmed receipts found for this order" });
-    }
-    
-    // Update actualAmountBuy to total receipts
-    // Use actualRate if available, otherwise use original rate
-    const effectiveRate = order.actualRate || order.rate;
-    const calculatedAmountSell = calculateAmountSell(totalReceiptAmount, effectiveRate, order.fromCurrency, order.toCurrency);
-    
-    db.prepare(
-      `UPDATE orders 
-       SET actualAmountBuy = @actualAmountBuy,
-           actualAmountSell = @actualAmountSell,
-           actualRate = @actualRate,
-           status = @status
-       WHERE id = @id;`
-    ).run({
-      id: Number(id),
-      actualAmountBuy: totalReceiptAmount,
-      actualAmountSell: calculatedAmountSell,
-      actualRate: effectiveRate,
-      status: "under_process",
-    });
-    
-    const updatedOrder = db
-      .prepare(
-        `SELECT o.*, c.name as customerName FROM orders o
-         LEFT JOIN customers c ON c.id = o.customerId
-         WHERE o.id = ?;`,
-      )
-      .get(id);
-    
-    res.json(updatedOrder);
-  } catch (error) {
-    console.error("Error proceeding with partial receipts:", error);
-    next(error);
-  }
-};
-
-export const adjustFlexOrderRate = (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { rate } = req.body;
-    
-    if (!rate || isNaN(rate) || rate <= 0) {
-      return res.status(400).json({ message: "Valid exchange rate is required" });
-    }
-    
-    // Check if order exists and is a flex order
-    const order = db.prepare("SELECT id, isFlexOrder, actualAmountBuy, amountBuy, fromCurrency, toCurrency FROM orders WHERE id = ?;").get(id);
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" });
-    }
-    
-    if (order.isFlexOrder !== 1) {
-      return res.status(400).json({ message: "This endpoint is only for flex orders" });
-    }
-    
-    const newRate = parseFloat(rate);
-    const actualAmountBuy = order.actualAmountBuy || order.amountBuy;
-    const calculatedAmountSell = calculateAmountSell(actualAmountBuy, newRate, order.fromCurrency, order.toCurrency);
-    
-    // Update actualRate and recalculate actualAmountSell
-    db.prepare(
-      `UPDATE orders 
-       SET actualRate = @actualRate,
-           actualAmountSell = @actualAmountSell
-       WHERE id = @id;`
-    ).run({
-      id: Number(id),
-      actualRate: newRate,
-      actualAmountSell: calculatedAmountSell,
-    });
-    
-    const updatedOrder = db
-      .prepare(
-        `SELECT o.*, c.name as customerName FROM orders o
-         LEFT JOIN customers c ON c.id = o.customerId
-         WHERE o.id = ?;`,
-      )
-      .get(id);
-    
-    res.json(updatedOrder);
-  } catch (error) {
-    console.error("Error adjusting flex order rate:", error);
     next(error);
   }
 };
@@ -2794,7 +2579,7 @@ export const confirmReceipt = (req, res, next) => {
     }
 
     // Check permissions - get order info (fetch all fields needed for later use)
-    const order = db.prepare("SELECT id, createdBy, handlerId, fromCurrency, toCurrency, amountBuy, paymentFlow, isFlexOrder, actualAmountBuy, rate, actualRate, status FROM orders WHERE id = ?;").get(receipt.orderId);
+    const order = db.prepare("SELECT id, createdBy, handlerId, fromCurrency, toCurrency, amountBuy, paymentFlow, actualAmountBuy, rate, actualRate, status FROM orders WHERE id = ?;").get(receipt.orderId);
     if (userId && order) {
       const userPermissions = getUserPermissions(userId);
       const isUserAdmin = isAdmin(userPermissions);
@@ -2854,14 +2639,7 @@ export const confirmReceipt = (req, res, next) => {
       const confirmedReceipts = db.prepare("SELECT * FROM order_receipts WHERE orderId = ? AND status = 'confirmed';").all(receipt.orderId);
       const totalAmount = confirmedReceipts.reduce((sum, r) => sum + r.amount, 0);
       
-      const isFlexOrder = order.isFlexOrder === 1;
-      const paymentFlow = order.paymentFlow || "receive_first";
-      const currentOrderStatus = order.status;
-      const isUnderProcess = currentOrderStatus === "under_process";
-      
-      // For flex orders and regular orders in "under_process" status, update actualAmountBuy/actualAmountSell
-      // Both follow the same flow - don't auto-advance status, let user proceed manually
-      if (isFlexOrder || isUnderProcess) {
+      if (order.status === "saved") {
         const effectiveRate = order.actualRate || order.rate;
         const calculatedAmountSell = calculateAmountSell(totalAmount, effectiveRate, order.fromCurrency, order.toCurrency);
         db.prepare(
@@ -2877,10 +2655,6 @@ export const confirmReceipt = (req, res, next) => {
           actualRate: effectiveRate,
         });
       }
-      
-      // CRITICAL: Never change status for orders in "under_process" - they behave exactly like flex orders
-      // For orders in "under_process" status, don't auto-advance status - let user proceed manually
-      // Status should only change when manually completing the order
     }
 
     res.json(receiptWithUrl);
@@ -3022,7 +2796,7 @@ export const confirmPayment = (req, res, next) => {
     }
 
     // Check permissions - get order info (fetch all fields needed for later use)
-    const order = db.prepare("SELECT id, createdBy, handlerId, fromCurrency, toCurrency, amountBuy, amountSell, paymentFlow, isFlexOrder, actualAmountBuy, rate, actualRate, status FROM orders WHERE id = ?;").get(payment.orderId);
+    const order = db.prepare("SELECT id, createdBy, handlerId, fromCurrency, toCurrency, amountBuy, amountSell, paymentFlow, actualAmountBuy, rate, actualRate, status FROM orders WHERE id = ?;").get(payment.orderId);
     if (userId && order) {
       const userPermissions = getUserPermissions(userId);
       const isUserAdmin = isAdmin(userPermissions);
@@ -3076,62 +2850,6 @@ export const confirmPayment = (req, res, next) => {
       ...confirmedPayment,
       imagePath: confirmedPayment.imagePath.startsWith('data:') ? confirmedPayment.imagePath : getFileUrl(confirmedPayment.imagePath),
     };
-
-    // Check if order should be updated based on confirmed payments
-    // Note: order variable already fetched above with all needed fields
-    if (order) {
-      const confirmedPayments = db.prepare("SELECT * FROM order_payments WHERE orderId = ? AND status = 'confirmed';").all(payment.orderId);
-      const totalAmount = confirmedPayments.reduce((sum, p) => sum + p.amount, 0);
-      
-      const isFlexOrder = order.isFlexOrder === 1;
-      const paymentFlow = order.paymentFlow || "receive_first";
-      
-      let expectedAmount = order.amountSell;
-      if (isFlexOrder) {
-        const orderWithActual = db.prepare("SELECT actualAmountBuy, actualAmountSell, actualRate, rate FROM orders WHERE id = ?;").get(payment.orderId);
-        const effectiveRate = orderWithActual?.actualRate || orderWithActual?.rate || order.rate;
-        const effectiveAmountBuy = orderWithActual?.actualAmountBuy || order.actualAmountBuy;
-        
-        if (orderWithActual?.actualAmountSell !== null && orderWithActual?.actualAmountSell !== undefined) {
-          expectedAmount = orderWithActual.actualAmountSell;
-        } else if (effectiveAmountBuy !== null && effectiveAmountBuy !== undefined) {
-          expectedAmount = effectiveAmountBuy * effectiveRate;
-        }
-      }
-      
-      // For flex orders, check for excess payments
-      if (isFlexOrder && totalAmount > expectedAmount) {
-        const excessAmount = totalAmount - expectedAmount;
-        const orderWithActual = db.prepare("SELECT actualRate, rate, actualAmountBuy FROM orders WHERE id = ?;").get(payment.orderId);
-        const effectiveRate = orderWithActual?.actualRate || orderWithActual?.rate || order.rate;
-        
-        const confirmedReceipts = db.prepare("SELECT * FROM order_receipts WHERE orderId = ? AND status = 'confirmed';").all(payment.orderId);
-        const totalReceiptAmount = confirmedReceipts.reduce((sum, r) => sum + r.amount, 0);
-        
-        const additionalReceiptsNeeded = calculateAmountBuy(excessAmount, effectiveRate, order.fromCurrency || '', order.toCurrency);
-        const currentActualAmountBuy = orderWithActual?.actualAmountBuy !== null && orderWithActual?.actualAmountBuy !== undefined 
-          ? orderWithActual.actualAmountBuy 
-          : totalReceiptAmount;
-        const newActualAmountBuy = currentActualAmountBuy + additionalReceiptsNeeded;
-        
-        db.prepare(
-          `UPDATE orders 
-           SET actualAmountSell = @actualAmountSell,
-               actualAmountBuy = @actualAmountBuy,
-               actualRate = @actualRate
-           WHERE id = @id;`
-        ).run({
-          id: Number(payment.orderId),
-          actualAmountSell: totalAmount,
-          actualAmountBuy: newActualAmountBuy,
-          actualRate: effectiveRate,
-        });
-      }
-      
-      // For regular orders in "under_process" status, don't auto-advance status - let user proceed manually
-      // For orders in "under_process" status, don't auto-advance status - let user proceed manually
-      // Status should only change when manually completing the order
-    }
 
     res.json(paymentWithUrl);
   } catch (error) {
@@ -3510,11 +3228,10 @@ export const getDashboardStats = (req, res) => {
     const totalOrdersResult = db.prepare("SELECT COUNT(*) as total FROM orders;").get();
     const totalOrders = Number(totalOrdersResult?.total || 0);
 
-    // Get pending orders count (pending + under_process)
-    const pendingOrdersResult = db.prepare(
-      "SELECT COUNT(*) as total FROM orders WHERE status IN ('pending', 'under_process');"
+    const savedOrdersResult = db.prepare(
+      "SELECT COUNT(*) as total FROM orders WHERE status = 'saved';"
     ).get();
-    const pendingOrders = Number(pendingOrdersResult?.total || 0);
+    const savedOrders = Number(savedOrdersResult?.total || 0);
 
     // Get completed orders count
     const completedOrdersResult = db.prepare(
@@ -3530,7 +3247,7 @@ export const getDashboardStats = (req, res) => {
 
     const result = {
       totalOrders,
-      pendingOrders,
+      savedOrders,
       completedOrders,
       cancelledOrders,
     };

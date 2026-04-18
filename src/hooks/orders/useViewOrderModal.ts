@@ -28,8 +28,6 @@ export function useViewOrderModal() {
   const receiptFileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   const paymentFileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   
-  // Flex order and excess payment state
-  const [flexOrderRate, setFlexOrderRate] = useState<string | null>(null);
   const [excessPaymentWarning, setExcessPaymentWarning] = useState<{
     excessAmount: number;
     additionalReceiptsNeeded: number;
@@ -87,7 +85,6 @@ export function useViewOrderModal() {
     setPaymentUploads([{ ...initialUploadItem }]);
     setReceiptUploadKey(0);
     setPaymentUploadKey(0);
-    setFlexOrderRate(null);
     setExcessPaymentWarning(null);
     // Reset profit and service charge state
     setProfitAmount("");
@@ -135,9 +132,6 @@ export function useViewOrderModal() {
     setActiveUploadType,
     receiptFileInputRefs,
     paymentFileInputRefs,
-    // Flex order state
-    flexOrderRate,
-    setFlexOrderRate,
     excessPaymentWarning,
     setExcessPaymentWarning,
     // Profit and service charge state

@@ -66,7 +66,7 @@ const baseQuery = fetchBaseQuery({
 export const api = createApi({
   reducerPath: "api",
   baseQuery,
-  tagTypes: ["Currency", "Customer", "CustomerBeneficiary", "User", "Role", "Order", "Auth", "Account", "Transfer", "Expense", "ProfitCalculation", "Setting", "Tag", "ApprovalRequest", "Notification", "Wallet"],
+  tagTypes: ["Currency", "Customer", "CustomerBeneficiary", "User", "Role", "Order", "Auth", "Account", "Transfer", "Expense", "ProfitCalculation", "Setting", "Tag", "Notification", "Wallet"],
   refetchOnReconnect: true,
   endpoints: (builder) => ({
     getCurrencies: builder.query<Currency[], void>({
@@ -638,10 +638,16 @@ export const api = createApi({
           };
         }
       },
-      invalidatesTags: (_res, _err, { receiptId }) => [
-        { type: "Order", id: "LIST" },
-        { type: "Account", id: "LIST" },
-      ],
+      invalidatesTags: (result) => {
+        const tags: Array<{ type: "Order"; id: number | "LIST" } | { type: "Account"; id: "LIST" }> = [
+          { type: "Order", id: "LIST" },
+          { type: "Account", id: "LIST" },
+        ];
+        if (result?.orderId != null) {
+          tags.push({ type: "Order", id: result.orderId });
+        }
+        return tags;
+      },
     }),
     deleteReceipt: builder.mutation<{ success: boolean; orderId?: number }, number>({
       query: (receiptId) => ({
@@ -701,10 +707,16 @@ export const api = createApi({
           };
         }
       },
-      invalidatesTags: () => [
-        { type: "Order", id: "LIST" },
-        { type: "Account", id: "LIST" },
-      ],
+      invalidatesTags: (result) => {
+        const tags: Array<{ type: "Order"; id: number | "LIST" } | { type: "Account"; id: "LIST" }> = [
+          { type: "Order", id: "LIST" },
+          { type: "Account", id: "LIST" },
+        ];
+        if (result?.orderId != null) {
+          tags.push({ type: "Order", id: result.orderId });
+        }
+        return tags;
+      },
     }),
     deletePayment: builder.mutation<{ success: boolean; orderId?: number }, number>({
       query: (paymentId) => ({
@@ -828,30 +840,6 @@ export const api = createApi({
         }
         return [{ type: "Order", id: "LIST" }, { type: "Account", id: "LIST" }];
       },
-    }),
-    proceedWithPartialReceipts: builder.mutation<Order, number>({
-      query: (id) => ({
-        url: `orders/${id}/proceed-partial-receipts`,
-        method: "POST",
-      }),
-      invalidatesTags: (_res, _err, id) => [
-        { type: "Order", id },
-        { type: "Order", id: "LIST" },
-      ],
-    }),
-    adjustFlexOrderRate: builder.mutation<
-      Order,
-      { id: number; rate: number }
-    >({
-      query: ({ id, ...body }) => ({
-        url: `orders/${id}/adjust-rate`,
-        method: "POST",
-        body,
-      }),
-      invalidatesTags: (_res, _err, { id }) => [
-        { type: "Order", id },
-        { type: "Order", id: "LIST" },
-      ],
     }),
     getAccounts: builder.query<Account[], void>({
       query: () => "accounts",
@@ -1485,93 +1473,6 @@ export const api = createApi({
         ];
       },
     }),
-    createApprovalRequest: builder.mutation<any, {
-      entityType: "order" | "expense" | "transfer";
-      entityId: number;
-      requestType: "delete" | "edit";
-      reason: string;
-      requestData?: any;
-      receiptFiles?: File[];
-      paymentFiles?: File[];
-    }>({
-      query: (body) => {
-        const { receiptFiles, paymentFiles, ...rest } = body;
-        
-        // If there are files, use FormData
-        if (receiptFiles && receiptFiles.length > 0 || paymentFiles && paymentFiles.length > 0) {
-          const formData = new FormData();
-          formData.append("entityType", rest.entityType);
-          formData.append("entityId", rest.entityId.toString());
-          formData.append("requestType", rest.requestType);
-          formData.append("reason", rest.reason);
-          if (rest.requestData) {
-            formData.append("requestData", JSON.stringify(rest.requestData));
-          }
-          
-          // Append receipt files
-          if (receiptFiles) {
-            receiptFiles.forEach((file, index) => {
-              formData.append(`receiptFiles`, file);
-            });
-          }
-          
-          // Append payment files
-          if (paymentFiles) {
-            paymentFiles.forEach((file, index) => {
-              formData.append(`paymentFiles`, file);
-            });
-          }
-          
-          return {
-            url: "approval-requests",
-            method: "POST",
-            body: formData,
-          };
-        } else {
-          // No files, use regular JSON
-          return {
-            url: "approval-requests",
-            method: "POST",
-            body: rest,
-          };
-        }
-      },
-      invalidatesTags: [{ type: "Order", id: "LIST" }, { type: "ApprovalRequest", id: "LIST" }],
-    }),
-    listApprovalRequests: builder.query<any[], { entityType?: string; status?: string; requestType?: string; entityId?: number }>({
-      query: (params) => ({
-        url: "approval-requests",
-        params,
-      }),
-      providesTags: [{ type: "ApprovalRequest", id: "LIST" }],
-    }),
-    getApprovalRequest: builder.query<any, number>({
-      query: (id) => `approval-requests/${id}`,
-      providesTags: (_res, _err, id) => [{ type: "ApprovalRequest", id }],
-    }),
-    approveRequest: builder.mutation<{ success: boolean; message: string; notificationData: any }, number>({
-      query: (id) => ({
-        url: `approval-requests/${id}/approve`,
-        method: "POST",
-      }),
-      invalidatesTags: (_res, _err, id) => [
-        { type: "Order", id: "LIST" },
-        { type: "ApprovalRequest", id: "LIST" },
-        { type: "ApprovalRequest", id },
-      ],
-    }),
-    rejectRequest: builder.mutation<{ success: boolean; message: string; notificationData: any }, { id: number; reason?: string }>({
-      query: ({ id, reason }) => ({
-        url: `approval-requests/${id}/reject`,
-        method: "POST",
-        body: { reason },
-      }),
-      invalidatesTags: (_res, _err, { id }) => [
-        { type: "ApprovalRequest", id: "LIST" },
-        { type: "ApprovalRequest", id },
-      ],
-    }),
-
     // Notification endpoints
     getNotifications: builder.query<{ notifications: Notification[] }, { limit?: number; offset?: number }>({
       query: ({ limit = 20, offset = 0 }) => `notifications?limit=${limit}&offset=${offset}`,
@@ -1782,8 +1683,6 @@ export const {
   useUpdatePaymentMutation,
   useDeletePaymentMutation,
   useConfirmPaymentMutation,
-  useProceedWithPartialReceiptsMutation,
-  useAdjustFlexOrderRateMutation,
   useGetAccountsQuery,
   useGetAccountsSummaryQuery,
   useGetAccountsByCurrencyQuery,
@@ -1831,11 +1730,6 @@ export const {
     useDeleteTagMutation,
   useBatchAssignTagsMutation,
   useBatchUnassignTagsMutation,
-  useCreateApprovalRequestMutation,
-  useListApprovalRequestsQuery,
-  useGetApprovalRequestQuery,
-  useApproveRequestMutation,
-  useRejectRequestMutation,
   useGetNotificationsQuery,
   useGetUnreadCountQuery,
   useMarkNotificationAsReadMutation,

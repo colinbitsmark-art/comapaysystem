@@ -38,7 +38,9 @@ interface ProfitServiceChargeSectionProps {
   // Configuration
   layout?: "grid" | "vertical";
   authUser?: AuthResponse | null;
-  
+  /** When false, hides “Add profit” / “Add service charges” (e.g. view-only order modal). */
+  showAddControls?: boolean;
+
   t: (key: string) => string | undefined;
 }
 
@@ -68,6 +70,7 @@ export const ProfitServiceChargeSection: React.FC<ProfitServiceChargeSectionProp
   handleNumberInputWheel,
   layout = "vertical",
   authUser,
+  showAddControls = true,
   t,
 }) => {
   const canPerformActions = order ? canPerformOrderActions(order, authUser || null) : true;
@@ -262,6 +265,10 @@ export const ProfitServiceChargeSection: React.FC<ProfitServiceChargeSectionProp
   const hasProfit = profits && profits.length > 0;
   const hasServiceCharge = serviceCharges && serviceCharges.length > 0;
 
+  if (!showAddControls && !showProfitSection && !showServiceChargeSection) {
+    return null;
+  }
+
   return (
     <div className={containerClassName}>
       {/* Profit Section */}
@@ -300,7 +307,7 @@ export const ProfitServiceChargeSection: React.FC<ProfitServiceChargeSectionProp
         t={t}
       />
 
-      {canPerformActions && (
+      {showAddControls && canPerformActions && (
         <div className="flex gap-2">
           {!showProfitSection && !hasProfit && (
             <button

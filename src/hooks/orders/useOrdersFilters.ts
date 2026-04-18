@@ -12,7 +12,6 @@ const defaultFilters: OrderFilters = {
   buyAccountId: null,
   sellAccountId: null,
   status: null,
-  orderType: null,
   tagIds: [],
 };
 
@@ -61,7 +60,6 @@ export function useOrdersFilters(
     if (filterState.buyAccountId !== null) params.buyAccountId = filterState.buyAccountId;
     if (filterState.sellAccountId !== null) params.sellAccountId = filterState.sellAccountId;
     if (filterState.status) params.status = filterState.status;
-    if (filterState.orderType) params.orderType = filterState.orderType;
     if (filterState.tagIds.length > 0) params.tagIds = filterState.tagIds.join(',');
     
     if (includePagination) {

@@ -34,7 +34,7 @@ export default function NotificationsPage() {
   // Filter notifications
   const filteredNotifications = notifications.filter((notif) => {
     if (filterType !== "all") {
-      const typeCategory = notif.type.split("_")[0]; // approval, order, expense, transfer
+      const typeCategory = notif.type.split("_")[0];
       if (typeCategory !== filterType) return false;
     }
     if (filterRead === "unread" && notif.isRead) return false;
@@ -72,24 +72,6 @@ export default function NotificationsPage() {
     const iconClass = "w-5 h-5";
     
     switch (type) {
-      case 'approval_approved':
-        return (
-          <svg className={`${iconClass} text-green-600`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        );
-      case 'approval_rejected':
-        return (
-          <svg className={`${iconClass} text-red-600`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        );
-      case 'approval_pending':
-        return (
-          <svg className={`${iconClass} text-amber-600`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        );
       case 'order_assigned':
       case 'order_unassigned':
         return (
@@ -179,7 +161,6 @@ export default function NotificationsPage() {
               className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
             >
               <option value="all">{t("notifications.allTypes") || "All Types"}</option>
-              <option value="approval">{t("notifications.approvals") || "Approvals"}</option>
               <option value="order">{t("notifications.orders") || "Orders"}</option>
               <option value="expense">{t("notifications.expenses") || "Expenses"}</option>
               <option value="transfer">{t("notifications.transfers") || "Transfers"}</option>

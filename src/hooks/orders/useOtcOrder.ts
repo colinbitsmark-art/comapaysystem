@@ -19,6 +19,7 @@ import {
 } from "../../services/api";
 import { getDefaultOtcHandler } from "../../utils/otcHandlerPreference";
 import type { Account, AuthResponse } from "../../types";
+import { ORDER_RECEIPT_PAYMENT_TOLERANCE } from "../../utils/orders/orderAmountTolerance";
 
 interface OtcForm {
   customerId: string;
@@ -98,16 +99,12 @@ export function useOtcOrder(
   const [confirmProfit] = useConfirmProfitMutation();
   const [confirmServiceCharge] = useConfirmServiceChargeMutation();
 
-  // Determine if OTC order is completed/cancelled/pending_amend/pending_delete for view mode
-  // pending_amend and pending_delete should be treated as completed (read-only)
+  // Cancelled OTC orders stay view-only; completed orders remain editable
   const isOtcCompleted = useMemo(() => {
     return Boolean(
       otcEditingOrderId &&
       otcOrderDetails?.order &&
-      (otcOrderDetails.order.status === "completed" || 
-       otcOrderDetails.order.status === "cancelled" ||
-       otcOrderDetails.order.status === "pending_amend" ||
-       otcOrderDetails.order.status === "pending_delete")
+      otcOrderDetails.order.status === "cancelled",
     );
   }, [otcEditingOrderId, otcOrderDetails]);
 
@@ -447,7 +444,7 @@ export function useOtcOrder(
         // Create new OTC order
         const newOrder = await addOrder({
           ...orderData,
-          status: "pending",
+          status: "saved",
           orderType: "otc",
         }).unwrap();
         orderId = newOrder.id;
@@ -561,7 +558,7 @@ export function useOtcOrder(
     // Validate receipt total equals amountBuy (with tolerance for floating-point precision)
     const receiptTotal = otcReceipts.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
     const amountBuy = Number(otcForm.amountBuy || 0);
-    if (Math.abs(receiptTotal - amountBuy) > 0.50) {
+    if (Math.abs(receiptTotal - amountBuy) > ORDER_RECEIPT_PAYMENT_TOLERANCE) {
       alert(`Receipt total (${receiptTotal.toFixed(2)}) must equal Amount Buy (${amountBuy.toFixed(2)})`);
       return;
     }
@@ -569,7 +566,7 @@ export function useOtcOrder(
     // Validate payment total equals amountSell (with tolerance for floating-point precision)
     const paymentTotal = otcPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
     const amountSell = Number(otcForm.amountSell || 0);
-    if (Math.abs(paymentTotal - amountSell) > 0.50) {
+    if (Math.abs(paymentTotal - amountSell) > ORDER_RECEIPT_PAYMENT_TOLERANCE) {
       alert(`Payment total (${paymentTotal.toFixed(2)}) must equal Amount Sell (${amountSell.toFixed(2)})`);
       return;
     }
@@ -635,15 +632,14 @@ export function useOtcOrder(
         // Profit and service charges are handled in createOrder backend (creates confirmed entries directly)
         const newOrder = await addOrder({
           ...orderData,
-          status: "pending",
+          status: "saved",
           orderType: "otc",
         }).unwrap();
         orderId = newOrder.id;
       }
 
       // For OTC orders, handler is already set in orderData, so no need to call processOrder
-      // processOrder would change status to "under_process" which prevents editing
-      // OTC orders should stay in "pending" status so they can be edited until completed
+      // OTC orders stay in "saved" so they can be edited until completed
 
       // Delete existing receipts and payments when editing, then recreate from form
       if (otcEditingOrderId && otcOrderDetails) {

@@ -16,7 +16,7 @@ import { useAppSelector, useAppDispatch } from "../app/hooks";
 import { setUser } from "../app/authSlice";
 import type { RolePermissions } from "../types";
 
-const SECTION_OPTIONS = ["dashboard", "currencies", "customers", "users", "roles", "orders", "transfers", "accounts", "expenses", "profit", "wallets", "tags", "approval_requests"];
+const SECTION_OPTIONS = ["dashboard", "currencies", "customers", "users", "roles", "orders", "transfers", "accounts", "expenses", "profit", "wallets", "tags"];
 
 // Group actions by their related pages/sections
 const ACTION_GROUPS = [
@@ -44,24 +44,12 @@ const ACTION_GROUPS = [
     section: "orders",
     actions: [
       { key: "createOrder", labelKey: "roles.createOrder" },
-      { key: "createFlexOrder", labelKey: "roles.createFlexOrder" },
-      { key: "createOtcOrder", labelKey: "roles.createOtcOrder" },
-      { key: "processOrder", labelKey: "roles.processOrder" },
       { key: "cancelOrder", labelKey: "roles.cancelOrder" },
       { key: "deleteOrder", labelKey: "roles.deleteOrder" },
       { key: "deleteManyOrders", labelKey: "roles.deleteManyOrders" },
-      { key: "requestOrderEdit", labelKey: "roles.requestOrderEdit" },
-      { key: "requestOrderDelete", labelKey: "roles.requestOrderDelete" },
       { key: "importOrder", labelKey: "roles.importOrder" },
       { key: "exportOrder", labelKey: "roles.exportOrder" },
       { key: "assignUnassignOrderTag", labelKey: "roles.assignUnassignOrderTag" },
-    ],
-  },
-  {
-    section: "approval_requests",
-    actions: [
-      { key: "approveOrderDelete", labelKey: "roles.approveOrderDelete" },
-      { key: "approveOrderEdit", labelKey: "roles.approveOrderEdit" },
     ],
   },
   {

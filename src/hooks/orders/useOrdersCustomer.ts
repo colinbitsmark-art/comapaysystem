@@ -4,7 +4,7 @@ import type { Customer } from "../../types";
 interface UseOrdersCustomerParams {
   addCustomer: any;
   setForm: (updater: (prev: any) => any) => void;
-  setOtcForm?: (updater: (prev: any) => any) => void;
+  setOtcForm?: (updater: (prev: any) => any) => void; // optional legacy
   setIsCreateCustomerModalOpen: (isOpen: boolean) => void;
   customers: Customer[];
   setAlertModal?: (modal: { isOpen: boolean; message: string; type?: "error" | "warning" | "info" | "success" }) => void;

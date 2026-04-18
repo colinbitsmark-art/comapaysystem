@@ -218,28 +218,9 @@ export function OrdersFilters({
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">{t("orders.all") || "All"}</option>
-              <option value="pending">{t("orders.pending") || "Pending"}</option>
-              <option value="under_process">{t("orders.underProcess") || "Under Process"}</option>
+              <option value="saved">{t("orders.saved") || "Saved"}</option>
               <option value="completed">{t("orders.completed") || "Completed"}</option>
               <option value="cancelled">{t("orders.cancelled") || "Cancelled"}</option>
-              <option value="pending_amend">{t("orders.pending_amend") || "Pending Amend"}</option>
-              <option value="pending_delete">{t("orders.pending_delete") || "Pending Delete"}</option>
-            </select>
-          </div>
-
-          {/* Order Type */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              {t("orders.orderType") || "Order Type"}
-            </label>
-            <select
-              value={filters.orderType || ""}
-              onChange={(e) => onFilterChange('orderType', (e.target.value || null) as "online" | "otc" | null)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">{t("orders.all")}</option>
-              <option value="online">{t("orders.online")}</option>
-              <option value="otc">{t("orders.otc")}</option>
             </select>
           </div>
 

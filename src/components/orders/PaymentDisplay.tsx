@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import type { OrderPayment } from "../../types";
 
 interface PaymentDisplayProps {
@@ -8,6 +8,8 @@ interface PaymentDisplayProps {
   getFileType: (imagePath: string) => 'image' | 'pdf' | null;
   onViewImage: (src: string, type: 'image' | 'pdf', title: string) => void;
   onViewPdf: (dataUri: string) => void;
+  canReplaceDraftUpload?: boolean;
+  onReplaceUploadedFile?: (file: File) => Promise<void>;
   t: (key: string) => string | undefined;
 }
 
@@ -18,8 +20,18 @@ export const PaymentDisplay: React.FC<PaymentDisplayProps> = ({
   getFileType,
   onViewImage,
   onViewPdf,
+  canReplaceDraftUpload = false,
+  onReplaceUploadedFile,
   t,
 }) => {
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const hasPreviewableFile = getFileType(payment.imagePath) !== null;
+  const showReplace =
+    payment.status === "draft" &&
+    canReplaceDraftUpload &&
+    !!onReplaceUploadedFile &&
+    hasPreviewableFile;
+
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between mb-2">
@@ -29,7 +41,37 @@ export const PaymentDisplay: React.FC<PaymentDisplayProps> = ({
           </span>
         )}
         {payment.status === 'draft' && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 justify-end">
+            {showReplace ? (
+              <>
+                <input
+                  ref={replaceInputRef}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.currentTarget.value = "";
+                    if (!file || !onReplaceUploadedFile) return;
+                    try {
+                      await onReplaceUploadedFile(file);
+                    } catch (error: unknown) {
+                      console.error("Error replacing payment file:", error);
+                      const err = error as { data?: { message?: string }; message?: string };
+                      alert(err?.data?.message || err?.message || t("orders.failedToReplaceUpload"));
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  title={t("orders.replaceUploadTooltip")}
+                  onClick={() => replaceInputRef.current?.click()}
+                  className="px-3 py-1 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors"
+                >
+                  {t("orders.replaceUpload")}
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               onClick={async () => {

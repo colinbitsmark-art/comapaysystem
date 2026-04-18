@@ -190,9 +190,8 @@ export function useOrdersFileUpload({
     event.preventDefault();
     if (!viewModalOrderId || !orderDetails) return;
 
-    // Validate that all uploads with image and amount also have accountId
     for (const upload of receiptUploads) {
-      if (upload.image && upload.amount) {
+      if (upload.amount && String(upload.amount).trim() !== "") {
         if (!upload.accountId || upload.accountId === "") {
           alert(t("orders.accountSelectionRequired"));
           return;
@@ -200,54 +199,41 @@ export function useOrdersFileUpload({
       }
     }
 
-    // For normal orders (not flex orders), validate that total receipts don't exceed order amount
     const currentOrder = orderDetails.order;
-    if (!currentOrder.isFlexOrder) {
-      // Calculate total amount of new receipts being uploaded
-      let newReceiptTotal = 0;
-      for (const upload of receiptUploads) {
-        if (upload.image && upload.amount && upload.accountId) {
-          newReceiptTotal += Number(upload.amount);
-        }
-      }
-
-      // Get existing total receipt amount (not balance - balance is the remaining amount)
-      const existingReceiptTotal = orderDetails.totalReceiptAmount || 0;
-      
-      // Calculate total receipts (existing + new)
-      const totalReceipts = existingReceiptTotal + newReceiptTotal;
-      
-      // Only block if total exceeds order amount (allow partial uploads)
-      if (totalReceipts > currentOrder.amountBuy) {
-        // Excess is the amount by which the total receipts (existing + new) exceed the order amount
-        const excess = totalReceipts - currentOrder.amountBuy;
-        setExcessReceiptModalData({
-          expectedReceipt: currentOrder.amountBuy,
-          attemptedReceipt: totalReceipts, // Show total (existing + new) in the modal
-          excess: excess,
-          fromCurrency: currentOrder.fromCurrency,
-        });
-        setShowExcessReceiptModal(true);
-        return; // Prevent submission
+    let newReceiptTotal = 0;
+    for (const upload of receiptUploads) {
+      if (upload.amount && upload.accountId) {
+        newReceiptTotal += Number(upload.amount);
       }
     }
 
-    // Process all valid uploads
+    const existingReceiptTotal = orderDetails.totalReceiptAmount || 0;
+    const totalReceipts = existingReceiptTotal + newReceiptTotal;
+
+    if (totalReceipts > currentOrder.amountBuy) {
+      const excess = totalReceipts - currentOrder.amountBuy;
+      setExcessReceiptModalData({
+        expectedReceipt: currentOrder.amountBuy,
+        attemptedReceipt: totalReceipts,
+        excess: excess,
+        fromCurrency: currentOrder.fromCurrency,
+      });
+      setShowExcessReceiptModal(true);
+      return;
+    }
+
     for (const upload of receiptUploads) {
-      if (upload.image && upload.amount && upload.accountId) {
+      if (upload.amount && upload.accountId) {
         const payload: any = {
           id: viewModalOrderId,
           amount: Number(upload.amount),
           accountId: Number(upload.accountId),
         };
-        
-        // Send File object if available, otherwise fallback to base64 (backward compatibility)
         if (upload.file) {
           payload.file = upload.file;
-        } else {
+        } else if (upload.image) {
           payload.imagePath = upload.image;
         }
-        
         await addReceipt(payload).unwrap();
       }
     }
@@ -281,10 +267,9 @@ export function useOrdersFileUpload({
     event.preventDefault();
     if (!viewModalOrderId || !orderDetails) return;
 
-    // Validate that all uploads have required fields
     for (const upload of paymentUploads) {
-      if (upload.image && upload.amount) {
-        if (!upload.accountId) {
+      if (upload.amount && String(upload.amount).trim() !== "") {
+        if (!upload.accountId || upload.accountId === "") {
           alert(t("orders.accountSelectionRequired"));
           return;
         }
@@ -292,67 +277,46 @@ export function useOrdersFileUpload({
     }
 
     const currentOrder = orderDetails.order;
-    const isFlex = currentOrder?.isFlexOrder;
 
-    // For normal orders (not flex orders), validate that total payments don't exceed order amount
-    if (!isFlex) {
-      // Calculate total amount of new payments being uploaded
-      let newPaymentTotal = 0;
-      for (const upload of paymentUploads) {
-        if (upload.image && upload.amount && upload.accountId) {
-          newPaymentTotal += Number(upload.amount);
-        }
+    let newPaymentTotal = 0;
+    for (const upload of paymentUploads) {
+      if (upload.amount && upload.accountId) {
+        newPaymentTotal += Number(upload.amount);
       }
+    }
 
-      // Get existing total payment amount (not balance - balance is the remaining amount)
-      const existingPaymentTotal = orderDetails.totalPaymentAmount || 0;
-      
-      // Calculate total payments (existing + new)
-      const totalPayments = existingPaymentTotal + newPaymentTotal;
-      
-      // Only block if total exceeds order amount (allow partial uploads)
-      if (totalPayments > currentOrder.amountSell) {
-        // Excess is the amount by which the total payments (existing + new) exceed the order amount
-        const excess = totalPayments - currentOrder.amountSell;
-        setExcessPaymentModalNormalData({
-          expectedPayment: currentOrder.amountSell,
-          attemptedPayment: totalPayments, // Show total (existing + new) in the modal
-          excess: excess,
-          toCurrency: currentOrder.toCurrency,
-        });
-        setShowExcessPaymentModalNormal(true);
-        return; // Prevent submission
-      }
+    const existingPaymentTotal = orderDetails.totalPaymentAmount || 0;
+    const totalPayments = existingPaymentTotal + newPaymentTotal;
+
+    if (totalPayments > currentOrder.amountSell) {
+      const excess = totalPayments - currentOrder.amountSell;
+      setExcessPaymentModalNormalData({
+        expectedPayment: currentOrder.amountSell,
+        attemptedPayment: totalPayments,
+        excess: excess,
+        toCurrency: currentOrder.toCurrency,
+      });
+      setShowExcessPaymentModalNormal(true);
+      return;
     }
 
     // Note: Exchange rate should be updated using the "Update Exchange Rate" button
     // We don't auto-update it during payment upload to give user control
 
     for (const upload of paymentUploads) {
-      if (upload.image && upload.amount) {
+      if (upload.amount && upload.accountId) {
         const payload: any = {
           id: viewModalOrderId,
           amount: Number(upload.amount),
           accountId: Number(upload.accountId),
         };
-        
-        // Send File object if available, otherwise fallback to base64 (backward compatibility)
         if (upload.file) {
           payload.file = upload.file;
-        } else {
+        } else if (upload.image) {
           payload.imagePath = upload.image;
         }
-        
         try {
-          const result = await addPayment(payload).unwrap();
-          
-          // Check for excess payment warning in flex orders
-          if (isFlex && (result as any).flexOrderExcess) {
-            setExcessPaymentWarning({
-              excessAmount: (result as any).flexOrderExcess.excessAmount,
-              additionalReceiptsNeeded: (result as any).flexOrderExcess.additionalReceiptsNeeded,
-            });
-          }
+          await addPayment(payload).unwrap();
         } catch (error) {
           console.error("Error adding payment:", error);
         }

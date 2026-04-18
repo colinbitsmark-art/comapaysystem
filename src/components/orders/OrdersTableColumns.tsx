@@ -29,31 +29,23 @@ export function renderOrderCell({
       return <td key={columnKey} className="py-2 font-mono text-slate-600">#{order.id}</td>;
     case "date":
       return <td key={columnKey} className="py-2">{formatDate(order.createdAt)}</td>;
-    case "handler":
+    case "createdBy": {
+      const creatorLabel =
+        (order.createdByName && String(order.createdByName).trim()) ||
+        (order.handlerName && String(order.handlerName).trim()) ||
+        "";
       return (
-        <td key={columnKey} className="py-2">
-          {order.handlerName ? (
-            order.handlerName
-          ) : (
-            <span className="text-rose-600">
-              {t("orders.noHandlerAssigned")}
-            </span>
-          )}
+        <td key={columnKey} className="py-2 text-slate-700">
+          {creatorLabel ? creatorLabel : <span className="text-slate-400">—</span>}
         </td>
       );
+    }
     case "customer":
       return (
         <td key={columnKey} className="py-2 font-semibold">
           <div className="flex items-center gap-2">
             {order.customerName || order.customerId}
-            
-{/*         我 FLEX TAGS DISPLAY NEXT TO CUSTOMER NAME    
-            {order.isFlexOrder && (
-              <Badge tone="purple">
-                Flex Order
-              </Badge>
-            )} */}
-            
+
             {/* 我 TAGS DISPLAY NEXT TO CUSTOMER NAME */} 
             {order.tags && Array.isArray(order.tags) && order.tags.length > 0 &&
               order.tags.map((tag: { id: number; name: string; color: string }) => (
@@ -73,45 +65,25 @@ export function renderOrderCell({
     case "buy":
       return (
         <td key={columnKey} className="py-2">
-          {order.isFlexOrder && order.actualAmountBuy ? (
-            <span>
-              <span className="text-purple-600 font-semibold">{Math.round(order.actualAmountBuy)}</span>
-              <span className="ml-1 text-slate-500 text-sm font-semibold">{order.fromCurrency}</span>
-            </span>
-          ) : (
-            <span>
-              {Math.round(order.amountBuy)}
-              <span className="ml-1 text-slate-500 text-sm font-semibold">{order.fromCurrency}</span>
-            </span>
-          )}
+          <span>
+            {Math.round(order.amountBuy)}
+            <span className="ml-1 text-slate-500 text-sm font-semibold">{order.fromCurrency}</span>
+          </span>
         </td>
       );
     case "sell":
       return (
         <td key={columnKey} className="py-2">
-          {order.isFlexOrder && order.actualAmountSell ? (
-            <span>
-              -<span className="text-purple-600 font-semibold">{Math.round(order.actualAmountSell)}</span>
-              <span className="ml-1 text-slate-500 text-sm font-semibold">{order.toCurrency}</span>
-            </span>
-          ) : (
-            <span>
-              -{Math.round(order.amountSell)}
-              <span className="ml-1 text-slate-500 text-sm font-semibold">{order.toCurrency}</span>
-            </span>
-          )}
+          <span>
+            -{Math.round(order.amountSell)}
+            <span className="ml-1 text-slate-500 text-sm font-semibold">{order.toCurrency}</span>
+          </span>
         </td>
       );
     case "rate":
       return (
         <td key={columnKey} className="py-2">
-          {order.isFlexOrder && order.actualRate ? (
-            <span>
-              <span className="text-purple-600 font-semibold">{order.actualRate}</span>
-            </span>
-          ) : (
-            order.rate
-          )}
+          {order.rate}
         </td>
       );
     case "status":
@@ -119,14 +91,6 @@ export function renderOrderCell({
         <td key={columnKey} className="py-2">
           <Badge tone={getStatusTone(order.status)}>
             {t(`orders.${order.status}`)}
-          </Badge>
-        </td>
-      );
-    case "orderType":
-      return (
-        <td key={columnKey} className="py-2">
-          <Badge tone={order.orderType === "otc" ? "amber" : "blue"}>
-            {order.orderType === "otc" ? t("orders.otc") : t("orders.online")}
           </Badge>
         </td>
       );

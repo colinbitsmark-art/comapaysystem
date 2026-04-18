@@ -5,17 +5,12 @@ import type { OrderStatus } from "../../types";
  */
 export function getStatusTone(status: OrderStatus): "amber" | "blue" | "emerald" | "rose" | "slate" | "orange" {
   switch (status) {
-    case "pending":
+    case "saved":
       return "amber";
-    case "under_process":
-      return "blue";
     case "completed":
       return "emerald";
     case "cancelled":
       return "rose";
-    case "pending_amend":
-    case "pending_delete":
-      return "orange";
     default:
       return "slate";
   }

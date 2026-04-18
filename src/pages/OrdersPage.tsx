@@ -5,38 +5,30 @@ import Badge from "../components/common/Badge";
 import SectionCard from "../components/common/SectionCard";
 import AlertModal from "../components/common/AlertModal";
 import ConfirmModal from "../components/common/ConfirmModal";
-import OtcOrderModal from "../components/orders/OtcOrderModal";
-import OnlineOrderModal from "../components/orders/OnlineOrderModal";
+import NewOrderModal from "../components/orders/NewOrderModal";
+import { BatchOrdersTab } from "../components/orders/BatchOrdersTab";
 import { AccountTooltip } from "../components/orders/AccountTooltip";
 import { SearchableSelect } from "../components/common/SearchableSelect";
 import { OrdersFilters } from "../components/orders/OrdersFilters";
 import { OrdersTable } from "../components/orders/OrdersTable";
 import { OrdersColumnDropdown } from "../components/orders/OrdersColumnDropdown";
 import { CreateCustomerModal } from "../components/orders/CreateCustomerModal";
-import { ProcessOrderModal } from "../components/orders/ProcessOrderModal";
 import { ImportOrdersModal } from "../components/orders/ImportOrdersModal";
 import { OrderWarningModals } from "../components/orders/OrderWarningModals";
-import { ReceiptDisplay } from "../components/orders/ReceiptDisplay";
-import { PaymentDisplay } from "../components/orders/PaymentDisplay";
 import { ReceiptUploadSection } from "../components/orders/ReceiptUploadSection";
 import { PaymentUploadSection } from "../components/orders/PaymentUploadSection";
 import { ProfitServiceChargeSection } from "../components/orders/ProfitServiceChargeSection";
-import { FlexOrderRatePanel } from "../components/orders/FlexOrderRatePanel";
 import { ViewOrderModal } from "../components/orders/ViewOrderModal";
 import { OnlineOrderUploadsSection } from "../components/orders/OnlineOrderUploadsSection";
 import { CompleteOrderButton } from "../components/orders/CompleteOrderButton";
 import { OnlineOrderSummary } from "../components/orders/OnlineOrderSummary";
 import { TagSelectionModal } from "../components/common/TagSelectionModal";
 import { RemarksSection } from "../components/orders/RemarksSection";
-import { RequestApprovalModal } from "../components/orders/RequestApprovalModal";
-import { OrderChangesModal } from "../components/orders/OrderChangesModal";
 import { calculateAmountSell as calculateAmountSellUtil } from "../utils/orders/orderCalculations";
 import { useOrdersFilters } from "../hooks/orders/useOrdersFilters";
 import { useOrdersTable } from "../hooks/orders/useOrdersTable";
-import { useOrderForm } from "../hooks/orders/useOrderForm";
-import { useProcessOrderModal } from "../hooks/orders/useProcessOrderModal";
+import { useUnifiedOrderModal } from "../hooks/orders/useUnifiedOrderModal";
 import { useViewOrderModal } from "../hooks/orders/useViewOrderModal";
-import { useOtcOrder } from "../hooks/orders/useOtcOrder";
 import { useBeneficiaryForm } from "../hooks/orders/useBeneficiaryForm";
 import { useOrdersModals } from "../hooks/orders/useOrdersModals";
 import { useOrdersImportExport } from "../hooks/orders/useOrdersImportExport";
@@ -55,8 +47,6 @@ import {
   useUpdateOrderStatusMutation,
   useDeleteOrderMutation,
   useGetOrderDetailsQuery,
-  useProcessOrderMutation,
-  useCreateApprovalRequestMutation,
   useAddReceiptMutation,
   useUpdateReceiptMutation,
   useDeleteReceiptMutation,
@@ -74,34 +64,24 @@ import {
   useAddCustomerBeneficiaryMutation,
   useGetAccountsQuery,
   useAddCustomerMutation,
-  useProceedWithPartialReceiptsMutation,
-  useAdjustFlexOrderRateMutation,
   useGetTagsQuery,
   useBatchAssignTagsMutation,
   useBatchUnassignTagsMutation,
-  useListApprovalRequestsQuery,
-  useGetApprovalRequestQuery,
 } from "../services/api";
-import { useGetRolesQuery } from "../services/api";
 import { useAppSelector } from "../app/hooks";
 import { hasActionPermission } from "../utils/permissions";
-import type { OrderStatus, Order } from "../types";
+import type { Order } from "../types";
 import { formatDate } from "../utils/format";
 
 export default function OrdersPage() {
   const { t } = useTranslation();
   const location = useLocation();
   const authUser = useAppSelector((s) => s.auth.user);
-  const { data: roles = [] } = useGetRolesQuery();
-
   // Get initial filters from location state
   const initialFilters = useMemo(() => {
-    const state = location.state as { initialFilters?: Partial<import("../types/orders").OrderFilters & { includeUnderProcess?: boolean }> } | null;
+    const state = location.state as { initialFilters?: Partial<import("../types/orders").OrderFilters> } | null;
     return state?.initialFilters;
   }, [location.state]);
-
-  // Check if we need to include under_process orders (for pending orders filter)
-  const includeUnderProcess = initialFilters?.includeUnderProcess ?? false;
 
   // Page state
   const [currentPage, setCurrentPage] = useState(1);
@@ -124,48 +104,9 @@ export default function OrdersPage() {
     tagFilterListRef,
   } = useOrdersFilters(currentPage, setCurrentPage, initialFilters);
 
-  // For pending orders, we need to fetch both pending and under_process
-  // Since API only accepts one status, we'll fetch under_process separately and combine
-  const { data: ordersData, isLoading: isLoadingPending, refetch: refetchOrders } = useGetOrdersQuery(queryParams);
-  
-  // Build query for under_process orders (only when needed)
-  const shouldFetchUnderProcess = includeUnderProcess && filters.status === "pending";
-  const underProcessQueryParams = useMemo(() => {
-    if (shouldFetchUnderProcess) {
-      return { ...queryParams, status: "under_process" as OrderStatus };
-    }
-    return { limit: 1, page: 1 }; // Dummy params when not needed
-  }, [shouldFetchUnderProcess, queryParams]);
-
-  // Only fetch under_process orders when needed
-  const { data: underProcessOrdersData, isLoading: isLoadingUnderProcess } = useGetOrdersQuery(
-    underProcessQueryParams,
-    { skip: !shouldFetchUnderProcess }
-  );
-
-  const isLoading = isLoadingPending || (includeUnderProcess && filters.status === "pending" && isLoadingUnderProcess);
-
-  // Combine orders if we need both pending and under_process
-  const orders = useMemo(() => {
-    if (includeUnderProcess && filters.status === "pending") {
-      const pendingOrders = ordersData?.orders || [];
-      const underProcessOrders = underProcessOrdersData?.orders || [];
-      // Combine and remove duplicates
-      const combined = [...pendingOrders, ...underProcessOrders];
-      const uniqueOrders = combined.filter((order, index, self) =>
-        index === self.findIndex((o) => o.id === order.id)
-      );
-      return uniqueOrders;
-    }
-    return ordersData?.orders || [];
-  }, [ordersData, underProcessOrdersData, includeUnderProcess, filters.status]);
-
-  const totalOrders = useMemo(() => {
-    if (includeUnderProcess && filters.status === "pending") {
-      return orders.length;
-    }
-    return ordersData?.total || 0;
-  }, [orders.length, ordersData, includeUnderProcess, filters.status]);
+  const { data: ordersData, isLoading, refetch: refetchOrders } = useGetOrdersQuery(queryParams);
+  const orders = ordersData?.orders || [];
+  const totalOrders = ordersData?.total || 0;
 
   const totalPages = useMemo(() => {
     return Math.ceil(totalOrders / 20);
@@ -176,23 +117,17 @@ export default function OrdersPage() {
   const { data: users = [] } = useGetUsersQuery();
   const { data: accounts = [] } = useGetAccountsQuery();
   const { data: tags = [] } = useGetTagsQuery();
-  const [addOrder, { isLoading: isSaving }] = useAddOrderMutation();
+  const [addOrder] = useAddOrderMutation();
 
-  // Order form state and handlers
-  const {
-    form,
-    setForm,
-    calculatedField,
-    setCalculatedField,
-    isFlexOrderMode,
-    setIsFlexOrderMode,
-    editingOrderId,
-    setEditingOrderId,
-    isModalOpen,
-    setIsModalOpen,
-    resetForm,
-    closeModal,
-  } = useOrderForm(currencies);
+  const [ordersPageTab, setOrdersPageTab] = useState<"list" | "batch">("list");
+  const [newOrderViewerModal, setNewOrderViewerModal] = useState<{
+    isOpen: boolean;
+    src: string;
+    type: "image" | "pdf";
+    title: string;
+  } | null>(null);
+
+  const unifiedOrder = useUnifiedOrderModal(currencies, accounts, authUser);
 
   // Get unique currency pairs from all orders (for dropdown)
   // Note: This would ideally come from the backend, but for now we'll generate from currencies
@@ -265,8 +200,6 @@ export default function OrdersPage() {
   const [updateOrder] = useUpdateOrderMutation();
   const [updateOrderStatus] = useUpdateOrderStatusMutation();
   const [deleteOrder, { isLoading: isDeleting }] = useDeleteOrderMutation();
-  const [createApprovalRequest, { isLoading: isSubmittingApproval }] = useCreateApprovalRequestMutation();
-
   // Batch delete hook
   const {
     isBatchDeleteMode,
@@ -309,10 +242,7 @@ export default function OrdersPage() {
   const [batchUnassignTags, { isLoading: isUntagging }] = useBatchUnassignTagsMutation();
   const [addCustomer, { isLoading: isCreatingCustomer }] = useAddCustomerMutation();
 
-  // Allow new customers to be preselected in both online and OTC forms
-  const setOtcFormRef = useRef<((updater: (prev: any) => any) => void) | null>(null);
-
-  // Customer creation functionality
+  // Customer creation (legacy modal — optional)
   const {
     customerForm,
     setCustomerForm,
@@ -320,14 +250,12 @@ export default function OrdersPage() {
     handleCreateCustomer,
   } = useOrdersCustomer({
     addCustomer,
-    setForm,
-    setOtcForm: (updater) => setOtcFormRef.current?.(updater),
+    setForm: () => {},
     setIsCreateCustomerModalOpen,
     customers,
     setAlertModal,
     t,
   });
-  const [processOrder] = useProcessOrderMutation();
   const [addReceipt] = useAddReceiptMutation();
   const [updateReceipt] = useUpdateReceiptMutation();
   const [deleteReceipt] = useDeleteReceiptMutation();
@@ -342,8 +270,6 @@ export default function OrdersPage() {
   const [deletePayment] = useDeletePaymentMutation();
   const [confirmPayment] = useConfirmPaymentMutation();
   const [addCustomerBeneficiary] = useAddCustomerBeneficiaryMutation();
-  const [proceedWithPartialReceipts] = useProceedWithPartialReceiptsMutation();
-  const [adjustFlexOrderRate] = useAdjustFlexOrderRateMutation();
 
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const [menuPositionAbove, setMenuPositionAbove] = useState<{ [key: number]: boolean }>({});
@@ -351,10 +277,6 @@ export default function OrdersPage() {
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   
-  // Approval request modal state
-  const [isRequestApprovalModalOpen, setIsRequestApprovalModalOpen] = useState(false);
-  const [requestApprovalOrderId, setRequestApprovalOrderId] = useState<number | null>(null);
-  const [requestApprovalType, setRequestApprovalType] = useState<"delete" | "edit">("delete");
   // Tag filter helpers (needs tags from query)
   const selectedTagNames = useMemo(
     () =>
@@ -434,15 +356,6 @@ export default function OrdersPage() {
     handleColumnDragLeave,
   } = useOrdersTable();
 
-  // Process order modal state and handlers
-  const {
-    processModalOrderId,
-    setProcessModalOrderId,
-    processForm,
-    setProcessForm,
-    resetProcessForm,
-    closeProcessModal,
-  } = useProcessOrderModal();
   
   // View order modal state and handlers
   const {
@@ -471,8 +384,6 @@ export default function OrdersPage() {
     setActiveUploadType,
     receiptFileInputRefs,
     paymentFileInputRefs,
-    flexOrderRate,
-    setFlexOrderRate,
     excessPaymentWarning,
     setExcessPaymentWarning,
     profitAmount,
@@ -518,7 +429,7 @@ export default function OrdersPage() {
     const order = orderDetails.order;
     const summaryClass = "lg:col-span-2 border-t pt-4 mt-4";
     const addWrapperClass = "lg:col-span-2";
-    const canEdit = order.status !== "completed" && order.status !== "cancelled";
+    const canEdit = Boolean(authUser);
 
     return (
       <>
@@ -670,6 +581,7 @@ export default function OrdersPage() {
           <div className={addWrapperClass}>
             <ProfitServiceChargeSection
               authUser={authUser}
+              showAddControls={false}
               orderId={viewModalOrderId}
               order={orderDetails?.order}
               accounts={accounts}
@@ -706,7 +618,7 @@ export default function OrdersPage() {
     if (!orderDetails) return null;
     const order = orderDetails.order;
     const summaryClass = "lg:col-span-2 border-t pt-4 mt-4";
-    const canEdit = order.status !== "completed" && order.status !== "cancelled";
+    const canEdit = Boolean(authUser);
 
     // If remarks exist in the database, show as readonly preview
     if (order.remarks && order.remarks.trim() !== "") {
@@ -847,56 +759,7 @@ export default function OrdersPage() {
 
   // receiptUploads and paymentUploads are now provided by useViewOrderModal hook
   
-  // OTC Order state and handlers
-  const {
-    isOtcOrderModalOpen,
-    setIsOtcOrderModalOpen,
-    otcEditingOrderId,
-    setOtcEditingOrderId,
-    otcForm,
-    setOtcForm,
-    otcReceipts,
-    setOtcReceipts,
-    otcPayments,
-    setOtcPayments,
-    otcProfitAmount,
-    setOtcProfitAmount,
-    otcProfitCurrency,
-    setOtcProfitCurrency,
-    otcProfitAccountId,
-    setOtcProfitAccountId,
-    otcServiceChargeAmount,
-    setOtcServiceChargeAmount,
-    otcServiceChargeCurrency,
-    setOtcServiceChargeCurrency,
-    otcServiceChargeAccountId,
-    setOtcServiceChargeAccountId,
-    showOtcProfitSection,
-    setShowOtcProfitSection,
-    showOtcServiceChargeSection,
-    setShowOtcServiceChargeSection,
-    otcCalculatedField,
-    setOtcCalculatedField,
-    otcRemarks,
-    setOtcRemarks,
-    showOtcRemarks,
-    setShowOtcRemarks,
-    otcOrderDetails,
-    isOtcCompleted,
-    isOtcSaving,
-    handleOtcOrderSave,
-    handleOtcOrderComplete,
-    closeOtcModal,
-    handleRemoveOtcProfit,
-    handleRemoveOtcServiceCharge,
-    handleRemoveOtcRemarks,
-  } = useOtcOrder(accounts, setOpenMenuId, setIsCreateCustomerModalOpen, authUser);
-  // Expose OTC form setter to the customer creation hook
-  useEffect(() => {
-    setOtcFormRef.current = setOtcForm;
-  }, [setOtcForm]);
-
-  // Order actions (edit, delete, status updates, process)
+  // Order actions (edit, delete, status updates)
   const {
     setStatus,
     startEdit,
@@ -906,27 +769,10 @@ export default function OrdersPage() {
     orders,
     updateOrderStatus,
     deleteOrder,
-    updateOrder,
-    addOrder,
-    processOrder,
     setOpenMenuId,
     setConfirmModal: setDeleteConfirmModal,
     setAlertModal,
-    setOtcEditingOrderId,
-    setIsOtcOrderModalOpen,
-    setEditingOrderId,
-    setForm,
-    setIsModalOpen,
-    form,
-    editingOrderId,
-    resetForm,
-    isFlexOrderMode,
-    authUser,
-    setProcessModalOrderId,
-    setIsFlexOrderMode,
-    processModalOrderId,
-    processForm,
-    resetProcessForm,
+    openOrderEditor: unifiedOrder.openEdit,
     selectedOrderIds,
     setSelectedOrderIds,
     setIsBatchDeleteMode,
@@ -940,29 +786,6 @@ export default function OrdersPage() {
 
   const { data: orderDetails } = useGetOrderDetailsQuery(viewModalOrderId || 0, {
     skip: !viewModalOrderId,
-  });
-
-  // Fetch approval request for pending_amend orders
-  const viewedOrder = orders.find((o) => o.id === viewModalOrderId);
-  const isPendingAmend = viewedOrder?.status === "pending_amend";
-  
-  // First get the list of approval requests to find the ID
-  const { data: approvalRequests = [] } = useListApprovalRequestsQuery(
-    {
-      entityType: "order",
-      entityId: viewModalOrderId || undefined,
-      requestType: "edit",
-      status: "pending",
-    },
-    {
-      skip: !viewModalOrderId || !isPendingAmend,
-    }
-  );
-  const approvalRequestId = approvalRequests.length > 0 ? approvalRequests[0].id : null;
-  
-  // Then fetch the detailed approval request (which includes full entity data with originalReceipts/Payments)
-  const { data: pendingApprovalRequest } = useGetApprovalRequestQuery(approvalRequestId!, {
-    skip: !approvalRequestId,
   });
 
   // File upload handling
@@ -1040,34 +863,6 @@ export default function OrdersPage() {
     }
     return null;
   }, [currencies]);
-
-  // Initialize flex order rate when modal opens
-  useEffect(() => {
-    if (orderDetails?.order && orderDetails.order.isFlexOrder) {
-      const initialRate = orderDetails.order.actualRate ?? orderDetails.order.rate;
-      setFlexOrderRate(
-        initialRate !== undefined && initialRate !== null ? String(initialRate) : null
-      );
-    }
-  }, [orderDetails]);
-
-  const resolveFlexOrderRate = (details?: typeof orderDetails) => {
-    const fallbackRate = details?.order?.actualRate ?? details?.order?.rate ?? 0;
-    const parsedRate =
-      flexOrderRate === ""
-        ? 0
-        : flexOrderRate !== null
-          ? Number(flexOrderRate)
-          : Number(fallbackRate);
-
-    if (!Number.isFinite(parsedRate)) {
-      return 0;
-    }
-
-    return parsedRate;
-  };
-
-  const resolvedFlexRate = resolveFlexOrderRate(orderDetails);
 
   // Load remarks when order details change
   useEffect(() => {
@@ -1323,10 +1118,10 @@ export default function OrdersPage() {
     setSelectedTagIds([]);
   }, []);
 
-  const currentRole = useMemo(() => roles.find((r) => r.name === authUser?.role), [roles, authUser?.role]);
-  const canCancelOrder = useMemo(() => Boolean(currentRole?.permissions?.actions?.cancelOrder), [currentRole]);
-  const canDeleteOrder = useMemo(() => Boolean(currentRole?.permissions?.actions?.deleteOrder), [currentRole]);
-  const canDeleteManyOrders = useMemo(() => Boolean(currentRole?.permissions?.actions?.deleteManyOrders), [currentRole]);
+  const canActOnOrders = Boolean(authUser);
+  const canCancelOrder = canActOnOrders;
+  const canDeleteOrder = canActOnOrders;
+  const canDeleteManyOrders = canActOnOrders;
 
   // Action buttons and status tone are now handled by OrderActionsMenu component
 
@@ -1424,40 +1219,21 @@ export default function OrdersPage() {
     }
   }, [viewModalOrderId]);
 
-  // Handle Esc key to close create order modal
+  // Handle Esc key to close unified new order modal
   useEffect(() => {
     const handleEscKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && isModalOpen) {
-        setIsModalOpen(false);
-        resetForm();
-        setEditingOrderId(null);
-        setIsFlexOrderMode(false);
+      if (event.key === "Escape" && unifiedOrder.isOpen) {
+        unifiedOrder.closeModal();
       }
     };
 
-    if (isModalOpen) {
+    if (unifiedOrder.isOpen) {
       document.addEventListener("keydown", handleEscKey);
       return () => {
         document.removeEventListener("keydown", handleEscKey);
       };
     }
-  }, [isModalOpen]);
-
-  // Handle Esc key to close process order modal
-  useEffect(() => {
-    const handleEscKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && processModalOrderId) {
-        closeProcessModal();
-      }
-    };
-
-    if (processModalOrderId) {
-      document.addEventListener("keydown", handleEscKey);
-      return () => {
-        document.removeEventListener("keydown", handleEscKey);
-      };
-    }
-  }, [processModalOrderId]);
+  }, [unifiedOrder.isOpen, unifiedOrder.closeModal]);
 
   // Handle Esc key to close viewer modal
   useEffect(() => {
@@ -1481,7 +1257,7 @@ export default function OrdersPage() {
   const makePaymentOrder = orders.find((o) => o.id === makePaymentModalOrderId);
   // Use orderDetails.order.status if available (more up-to-date), otherwise fall back to currentOrder
   const orderStatusForView = orderDetails?.order?.status || currentOrder?.status;
-  const isUnderProcess = orderStatusForView === "under_process";
+  const isSavedOrder = orderStatusForView === "saved";
 
   const { data: customerBeneficiaries = [] } = useGetCustomerBeneficiariesQuery(
     makePaymentOrder?.customerId ?? 0,
@@ -1495,37 +1271,35 @@ export default function OrdersPage() {
         // 我 REMOVED DESCRIPTION UNDER THE TITLE BEING DISPLAYED
         // description={t("orders.titledescription")}
         actions={
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             {isLoading ? t("common.loading") : `${totalOrders} ${t("orders.orders")}`}
-            <button
-              onClick={() => {
-                setIsFlexOrderMode(false);
-                setIsModalOpen(true);
-              }}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 transition-colors"
-            >
-              {t("orders.createOrder")}
-            </button>
-            {hasActionPermission(authUser, "createFlexOrder") && (
+            <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-sm font-semibold">
               <button
-                onClick={() => {
-                  setIsFlexOrderMode(true);
-                  setIsModalOpen(true);
-                }}
-                className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-purple-700 transition-colors"
+                type="button"
+                onClick={() => setOrdersPageTab("list")}
+                className={`rounded-md px-3 py-1.5 ${
+                  ordersPageTab === "list" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"
+                }`}
               >
-                {t("orders.createFlexOrder")}
+                {t("orders.tabList")}
               </button>
-            )}
-            {hasActionPermission(authUser, "createOtcOrder") && (
               <button
-                onClick={() => {
-                  setOtcEditingOrderId(null); // Clear any previous editing order
-                  setIsOtcOrderModalOpen(true);
-                }}
-                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 transition-colors"
+                type="button"
+                onClick={() => setOrdersPageTab("batch")}
+                className={`rounded-md px-3 py-1.5 ${
+                  ordersPageTab === "batch" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"
+                }`}
               >
-                {t("orders.otcOrder")}
+                {t("orders.tabBatch")}
+              </button>
+            </div>
+            {hasActionPermission(authUser, "createOrder") && (
+              <button
+                type="button"
+                onClick={() => unifiedOrder.openNew()}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 transition-colors"
+              >
+                {t("orders.newOrder")}
               </button>
             )}
             {canDeleteManyOrders && (
@@ -1618,107 +1392,118 @@ export default function OrdersPage() {
           </div>
         }
       >
-        {/* Filter Section */}
-        <OrdersFilters
-          filters={filters}
-          isExpanded={isFilterExpanded}
-          onToggleExpanded={() => setIsFilterExpanded(!isFilterExpanded)}
-          onDatePresetChange={handleDatePresetChange}
-          onFilterChange={updateFilter}
-          onClearFilters={handleClearFilters}
-          onExport={handleExportOrders}
-          isExporting={isExporting}
-          canExport={hasActionPermission(authUser, "exportOrder")}
-          isTagFilterOpen={isTagFilterOpen}
-          setIsTagFilterOpen={setIsTagFilterOpen}
-          tagFilterHighlight={tagFilterHighlight}
-          setTagFilterHighlight={setTagFilterHighlight}
-          tagFilterListRef={tagFilterListRef}
-          onTagFilterKeyDown={handleTagFilterKeyDown}
-          users={users}
-          customers={customers}
-          accounts={accounts}
-          currencyPairs={currencyPairs}
-          tags={tags}
-          selectedTagNames={selectedTagNames}
-          tagFilterLabel={tagFilterLabel}
-        />
+        {ordersPageTab === "list" ? (
+          <>
+            <OrdersFilters
+              filters={filters}
+              isExpanded={isFilterExpanded}
+              onToggleExpanded={() => setIsFilterExpanded(!isFilterExpanded)}
+              onDatePresetChange={handleDatePresetChange}
+              onFilterChange={updateFilter}
+              onClearFilters={handleClearFilters}
+              onExport={handleExportOrders}
+              isExporting={isExporting}
+              canExport={hasActionPermission(authUser, "exportOrder")}
+              isTagFilterOpen={isTagFilterOpen}
+              setIsTagFilterOpen={setIsTagFilterOpen}
+              tagFilterHighlight={tagFilterHighlight}
+              setTagFilterHighlight={setTagFilterHighlight}
+              tagFilterListRef={tagFilterListRef}
+              onTagFilterKeyDown={handleTagFilterKeyDown}
+              users={users}
+              customers={customers}
+              accounts={accounts}
+              currencyPairs={currencyPairs}
+              tags={tags}
+              selectedTagNames={selectedTagNames}
+              tagFilterLabel={tagFilterLabel}
+            />
 
-        <OrdersTable
-          orders={orders}
-          accounts={accounts}
-          columnOrder={columnOrder}
-          visibleColumns={visibleColumns}
-          getColumnLabel={getColumnLabel}
-          showCheckbox={isBatchTagMode || (canDeleteManyOrders && isBatchDeleteMode)}
-          selectedOrderIds={selectedOrderIds}
-          onSelectOrder={(orderId, selected) => {
-            if (selected) {
-              setSelectedOrderIds((prev: number[]) =>
-                prev.includes(orderId) ? prev : [...prev, orderId]
-              );
-            } else {
-              setSelectedOrderIds((prev: number[]) => prev.filter((id: number) => id !== orderId));
-            }
-          }}
-          onSelectAll={(selected) => {
-            setSelectedOrderIds(selected ? orders.map((o) => o.id) : []);
-          }}
-          openMenuId={openMenuId}
-          menuPositionAbove={menuPositionAbove}
-          menuRefs={menuRefs}
-          menuElementRefs={menuElementRefs}
-          onMenuToggle={(orderId) => setOpenMenuId(openMenuId === orderId ? null : orderId)}
-          authUser={authUser}
-          onEdit={startEdit}
-          onProcess={(orderId) => {
-            setProcessModalOrderId(orderId);
-            setOpenMenuId(null);
-          }}
-          onView={(orderId) => {
-            setViewModalOrderId(orderId);
-            setOpenMenuId(null);
-          }}
-          onCancel={(orderId) => setStatus(orderId, "cancelled")}
-          onDelete={handleDeleteClick}
-          onRequestDelete={(orderId) => {
-            setRequestApprovalOrderId(orderId);
-            setRequestApprovalType("delete");
-            setIsRequestApprovalModalOpen(true);
-            setOpenMenuId(null);
-          }}
-          onRequestEdit={(orderId) => {
-            setRequestApprovalOrderId(orderId);
-            setRequestApprovalType("edit");
-            setIsRequestApprovalModalOpen(true);
-            setOpenMenuId(null);
-          }}
-          canCancelOrder={canCancelOrder}
-          canDeleteOrder={canDeleteOrder}
-          isDeleting={isDeleting}
-          currentPage={currentPage}
-          totalPages={totalPages}
-          totalOrders={totalOrders}
-          onPageChange={setCurrentPage}
-        />
+            <OrdersTable
+              orders={orders}
+              accounts={accounts}
+              columnOrder={columnOrder}
+              visibleColumns={visibleColumns}
+              getColumnLabel={getColumnLabel}
+              showCheckbox={isBatchTagMode || (canDeleteManyOrders && isBatchDeleteMode)}
+              selectedOrderIds={selectedOrderIds}
+              onSelectOrder={(orderId, selected) => {
+                if (selected) {
+                  setSelectedOrderIds((prev: number[]) =>
+                    prev.includes(orderId) ? prev : [...prev, orderId]
+                  );
+                } else {
+                  setSelectedOrderIds((prev: number[]) => prev.filter((id: number) => id !== orderId));
+                }
+              }}
+              onSelectAll={(selected) => {
+                setSelectedOrderIds(selected ? orders.map((o) => o.id) : []);
+              }}
+              openMenuId={openMenuId}
+              menuPositionAbove={menuPositionAbove}
+              menuRefs={menuRefs}
+              menuElementRefs={menuElementRefs}
+              onMenuToggle={(orderId) => setOpenMenuId(openMenuId === orderId ? null : orderId)}
+              authUser={authUser}
+              onEdit={startEdit}
+              onProcess={() => {}}
+              onView={(orderId) => {
+                setViewModalOrderId(orderId);
+                setOpenMenuId(null);
+              }}
+              onCancel={(orderId) => setStatus(orderId, "cancelled")}
+              onDelete={handleDeleteClick}
+              canCancelOrder={canCancelOrder}
+              canDeleteOrder={canDeleteOrder}
+              isDeleting={isDeleting}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalOrders={totalOrders}
+              onPageChange={setCurrentPage}
+            />
+          </>
+        ) : (
+          <BatchOrdersTab
+            currencies={currencies}
+            accounts={accounts}
+            onDone={() => setOrdersPageTab("list")}
+            setAlertModal={setAlertModal}
+          />
+        )}
       </SectionCard>
 
-      <OnlineOrderModal
-        isOpen={isModalOpen}
-        isFlexOrderMode={isFlexOrderMode}
-        editingOrderId={editingOrderId}
-        isSaving={isSaving}
-        form={form}
-        setForm={setForm}
-        calculatedField={calculatedField}
-        setCalculatedField={setCalculatedField}
-        customers={customers}
+      <NewOrderModal
+        isOpen={unifiedOrder.isOpen}
+        isSaving={unifiedOrder.isSaving}
+        editingOrderId={unifiedOrder.editingOrderId}
+        customerName={unifiedOrder.customerName}
+        setCustomerName={unifiedOrder.setCustomerName}
+        fromCurrency={unifiedOrder.fromCurrency}
+        setFromCurrency={unifiedOrder.setFromCurrency}
+        toCurrency={unifiedOrder.toCurrency}
+        setToCurrency={unifiedOrder.setToCurrency}
+        amountBuy={unifiedOrder.amountBuy}
+        amountSell={unifiedOrder.amountSell}
+        rate={unifiedOrder.rate}
+        onAmountBuyChange={unifiedOrder.handleAmountBuyChange}
+        onAmountSellChange={unifiedOrder.handleAmountSellChange}
+        onRateChange={unifiedOrder.handleRateChange}
+        lines={unifiedOrder.lines}
+        setLines={unifiedOrder.setLines}
+        remarks={unifiedOrder.remarks}
+        setRemarks={unifiedOrder.setRemarks}
+        showRemarks={unifiedOrder.showRemarks}
+        setShowRemarks={unifiedOrder.setShowRemarks}
         currencies={currencies}
+        accounts={accounts}
         handleNumberInputWheel={handleNumberInputWheel}
-        onSubmit={submit}
-        onClose={closeModal}
-        setIsCreateCustomerModalOpen={setIsCreateCustomerModalOpen}
-        t={t}
+        onSave={unifiedOrder.handleSave}
+        onComplete={unifiedOrder.handleComplete}
+        onClose={unifiedOrder.closeModal}
+        onAutoFill={unifiedOrder.fillReceiptPaymentFromTotals}
+        addLineRow={unifiedOrder.addLineRow}
+        viewerModal={newOrderViewerModal}
+        setViewerModal={setNewOrderViewerModal}
       />
 
       {/* Create Customer Modal */}
@@ -1734,292 +1519,101 @@ export default function OrdersPage() {
         onSubmit={handleCreateCustomer}
       />
 
-      {/* Process Order Modal */}
-      <ProcessOrderModal
-        isOpen={!!processModalOrderId}
-        processForm={processForm}
-        setProcessForm={setProcessForm}
-        users={users}
-        onClose={closeProcessModal}
-        onSubmit={handleProcess}
-      />
-
-      {/* Order Changes Modal - For pending_amend orders */}
-      {viewModalOrderId && isPendingAmend && pendingApprovalRequest && orderDetails && (
-        <OrderChangesModal
-          isOpen={true}
-          order={{
-            ...(pendingApprovalRequest.entity || orderDetails.order),
-            // Ensure we have originalReceipts and originalPayments from the entity or orderDetails
-            originalReceipts: pendingApprovalRequest.entity?.originalReceipts || 
-                            orderDetails.receipts.filter((r: any) => r.status === 'confirmed'),
-            originalPayments: pendingApprovalRequest.entity?.originalPayments || 
-                            orderDetails.payments.filter((p: any) => p.status === 'confirmed'),
-          }}
-          amendedData={pendingApprovalRequest.requestData || {}}
-          reason={pendingApprovalRequest.reason}
-          accounts={accounts}
-          onClose={closeViewModal}
-          showActions={false}
-          setViewerModal={setViewerModal}
-        />
-      )}
-
-      {/* View Order Modal - For non-pending_amend orders */}
-      {viewModalOrderId && !isPendingAmend && orderDetails && (
+      {viewModalOrderId && orderDetails && (
         <ViewOrderModal
           isOpen={!!viewModalOrderId}
           onClose={closeViewModal}
           title={t("orders.orderDetails")}
         >
-          <div className={orderDetails.order.isFlexOrder ? "grid grid-cols-1 lg:grid-cols-3 gap-4" : "space-y-4"}>
-              {/* For flex orders, show both receipt and payment sections */}
-              {orderDetails.order.isFlexOrder ? (
-                <>
-                  {/* For flex orders: Show upload section when under_process, summary when not */}
-                  {isUnderProcess ? (
-                    <>
-                      <div className="lg:col-span-2">
-                        <OnlineOrderUploadsSection
-                        orderDetails={orderDetails}
-                        accounts={accounts}
-                        orders={orders}
-                        viewModalOrderId={viewModalOrderId}
-                        authUser={authUser}
-                        receipts={orderDetails.receipts}
-                        totalReceiptAmount={orderDetails.totalReceiptAmount}
-                        receiptBalance={orderDetails.receiptBalance}
-                        showReceiptUpload={showReceiptUpload}
-                        setShowReceiptUpload={setShowReceiptUpload}
-                        receiptUploads={receiptUploads}
-                        setReceiptUploads={setReceiptUploads}
-                        receiptUploadKey={receiptUploadKey}
-                        receiptDragOver={receiptDragOver}
-                        setReceiptDragOver={setReceiptDragOver}
-                        receiptFileInputRefs={receiptFileInputRefs}
-                        handleAddReceipt={handleAddReceipt}
-                        confirmReceipt={confirmReceipt}
-                        deleteReceipt={deleteReceipt}
-                        payments={orderDetails.payments}
-                        totalPaymentAmount={orderDetails.totalPaymentAmount}
-                        paymentBalance={orderDetails.paymentBalance}
-                        excessPaymentWarning={excessPaymentWarning}
-                        showPaymentUpload={showPaymentUpload}
-                        setShowPaymentUpload={setShowPaymentUpload}
-                        paymentUploads={paymentUploads}
-                        setPaymentUploads={setPaymentUploads}
-                        paymentUploadKey={paymentUploadKey}
-                        paymentDragOver={paymentDragOver}
-                        setPaymentDragOver={setPaymentDragOver}
-                        paymentFileInputRefs={paymentFileInputRefs}
-                        handleAddPayment={handleAddPayment}
-                        confirmPayment={confirmPayment}
-                        deletePayment={deletePayment}
-                        handleImageUpload={handleImageUpload}
-                        handleDrop={handleDrop}
-                        handleDragOver={handleDragOver}
-                        handleDragLeave={handleDragLeave}
-                        handleFileChange={handleFileChange}
-                        handleNumberInputWheel={handleNumberInputWheel}
-                        setActiveUploadType={setActiveUploadType}
-                        getFileType={getFileType}
-                        setViewerModal={setViewerModal}
-                        openPdfInNewTab={openPdfInNewTab}
-                        isFlexOrder={true}
-                        showCancelButtons={true}
-                        layout="grid"
-                        t={t}
-                      />
-                      </div>
-                      
-                      {/* Flex Order Rate Panel - Right Side */}
-                      {orderDetails.order.status !== "completed" && 
-                       orderDetails.order.status !== "cancelled" && (
-                        <FlexOrderRatePanel
-                          orderId={viewModalOrderId}
-                          flexOrderRate={flexOrderRate}
-                          setFlexOrderRate={setFlexOrderRate}
-                          orderDetails={orderDetails}
-                          currencies={currencies}
-                          adjustFlexOrderRate={adjustFlexOrderRate}
-                          handleNumberInputWheel={handleNumberInputWheel}
-                          t={t}
-                        />
-                      )}
+          <div className="space-y-4">
+            {isSavedOrder ? (
+              <OnlineOrderUploadsSection
+                orderDetails={orderDetails}
+                accounts={accounts}
+                orders={orders}
+                viewModalOrderId={viewModalOrderId}
+                authUser={authUser}
+                receipts={orderDetails.receipts}
+                totalReceiptAmount={orderDetails.totalReceiptAmount}
+                receiptBalance={orderDetails.receiptBalance}
+                showReceiptUpload={showReceiptUpload}
+                setShowReceiptUpload={setShowReceiptUpload}
+                receiptUploads={receiptUploads}
+                setReceiptUploads={setReceiptUploads}
+                receiptUploadKey={receiptUploadKey}
+                receiptDragOver={receiptDragOver}
+                setReceiptDragOver={setReceiptDragOver}
+                receiptFileInputRefs={receiptFileInputRefs}
+                handleAddReceipt={handleAddReceipt}
+                confirmReceipt={confirmReceipt}
+                deleteReceipt={deleteReceipt}
+                payments={orderDetails.payments}
+                totalPaymentAmount={orderDetails.totalPaymentAmount}
+                paymentBalance={orderDetails.paymentBalance}
+                excessPaymentWarning={excessPaymentWarning}
+                showPaymentUpload={showPaymentUpload}
+                setShowPaymentUpload={setShowPaymentUpload}
+                paymentUploads={paymentUploads}
+                setPaymentUploads={setPaymentUploads}
+                paymentUploadKey={paymentUploadKey}
+                paymentDragOver={paymentDragOver}
+                setPaymentDragOver={setPaymentDragOver}
+                paymentFileInputRefs={paymentFileInputRefs}
+                handleAddPayment={handleAddPayment}
+                confirmPayment={confirmPayment}
+                deletePayment={deletePayment}
+                handleImageUpload={handleImageUpload}
+                handleDrop={handleDrop}
+                handleDragOver={handleDragOver}
+                handleDragLeave={handleDragLeave}
+                handleFileChange={handleFileChange}
+                handleNumberInputWheel={handleNumberInputWheel}
+                setActiveUploadType={setActiveUploadType}
+                getFileType={getFileType}
+                setViewerModal={setViewerModal}
+                openPdfInNewTab={openPdfInNewTab}
+                onReplaceDraftReceiptFile={async (receiptId, file) => {
+                  await updateReceipt({ receiptId, file }).unwrap();
+                }}
+                onReplaceDraftPaymentFile={async (paymentId, file) => {
+                  await updatePayment({ paymentId, file }).unwrap();
+                }}
+                showCancelButtons={true}
+                layout="vertical"
+                t={t}
+              />
+            ) : (
+              <OnlineOrderSummary
+                orderDetails={orderDetails}
+                accounts={accounts}
+                viewModalOrderId={viewModalOrderId}
+                confirmReceipt={confirmReceipt}
+                deleteReceipt={deleteReceipt}
+                confirmPayment={confirmPayment}
+                deletePayment={deletePayment}
+                getFileType={getFileType}
+                setViewerModal={setViewerModal}
+                openPdfInNewTab={openPdfInNewTab}
+                t={t}
+              />
+            )}
 
-                    {renderProfitServiceCharges()}
+            {renderProfitServiceCharges()}
+            {renderRemarks()}
 
-                    {/* Remarks Section for Flex Orders (under_process) */}
-                    {isUnderProcess && renderRemarks()}
-
-                    {/* Complete Order Button for Flex Orders (under_process) */}
-                    <CompleteOrderButton
-                      orderId={viewModalOrderId}
-                      orderDetails={orderDetails}
-                      currencies={currencies}
-                      flexOrderRate={flexOrderRate}
-                      updateOrderStatus={updateOrderStatus}
-                      calculateAmountSell={calculateAmountSell}
-                      resolveFlexOrderRate={resolveFlexOrderRate}
-                      setMissingPaymentModalData={setMissingPaymentModalData}
-                      setShowMissingPaymentModal={setShowMissingPaymentModal}
-                      setExcessPaymentModalData={setExcessPaymentModalData}
-                      setShowExcessPaymentModal={setShowExcessPaymentModal}
-                      authUser={authUser}
-                      layout="grid"
-                      t={t}
-                    />
-                    </>
-                  ) : (
-                    <>
-                      {/* Order Summary for Flex Orders - When not in under_process */}
-                      <div className="lg:col-span-3">
-                        <OnlineOrderSummary
-                          orderDetails={orderDetails}
-                          accounts={accounts}
-                          viewModalOrderId={viewModalOrderId}
-                          confirmReceipt={confirmReceipt}
-                          deleteReceipt={deleteReceipt}
-                          confirmPayment={confirmPayment}
-                          deletePayment={deletePayment}
-                          getFileType={getFileType}
-                          setViewerModal={setViewerModal}
-                          openPdfInNewTab={openPdfInNewTab}
-                          t={t}
-                        />
-                      </div>
-
-                      {/* Purple Section - Right Side, Sticky */}
-                      {orderDetails.order.status !== "completed" && 
-                       orderDetails.order.status !== "cancelled" && (
-                        <FlexOrderRatePanel
-                          orderId={viewModalOrderId}
-                          flexOrderRate={flexOrderRate}
-                          setFlexOrderRate={setFlexOrderRate}
-                          orderDetails={orderDetails}
-                          currencies={currencies}
-                          adjustFlexOrderRate={adjustFlexOrderRate}
-                          handleNumberInputWheel={handleNumberInputWheel}
-                          t={t}
-                        />
-                      )}
-
-                      {renderProfitServiceCharges()}
-
-                      {/* Complete Order Button for Flex Orders */}
-                      <CompleteOrderButton
-                        orderId={viewModalOrderId}
-                        orderDetails={orderDetails}
-                        currencies={currencies}
-                        flexOrderRate={flexOrderRate}
-                        updateOrderStatus={updateOrderStatus}
-                        calculateAmountSell={calculateAmountSell}
-                        resolveFlexOrderRate={resolveFlexOrderRate}
-                        setMissingPaymentModalData={setMissingPaymentModalData}
-                        setShowMissingPaymentModal={setShowMissingPaymentModal}
-                        setExcessPaymentModalData={setExcessPaymentModalData}
-                        setShowExcessPaymentModal={setShowExcessPaymentModal}
-                        layout="grid"
-                        t={t}
-                      />
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  {/* Regular order flow - show sections based on status */}
-                  {/* Regular order flow - show sections based on status */}
-              {isUnderProcess && !orderDetails.order.isFlexOrder && (
-                <OnlineOrderUploadsSection
-                  orderDetails={orderDetails}
-                  accounts={accounts}
-                  orders={orders}
-                  viewModalOrderId={viewModalOrderId}
-                  authUser={authUser}
-                  receipts={orderDetails.receipts}
-                  totalReceiptAmount={orderDetails.totalReceiptAmount}
-                  receiptBalance={orderDetails.receiptBalance}
-                  showReceiptUpload={showReceiptUpload}
-                  setShowReceiptUpload={setShowReceiptUpload}
-                  receiptUploads={receiptUploads}
-                  setReceiptUploads={setReceiptUploads}
-                  receiptUploadKey={receiptUploadKey}
-                  receiptDragOver={receiptDragOver}
-                  setReceiptDragOver={setReceiptDragOver}
-                  receiptFileInputRefs={receiptFileInputRefs}
-                  handleAddReceipt={handleAddReceipt}
-                  confirmReceipt={confirmReceipt}
-                  deleteReceipt={deleteReceipt}
-                  payments={orderDetails.payments}
-                  totalPaymentAmount={orderDetails.totalPaymentAmount}
-                  paymentBalance={orderDetails.paymentBalance}
-                  showPaymentUpload={showPaymentUpload}
-                  setShowPaymentUpload={setShowPaymentUpload}
-                  paymentUploads={paymentUploads}
-                  setPaymentUploads={setPaymentUploads}
-                  paymentUploadKey={paymentUploadKey}
-                  paymentDragOver={paymentDragOver}
-                  setPaymentDragOver={setPaymentDragOver}
-                  paymentFileInputRefs={paymentFileInputRefs}
-                  handleAddPayment={handleAddPayment}
-                  confirmPayment={confirmPayment}
-                  deletePayment={deletePayment}
-                  handleImageUpload={handleImageUpload}
-                  handleDrop={handleDrop}
-                  handleDragOver={handleDragOver}
-                  handleDragLeave={handleDragLeave}
-                  handleFileChange={handleFileChange}
-                  handleNumberInputWheel={handleNumberInputWheel}
-                  setActiveUploadType={setActiveUploadType}
-                  getFileType={getFileType}
-                  setViewerModal={setViewerModal}
-                  openPdfInNewTab={openPdfInNewTab}
-                  isFlexOrder={false}
-                  showCancelButtons={true}
-                  layout="vertical"
-                  t={t}
-                />
-              )}
-
-              {/* Order Summary - For both flex and regular orders when not in under_process */}
-              {!isUnderProcess && orderDetails && (
-                <OnlineOrderSummary
-                  orderDetails={orderDetails}
-                  accounts={accounts}
-                  viewModalOrderId={viewModalOrderId}
-                  confirmReceipt={confirmReceipt}
-                  deleteReceipt={deleteReceipt}
-                  confirmPayment={confirmPayment}
-                  deletePayment={deletePayment}
-                  getFileType={getFileType}
-                  setViewerModal={setViewerModal}
-                  openPdfInNewTab={openPdfInNewTab}
-                  t={t}
-                />
-              )}
-
-              {!orderDetails.order.isFlexOrder && renderProfitServiceCharges()}
-
-              {/* Remarks Section for Regular Orders (under_process) */}
-              {isUnderProcess && !orderDetails.order.isFlexOrder && renderRemarks()}
-
-              {/* Complete Order Button for Regular Orders */}
-              {!orderDetails.order.isFlexOrder && (
-                <CompleteOrderButton
-                  orderId={viewModalOrderId}
-                  orderDetails={orderDetails}
-                  currencies={currencies}
-                  flexOrderRate={null}
-                  updateOrderStatus={updateOrderStatus}
-                  calculateAmountSell={calculateAmountSell}
-                  authUser={authUser}
-                  layout="vertical"
-                  t={t}
-                />
-              )}
-                </>
-              )}
-            </div>
+            {isSavedOrder && (
+              <CompleteOrderButton
+                orderId={viewModalOrderId}
+                orderDetails={orderDetails}
+                currencies={currencies}
+                updateOrderStatus={updateOrderStatus}
+                calculateAmountSell={calculateAmountSell}
+                authUser={authUser}
+                layout="vertical"
+                t={t}
+              />
+            )}
+          </div>
         </ViewOrderModal>
       )}
 
@@ -2120,51 +1714,6 @@ export default function OrdersPage() {
         t={t}
       />
 
-      {/* Request Approval Modal */}
-      <RequestApprovalModal
-        isOpen={isRequestApprovalModalOpen}
-        order={requestApprovalOrderId ? orders.find(o => o.id === requestApprovalOrderId) || null : null}
-        requestType={requestApprovalType}
-        accounts={accounts}
-        currencies={currencies}
-        handleNumberInputWheel={handleNumberInputWheel}
-        onClose={() => {
-          setIsRequestApprovalModalOpen(false);
-          setRequestApprovalOrderId(null);
-        }}
-        onSubmit={async (reason, amendedData) => {
-          if (!requestApprovalOrderId) return;
-
-          try {
-            const amendedDataWithFiles = amendedData as Partial<Order> & { receiptFiles?: File[]; paymentFiles?: File[] };
-            await createApprovalRequest({
-              entityType: "order",
-              entityId: requestApprovalOrderId,
-              requestType: requestApprovalType,
-              reason,
-              requestData: requestApprovalType === "edit" ? amendedData : undefined,
-              receiptFiles: requestApprovalType === "edit" && amendedDataWithFiles?.receiptFiles ? amendedDataWithFiles.receiptFiles : undefined,
-              paymentFiles: requestApprovalType === "edit" && amendedDataWithFiles?.paymentFiles ? amendedDataWithFiles.paymentFiles : undefined,
-            }).unwrap();
-
-            setIsRequestApprovalModalOpen(false);
-            setRequestApprovalOrderId(null);
-            setAlertModal({
-              isOpen: true,
-              message: t("orders.approvalRequestSubmitted") || "Approval request submitted successfully",
-              type: "success",
-            });
-          } catch (error: any) {
-            setAlertModal({
-              isOpen: true,
-              message: error?.data?.message || t("orders.errorSubmittingRequest") || "Error submitting approval request",
-              type: "error",
-            });
-          }
-        }}
-        isSubmitting={isSubmittingApproval}
-      />
-
       {/* Delete confirmation modal (for delete operations) */}
       <ConfirmModal
         isOpen={deleteConfirmModal.isOpen}
@@ -2190,55 +1739,6 @@ export default function OrdersPage() {
         onClose={() => setImportModalOpen(false)}
         onFileChange={handleImportFile}
         onDownloadTemplate={handleDownloadTemplate}
-      />
-
-      <OtcOrderModal
-        isOpen={isOtcOrderModalOpen}
-        isSaving={isOtcSaving}
-        isOtcCompleted={isOtcCompleted}
-        otcEditingOrderId={otcEditingOrderId}
-        otcOrderDetails={otcOrderDetails}
-        customers={customers}
-        users={users}
-        currencies={currencies}
-        accounts={accounts}
-        otcForm={otcForm}
-        setOtcForm={setOtcForm}
-        otcReceipts={otcReceipts}
-        setOtcReceipts={setOtcReceipts}
-        otcPayments={otcPayments}
-        setOtcPayments={setOtcPayments}
-        showOtcProfitSection={showOtcProfitSection}
-        setShowOtcProfitSection={setShowOtcProfitSection}
-        showOtcServiceChargeSection={showOtcServiceChargeSection}
-        setShowOtcServiceChargeSection={setShowOtcServiceChargeSection}
-        otcProfitAmount={otcProfitAmount}
-        setOtcProfitAmount={setOtcProfitAmount}
-        otcProfitCurrency={otcProfitCurrency}
-        setOtcProfitCurrency={setOtcProfitCurrency}
-        otcProfitAccountId={otcProfitAccountId}
-        setOtcProfitAccountId={setOtcProfitAccountId}
-        otcServiceChargeAmount={otcServiceChargeAmount}
-        setOtcServiceChargeAmount={setOtcServiceChargeAmount}
-        otcServiceChargeCurrency={otcServiceChargeCurrency}
-        setOtcServiceChargeCurrency={setOtcServiceChargeCurrency}
-        otcServiceChargeAccountId={otcServiceChargeAccountId}
-        setOtcServiceChargeAccountId={setOtcServiceChargeAccountId}
-        otcRemarks={otcRemarks}
-        setOtcRemarks={setOtcRemarks}
-        showOtcRemarks={showOtcRemarks}
-        setShowOtcRemarks={setShowOtcRemarks}
-        handleNumberInputWheel={handleNumberInputWheel}
-        getBaseCurrency={getBaseCurrency}
-        onSave={handleOtcOrderSave}
-        onComplete={handleOtcOrderComplete}
-        onClose={closeOtcModal}
-        setIsCreateCustomerModalOpen={setIsCreateCustomerModalOpen}
-        authUser={authUser}
-        onRemoveProfit={handleRemoveOtcProfit}
-        onRemoveServiceCharge={handleRemoveOtcServiceCharge}
-        onRemoveRemarks={handleRemoveOtcRemarks}
-        t={t}
       />
     </div>
   );

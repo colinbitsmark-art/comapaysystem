@@ -3,11 +3,10 @@ import Badge from "../common/Badge";
 import { formatDate } from "../../utils/format";
 import { RemarksSection } from "./RemarksSection";
 import { CustomerSelect } from "../common/CustomerSelect";
+import { CurrencyPairSwapButton } from "./CurrencyPairSwapButton";
 import { saveDefaultOtcHandler, getDefaultOtcHandler, clearDefaultOtcHandler } from "../../utils/otcHandlerPreference";
-import { useListApprovalRequestsQuery, useGetApprovalRequestQuery } from "../../services/api";
 import { useTranslation } from "react-i18next";
-import type { Account, Order, AuthResponse, OrderStatus } from "../../types";
-import { canModifyOrder, isAdmin } from "../../utils/orderPermissions";
+import type { Account, Order, OrderStatus } from "../../types";
 import { getStatusTone } from "../../utils/orders/orderFormatters";
 
 type BasicEntity = { id: number; name: string };
@@ -156,153 +155,6 @@ type FormProps = {
   t: (key: string) => string;
 };
 
-// Component to show comparison view for pending_amend orders
-const OtcOrderComparisonView = ({ 
-  order, 
-  approvalRequest, 
-  accounts, 
-  customers, 
-  users, 
-  onClose, 
-  t 
-}: { 
-  order: any; 
-  approvalRequest: any; 
-  accounts: Account[]; 
-  customers: BasicEntity[]; 
-  users: BasicEntity[]; 
-  onClose: () => void; 
-  t: (key: string) => string;
-}) => {
-  // Look up account names from accounts array if not provided
-  const getAccountName = (accountId: number | null | undefined) => {
-    if (!accountId) return null;
-    return accounts.find((a) => a.id === accountId)?.name || null;
-  };
-
-  const originalOrder = approvalRequest?.entity || null;
-  const amendedData = approvalRequest?.requestData || null;
-
-  // Merge original order data with amended data for display
-  // Clear account names if account IDs changed or were cleared in the amended data
-  // This ensures the component looks up account names from the new IDs (or shows none if cleared)
-  const amendedOrder = originalOrder && amendedData ? {
-    ...originalOrder,
-    ...amendedData,
-    profitAccountName: ('profitAccountId' in amendedData && 
-                       amendedData.profitAccountId !== originalOrder.profitAccountId)
-      ? undefined 
-      : originalOrder.profitAccountName,
-    serviceChargeAccountName: ('serviceChargeAccountId' in amendedData && 
-                              amendedData.serviceChargeAccountId !== originalOrder.serviceChargeAccountId)
-      ? undefined 
-      : originalOrder.serviceChargeAccountName,
-  } : null;
-
-  return (
-    <div className="space-y-6">
-      {/* Reason */}
-      {approvalRequest?.reason && (
-        <div className="mb-6">
-          <h3 className="text-sm font-semibold text-slate-700 mb-2">
-            {t("approvals.reason") || "Reason"}
-          </h3>
-          <div className="bg-slate-50 rounded-lg p-4 text-sm text-slate-700">
-            {approvalRequest.reason}
-          </div>
-        </div>
-      )}
-
-      {/* Comparison View */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">
-            {t("approvals.originalOrder") || "Original Order"}
-          </h3>
-          {originalOrder && (
-            <div className="bg-slate-50 rounded-lg p-4 text-sm space-y-2">
-              <div><strong>{t("orders.customer") || "Customer"}:</strong> {originalOrder.customerName || originalOrder.customerId || "-"}</div>
-              <div><strong>{t("orders.currencyPair") || "Currency Pair"}:</strong> {originalOrder.fromCurrency || ""} / {originalOrder.toCurrency || ""}</div>
-              <div><strong>{t("orders.amountBuy") || "Amount Buy"}:</strong> {originalOrder.amountBuy} {originalOrder.fromCurrency || ""}</div>
-              <div><strong>{t("orders.amountSell") || "Amount Sell"}:</strong> {originalOrder.amountSell} {originalOrder.toCurrency || ""}</div>
-              <div><strong>{t("orders.rate") || "Rate"}:</strong> {originalOrder.rate}</div>
-              {(originalOrder.profitAmount !== null && originalOrder.profitAmount !== undefined) && (
-                <div>
-                  <strong>{t("orders.profitAmount") || "Profit Amount"}:</strong> {originalOrder.profitAmount} {originalOrder.profitCurrency || ""}
-                  {originalOrder.profitAccountName ? (
-                    <span className="text-slate-500 ml-1">({originalOrder.profitAccountName})</span>
-                  ) : originalOrder.profitAccountId ? (
-                    <span className="text-slate-500 ml-1">({getAccountName(originalOrder.profitAccountId) || `${t("orders.account") || "Account"} #${originalOrder.profitAccountId}`})</span>
-                  ) : null}
-                </div>
-              )}
-              {(originalOrder.serviceChargeAmount !== null && originalOrder.serviceChargeAmount !== undefined) && (
-                <div>
-                  <strong>{t("orders.serviceChargeAmount") || "Service Charge Amount"}:</strong> {originalOrder.serviceChargeAmount} {originalOrder.serviceChargeCurrency || ""}
-                  {originalOrder.serviceChargeAccountName ? (
-                    <span className="text-slate-500 ml-1">({originalOrder.serviceChargeAccountName})</span>
-                  ) : originalOrder.serviceChargeAccountId ? (
-                    <span className="text-slate-500 ml-1">({getAccountName(originalOrder.serviceChargeAccountId) || `${t("orders.account") || "Account"} #${originalOrder.serviceChargeAccountId}`})</span>
-                  ) : null}
-                </div>
-              )}
-              {originalOrder.remarks && (
-                <div><strong>{t("orders.remarks") || "Remarks"}:</strong> {originalOrder.remarks}</div>
-              )}
-            </div>
-          )}
-        </div>
-        <div>
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">
-            {t("approvals.amendedOrder") || "Amended Order"}
-          </h3>
-          {amendedOrder && (
-            <div className="bg-slate-50 rounded-lg p-4 text-sm space-y-2">
-              <div><strong>{t("orders.customer") || "Customer"}:</strong> {amendedOrder.customerName || amendedOrder.customerId || "-"}</div>
-              <div><strong>{t("orders.currencyPair") || "Currency Pair"}:</strong> {amendedOrder.fromCurrency || ""} / {amendedOrder.toCurrency || ""}</div>
-              <div><strong>{t("orders.amountBuy") || "Amount Buy"}:</strong> {amendedOrder.amountBuy} {amendedOrder.fromCurrency || ""}</div>
-              <div><strong>{t("orders.amountSell") || "Amount Sell"}:</strong> {amendedOrder.amountSell} {amendedOrder.toCurrency || ""}</div>
-              <div><strong>{t("orders.rate") || "Rate"}:</strong> {amendedOrder.rate}</div>
-              {(amendedOrder.profitAmount !== null && amendedOrder.profitAmount !== undefined) && (
-                <div>
-                  <strong>{t("orders.profitAmount") || "Profit Amount"}:</strong> {amendedOrder.profitAmount} {amendedOrder.profitCurrency || ""}
-                  {amendedOrder.profitAccountName ? (
-                    <span className="text-slate-500 ml-1">({amendedOrder.profitAccountName})</span>
-                  ) : amendedOrder.profitAccountId ? (
-                    <span className="text-slate-500 ml-1">({getAccountName(amendedOrder.profitAccountId) || `${t("orders.account") || "Account"} #${amendedOrder.profitAccountId}`})</span>
-                  ) : null}
-                </div>
-              )}
-              {(amendedOrder.serviceChargeAmount !== null && amendedOrder.serviceChargeAmount !== undefined) && (
-                <div>
-                  <strong>{t("orders.serviceChargeAmount") || "Service Charge Amount"}:</strong> {amendedOrder.serviceChargeAmount} {amendedOrder.serviceChargeCurrency || ""}
-                  {amendedOrder.serviceChargeAccountName ? (
-                    <span className="text-slate-500 ml-1">({amendedOrder.serviceChargeAccountName})</span>
-                  ) : amendedOrder.serviceChargeAccountId ? (
-                    <span className="text-slate-500 ml-1">({getAccountName(amendedOrder.serviceChargeAccountId) || `${t("orders.account") || "Account"} #${amendedOrder.serviceChargeAccountId}`})</span>
-                  ) : null}
-                </div>
-              )}
-              {amendedOrder.remarks && (
-                <div><strong>{t("orders.remarks") || "Remarks"}:</strong> {amendedOrder.remarks}</div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-        >
-          {t("common.close")}
-        </button>
-      </div>
-    </div>
-  );
-};
 
 const OtcOrderView = ({ accounts, customers, users, otcOrderDetails, onClose, t }: ViewProps) => {
   const order = otcOrderDetails.order;
@@ -476,116 +328,6 @@ const OtcOrderView = ({ accounts, customers, users, otcOrderDetails, onClose, t 
   );
 };
 
-// Wrapper component to fetch approval request for pending_amend orders
-const OtcOrderComparisonViewWrapper = ({
-  order,
-  accounts,
-  customers,
-  users,
-  onClose,
-  t,
-}: {
-  order: any;
-  accounts: Account[];
-  customers: BasicEntity[];
-  users: BasicEntity[];
-  onClose: () => void;
-  t: (key: string) => string;
-}) => {
-  const { t: translate } = useTranslation();
-  
-  // Fetch approval request for this specific order
-  // Don't filter by status - we want to find the request even if it's been processed
-  const { data: approvalRequests = [], isLoading: isLoadingList, isError: isErrorList } = useListApprovalRequestsQuery({
-    entityType: "order",
-    requestType: "edit",
-    entityId: order.id,
-  });
-
-  // Get the approval request ID (should be only one or none)
-  // Prefer pending requests, but fall back to any if pending not found
-  const pendingRequest = approvalRequests.find((req: any) => req.status === "pending");
-  const approvalRequestId = pendingRequest?.id || (approvalRequests.length > 0 ? approvalRequests[0].id : null);
-
-  // Fetch full approval request details with entity data
-  const { data: approvalRequest, isLoading: isLoadingDetails, isError: isErrorDetails } = useGetApprovalRequestQuery(approvalRequestId!, {
-    skip: !approvalRequestId,
-  });
-
-  // Show loading state
-  if (isLoadingList || (approvalRequestId && isLoadingDetails)) {
-    return (
-      <div className="space-y-6">
-        <div className="text-center py-8 text-slate-500">
-          {translate("common.loading") || "Loading..."}
-        </div>
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-          >
-            {translate("common.close")}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Show error state
-  if (isErrorList || isErrorDetails) {
-    return (
-      <div className="space-y-6">
-        <div className="text-center py-8 text-red-500">
-          {translate("common.errorLoading") || "Error loading approval request"}
-        </div>
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-          >
-            {translate("common.close")}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // If we found an approval request, show comparison view
-  if (approvalRequest) {
-    return (
-      <OtcOrderComparisonView
-        order={order}
-        approvalRequest={approvalRequest}
-        accounts={accounts}
-        customers={customers}
-        users={users}
-        onClose={onClose}
-        t={translate}
-      />
-    );
-  }
-
-  // Fallback: show message if no approval request found
-  // This shouldn't happen for pending_amend orders, but handle gracefully
-  return (
-    <div className="space-y-6">
-      <div className="text-center py-8 text-slate-500">
-        {translate("approvals.noRequestFound") || "No approval request found for this order"}
-      </div>
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-        >
-          {translate("common.close")}
-        </button>
-      </div>
-    </div>
-  );
-};
 
 const OtcOrderForm = ({
   accounts,
@@ -663,15 +405,15 @@ const OtcOrderForm = ({
     }
   }, [otcEditingOrderId, otcOrderDetails]);
 
-  // Handle handler change with warning for pending OTC orders
+  // Handle handler change with warning for saved OTC orders
   const handleHandlerChange = (newHandlerId: string) => {
     const order = otcOrderDetails?.order;
-    const isPending = order?.status === "pending";
+    const isSaved = order?.status === "saved";
     const hasOriginalHandler = originalHandlerId !== "" && originalHandlerId !== null;
     const isChangingHandler = newHandlerId !== originalHandlerId && hasOriginalHandler;
 
-    // Show warning only for pending OTC orders that already have a handler
-    if (isPending && isChangingHandler && otcEditingOrderId) {
+    // Show warning only for saved OTC orders that already have a handler
+    if (isSaved && isChangingHandler && otcEditingOrderId) {
       setPendingHandlerChange(newHandlerId);
       setShowHandlerChangeWarning(true);
     } else {
@@ -701,9 +443,9 @@ const OtcOrderForm = ({
     return defaultHandlerId === otcForm.handlerId;
   }, [authUser?.id, otcForm.handlerId, defaultHandlerId]);
 
-  // Check if order is pending (hide button for pending orders)
-  const isPendingOrder = useMemo(() => {
-    return otcOrderDetails?.order?.status === "pending";
+  // Hide button for saved (in-progress) orders until status changes
+  const isSavedOrder = useMemo(() => {
+    return otcOrderDetails?.order?.status === "saved";
   }, [otcOrderDetails?.order?.status]);
 
   return (
@@ -727,9 +469,9 @@ const OtcOrderForm = ({
           {t("orders.createNewCustomer")}
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <select
-          className="rounded-lg border border-slate-200 px-3 py-2"
+          className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2"
           value={otcForm.fromCurrency}
           onChange={(e) => setOtcForm((p) => ({ ...p, fromCurrency: e.target.value }))}
           required
@@ -743,8 +485,21 @@ const OtcOrderForm = ({
               </option>
             ))}
         </select>
+        <div className="flex justify-center sm:pb-0.5">
+          <CurrencyPairSwapButton
+            label={t("orders.swapCurrencies")}
+            disabled={!otcForm.fromCurrency && !otcForm.toCurrency}
+            onClick={() =>
+              setOtcForm((p) => ({
+                ...p,
+                fromCurrency: p.toCurrency,
+                toCurrency: p.fromCurrency,
+              }))
+            }
+          />
+        </div>
         <select
-          className="rounded-lg border border-slate-200 px-3 py-2"
+          className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2"
           value={otcForm.toCurrency}
           onChange={(e) => setOtcForm((p) => ({ ...p, toCurrency: e.target.value }))}
           required
@@ -839,7 +594,7 @@ const OtcOrderForm = ({
             </option>
           ))}
         </select>
-        {otcForm.handlerId && !isPendingOrder && (
+        {otcForm.handlerId && !isSavedOrder && (
           <button
             type="button"
             onClick={() => {
@@ -1307,21 +1062,7 @@ export default function OtcOrderModal({
   onRemoveRemarks,
   t,
 }: OtcOrderModalProps) {
-  // Check if user can modify the order (for pending orders)
-  // Admins or creator/handler can modify
-  const userCanModify = useMemo(() => {
-    if (!authUser) return false;
-    if (isAdmin(authUser as AuthResponse)) return true;
-    if (!otcOrderDetails?.order) return false;
-    return canModifyOrder(otcOrderDetails.order as Order, authUser as AuthResponse);
-  }, [otcOrderDetails?.order, authUser]);
-
-  // For pending orders, if user cannot modify, show as view-only
-  // Important: Only check this if we're actually editing an order (otcEditingOrderId is set)
-  const shouldShowViewMode = otcEditingOrderId && (
-    isOtcCompleted || 
-    (otcOrderDetails?.order?.status === "pending" && !userCanModify)
-  );
+  const shouldShowViewMode = Boolean(otcEditingOrderId && isOtcCompleted);
 
   const heading = shouldShowViewMode
     ? t("orders.viewOtcOrder")
@@ -1368,25 +1109,14 @@ export default function OtcOrderModal({
 
         <div className="overflow-y-auto px-6 py-4">
           {shouldShowViewMode && otcOrderDetails?.order ? (
-            otcOrderDetails.order.status === "pending_amend" ? (
-              <OtcOrderComparisonViewWrapper
-                order={otcOrderDetails.order}
-                accounts={accounts}
-                customers={customers}
-                users={users}
-                onClose={onClose}
-                t={t}
-              />
-            ) : (
-              <OtcOrderView
-                accounts={accounts}
-                customers={customers}
-                users={users}
-                otcOrderDetails={otcOrderDetails}
-                onClose={onClose}
-                t={t}
-              />
-            )
+            <OtcOrderView
+              accounts={accounts}
+              customers={customers}
+              users={users}
+              otcOrderDetails={otcOrderDetails}
+              onClose={onClose}
+              t={t}
+            />
           ) : (
             <OtcOrderForm
               accounts={accounts}

@@ -226,13 +226,9 @@ export function validateAndParseOrderRow(
   }
   const status: OrderStatus = "completed";
 
-  // Parse order type
+  // Optional legacy column: default to online when missing or invalid
   const orderTypeStr = String(row["Order Type"] || row["OrderType"] || row["orderType"] || "").trim().toLowerCase();
-  if (orderTypeStr !== "online" && orderTypeStr !== "otc") {
-    errors.push(`Row ${rowNumber}: Order Type must be "online" or "otc"`);
-    return { success: false, errors };
-  }
-  const orderType = orderTypeStr as "online" | "otc";
+  const orderType: "online" | "otc" = orderTypeStr === "otc" ? "otc" : "online";
 
   // Parse tags (optional) and validate existence
   const rawTags = row["Tags"] ?? row["tags"];

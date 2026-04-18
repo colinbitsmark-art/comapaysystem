@@ -47,6 +47,10 @@ interface OnlineOrderUploadsSectionProps {
   confirmPayment: (paymentId: number) => { unwrap: () => Promise<any> };
   deletePayment: (paymentId: number) => { unwrap: () => Promise<any> };
   
+  /** Replace file on an existing draft receipt/payment (server PUT). */
+  onReplaceDraftReceiptFile?: (receiptId: number, file: File) => Promise<void>;
+  onReplaceDraftPaymentFile?: (paymentId: number, file: File) => Promise<void>;
+
   // File upload handlers
   handleImageUpload: (file: File, index: number, type: "receipt" | "payment") => void;
   handleDrop: (e: React.DragEvent, index: number, type: "receipt" | "payment") => void;
@@ -62,7 +66,6 @@ interface OnlineOrderUploadsSectionProps {
   openPdfInNewTab: (dataUri: string) => void;
   
   // Configuration props
-  isFlexOrder?: boolean;
   showCancelButtons?: boolean;
   layout?: "grid" | "vertical";
   
@@ -104,6 +107,8 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
   handleAddPayment,
   confirmPayment,
   deletePayment,
+  onReplaceDraftReceiptFile,
+  onReplaceDraftPaymentFile,
   handleImageUpload,
   handleDrop,
   handleDragOver,
@@ -114,7 +119,6 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
   getFileType,
   setViewerModal,
   openPdfInNewTab,
-  isFlexOrder = false,
   showCancelButtons = false,
   layout = "vertical",
   t,
@@ -123,14 +127,6 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
   const canPerformActions = canPerformOrderActions(orderDetails.order, authUser);
   
   const containerClassName = layout === "grid" ? "lg:col-span-2 space-y-4" : "space-y-4";
-  const receiptTitleSuffix = isFlexOrder ? ` (${t("orders.flexOrder")})` : "";
-  const paymentTitleSuffix = isFlexOrder ? ` (${t("orders.flexOrder")})` : "";
-  const receiptAmountBuy = isFlexOrder 
-    ? (orderDetails.order.actualAmountBuy || orderDetails.order.amountBuy)
-    : orderDetails.order.amountBuy;
-  const paymentAmountSell = isFlexOrder
-    ? (orderDetails.order.actualAmountSell || orderDetails.order.amountSell)
-    : orderDetails.order.amountSell;
 
   const handleCancelReceipt = () => {
     setReceiptUploads([{ image: "", amount: "", accountId: "" }]);
@@ -147,15 +143,10 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
       {/* Receipt Upload Section */}
       <div className="border-b pb-4">
         <h3 className="font-semibold text-slate-900 mb-2">
-          {t("orders.receiptUploads")}{receiptTitleSuffix}
+          {t("orders.receiptUploads")}
         </h3>
         <div className="text-sm text-slate-600 mb-2">
           {t("orders.amountBuy")}: {orderDetails.order.amountBuy} {orderDetails.order.fromCurrency}
-          {isFlexOrder && orderDetails.order.actualAmountBuy && (
-            <span className="ml-2 text-purple-600">
-              (Actual: {orderDetails.order.actualAmountBuy} {orderDetails.order.fromCurrency})
-            </span>
-          )}
         </div>
         <div className="text-sm text-slate-600 mb-2">
           {t("orders.amountReceived")}: {totalReceiptAmount.toFixed(2)} {orderDetails.order.fromCurrency}
@@ -164,7 +155,7 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
           {t("orders.balance")}: {receiptBalance.toFixed(2)} {orderDetails.order.fromCurrency}
         </div>
 
-        <div className={`grid ${isFlexOrder ? "grid-cols-3" : "grid-cols-4"} gap-4`}>
+        <div className="grid grid-cols-4 gap-4">
           {receipts.map((receipt) => (
             <ReceiptDisplay
               key={receipt.id}
@@ -178,6 +169,12 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
               getFileType={getFileType}
               onViewImage={(src, type, title) => setViewerModal({ isOpen: true, src, type, title })}
               onViewPdf={openPdfInNewTab}
+              canReplaceDraftUpload={!isDisabled && canPerformActions}
+              onReplaceUploadedFile={
+                onReplaceDraftReceiptFile
+                  ? (file) => onReplaceDraftReceiptFile(receipt.id, file)
+                  : undefined
+              }
               t={t}
             />
           ))}
@@ -207,7 +204,6 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
               }}
               onCancel={handleCancelReceipt}
               showCancelButtons={showCancelButtons}
-              isFlexOrder={isFlexOrder}
               t={t}
             />
           )}
@@ -232,9 +228,9 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
       {/* Payment Upload Section */}
       <div className="border-b pb-4">
         <h3 className="font-semibold text-slate-900 mb-2">
-          {t("orders.paymentUploads")}{paymentTitleSuffix}
+          {t("orders.paymentUploads")}
         </h3>
-        {isFlexOrder && excessPaymentWarning && (
+        {excessPaymentWarning && (
           <div className="mb-4 p-4 bg-amber-50 border border-amber-300 rounded-lg">
             <p className="text-sm font-semibold text-amber-900 mb-2">
               ⚠️ Payment Exceeds Expected Amount
@@ -255,7 +251,7 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
           </div>
         )}
         <div className="text-sm text-slate-600 mb-2">
-          {t("orders.amountSell")}: -{paymentAmountSell} {orderDetails.order.toCurrency}
+          {t("orders.amountSell")}: -{orderDetails.order.amountSell} {orderDetails.order.toCurrency}
         </div>
         <div className="text-sm text-slate-600 mb-2">
           {t("orders.amountPaid")}: {totalPaymentAmount.toFixed(2)} {orderDetails.order.toCurrency}
@@ -264,7 +260,7 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
           {t("orders.balance")}: {paymentBalance.toFixed(2)} {orderDetails.order.toCurrency}
         </div>
 
-        <div className={`grid ${isFlexOrder ? "grid-cols-3" : "grid-cols-4"} gap-4`}>
+        <div className="grid grid-cols-4 gap-4">
           {payments.map((payment) => (
             <PaymentDisplay
               key={payment.id}
@@ -278,6 +274,12 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
               getFileType={getFileType}
               onViewImage={(src, type, title) => setViewerModal({ isOpen: true, src, type, title })}
               onViewPdf={openPdfInNewTab}
+              canReplaceDraftUpload={!isDisabled && canPerformActions}
+              onReplaceUploadedFile={
+                onReplaceDraftPaymentFile
+                  ? (file) => onReplaceDraftPaymentFile(payment.id, file)
+                  : undefined
+              }
               t={t}
             />
           ))}
@@ -307,7 +309,6 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
               }}
               onCancel={handleCancelPayment}
               showCancelButtons={showCancelButtons}
-              isFlexOrder={isFlexOrder}
               t={t}
             />
           )}
@@ -322,11 +323,7 @@ const OnlineOrderUploadsSectionComponent: React.FC<OnlineOrderUploadsSectionProp
                 setPaymentUploads([{ image: "", amount: "", accountId: "" }]);
               }
             }}
-            className={`mt-4 px-4 py-2 text-sm font-medium border rounded-lg transition-colors ${
-              isFlexOrder
-                ? "text-green-700 bg-green-50 border-green-200 hover:bg-green-100"
-                : "text-blue-700 bg-blue-50 border-blue-200 hover:bg-blue-100"
-            }`}
+            className="mt-4 px-4 py-2 text-sm font-medium border rounded-lg transition-colors text-blue-700 bg-blue-50 border-blue-200 hover:bg-blue-100"
           >
             {t("orders.addPayment")}
           </button>

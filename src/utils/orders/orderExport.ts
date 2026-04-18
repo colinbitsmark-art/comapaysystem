@@ -19,7 +19,6 @@ export async function exportOrdersToExcel(
   if (queryParams.buyAccountId !== undefined) queryString.append("buyAccountId", queryParams.buyAccountId.toString());
   if (queryParams.sellAccountId !== undefined) queryString.append("sellAccountId", queryParams.sellAccountId.toString());
   if (queryParams.status) queryString.append("status", queryParams.status);
-  if (queryParams.orderType) queryString.append("orderType", queryParams.orderType);
   if (queryParams.tagIds) queryString.append("tagIds", queryParams.tagIds);
 
   // Fetch orders
@@ -48,7 +47,6 @@ export async function exportOrdersToExcel(
     "To Currency": order.toCurrency,
     "Sell Account": order.sellAccountName || "-",
     "Status": order.status,
-    "Order Type": order.orderType || "-",
     "Profit Amount": order.profitAmount || 0,
     "Profit Currency": order.profitCurrency || "-",
     "Service Charge Amount": order.serviceChargeAmount || 0,

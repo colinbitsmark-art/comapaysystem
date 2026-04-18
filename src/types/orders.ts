@@ -1,7 +1,6 @@
-import type { OrderStatus } from "./index";
+import type { OrderStatus } from "../types";
 
 export type DatePreset = 'all' | 'currentWeek' | 'lastWeek' | 'currentMonth' | 'lastMonth' | 'custom';
-export type OrderType = "online" | "otc" | null;
 
 export interface OrderFilters {
   datePreset: DatePreset;
@@ -13,7 +12,6 @@ export interface OrderFilters {
   buyAccountId: number | null;
   sellAccountId: number | null;
   status: OrderStatus | null;
-  orderType: OrderType;
   tagIds: number[];
 }
 
@@ -27,7 +25,6 @@ export interface OrderQueryParams {
   buyAccountId?: number;
   sellAccountId?: number;
   status?: OrderStatus;
-  orderType?: "online" | "otc";
   tagIds?: string;
   page?: number;
   limit?: number;

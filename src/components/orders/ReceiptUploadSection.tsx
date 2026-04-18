@@ -23,7 +23,6 @@ interface ReceiptUploadSectionProps {
   onFormSubmit?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onCancel?: () => void;
   showCancelButtons?: boolean;
-  isFlexOrder?: boolean;
   t: (key: string) => string | undefined;
 }
 
@@ -48,7 +47,6 @@ export const ReceiptUploadSection: React.FC<ReceiptUploadSectionProps> = ({
   onFormSubmit,
   onCancel,
   showCancelButtons = false,
-  isFlexOrder = false,
   t,
 }) => {
   const currentOrder = orders.find((o) => o.id === viewModalOrderId);
@@ -168,7 +166,6 @@ export const ReceiptUploadSection: React.FC<ReceiptUploadSectionProps> = ({
               setUploads(newUploads);
             }}
             className="mt-2 w-full rounded-lg border border-slate-200 px-2 py-1 text-xs"
-            required={!!upload.image}
             onWheel={handleNumberInputWheel}
           />
           {(() => {
@@ -184,7 +181,6 @@ export const ReceiptUploadSection: React.FC<ReceiptUploadSectionProps> = ({
                   };
                   setUploads(newUploads);
                 }}
-                required={!!upload.image}
               >
             <option value="">
               {t("orders.selectReceiptAccount")} ({currentOrder?.fromCurrency || ""}) *

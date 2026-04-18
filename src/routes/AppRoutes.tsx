@@ -14,7 +14,6 @@ import OrdersPage from "../pages/OrdersPage";
 import LoginPage from "../pages/LoginPage";
 import ProfitCalculationPage from "../pages/ProfitCalculationPage";
 import SettingsPage from "../pages/SettingsPage";
-import ApprovalRequestsPage from "../pages/ApprovalRequestsPage";
 import NotificationsPage from "../pages/NotificationsPage";
 import NotificationPreferencesPage from "../pages/NotificationPreferencesPage";
 import WalletTrackerPage from "../pages/WalletTrackerPage";
@@ -58,7 +57,6 @@ export default function AppRoutes() {
           <Route path="roles" element={<RequireAuth section="roles"><RolesPage /></RequireAuth>} />
           <Route path="tags" element={<RequireAuth section="tags"><TagsPage /></RequireAuth>} />
           <Route path="orders" element={<RequireAuth section="orders"><OrdersPage /></RequireAuth>} />
-          <Route path="approval-requests" element={<RequireAuth section="approval_requests"><ApprovalRequestsPage /></RequireAuth>} />
           <Route path="wallets" element={<RequireAuth section="wallets"><WalletTrackerPage /></RequireAuth>} />
           <Route path="notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
           <Route path="notification-preferences" element={<RequireAuth><NotificationPreferencesPage /></RequireAuth>} />

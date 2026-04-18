@@ -39,12 +39,11 @@ import {
   updateOrderStatus,
   deleteOrder,
   getOrderDetails,
+  getOrderChanges,
   processOrder,
   addReceipt,
   addBeneficiary,
   addPayment,
-  proceedWithPartialReceipts,
-  adjustFlexOrderRate,
   updateReceipt,
   deleteReceipt,
   confirmReceipt,
@@ -124,13 +123,6 @@ import {
   batchUnassignTags,
 } from "../controllers/tagsController.js";
 import {
-  createApprovalRequest,
-  listApprovalRequests,
-  getApprovalRequest,
-  approveRequest,
-  rejectRequest,
-} from "../controllers/approvalsController.js";
-import {
   getNotifications,
   getUnreadCount,
   markAsRead,
@@ -192,6 +184,7 @@ router.get("/orders", listOrders);
 router.get("/orders/export", exportOrders);
 router.post("/orders", createOrder);
 // More specific routes must come before less specific ones
+router.get("/orders/:id/changes", getOrderChanges);
 router.get("/orders/:id/details", getOrderDetails);
 router.post("/orders/:id/process", processOrder);
 router.post("/orders/:id/receipts", upload.single("file"), addReceipt);
@@ -209,8 +202,6 @@ router.post("/orders/profits/:profitId/confirm", confirmProfit);
 router.put("/orders/service-charges/:serviceChargeId", updateServiceCharge);
 router.delete("/orders/service-charges/:serviceChargeId", deleteServiceCharge);
 router.post("/orders/service-charges/:serviceChargeId/confirm", confirmServiceCharge);
-router.post("/orders/:id/proceed-partial-receipts", proceedWithPartialReceipts);
-router.post("/orders/:id/adjust-rate", adjustFlexOrderRate);
 router.patch("/orders/:id/status", updateOrderStatus);
 router.put("/orders/:id", updateOrder);
 // DELETE must come last as it matches /orders/:id
@@ -273,15 +264,6 @@ router.put("/tags/:id", updateTag);
 router.delete("/tags/:id", deleteTag);
 router.post("/tags/batch-assign", batchAssignTags);
 router.post("/tags/batch-unassign", batchUnassignTags);
-
-router.post("/approval-requests", upload.fields([
-  { name: 'receiptFiles', maxCount: 10 },
-  { name: 'paymentFiles', maxCount: 10 }
-]), createApprovalRequest);
-router.get("/approval-requests", listApprovalRequests);
-router.get("/approval-requests/:id", getApprovalRequest);
-router.post("/approval-requests/:id/approve", approveRequest);
-router.post("/approval-requests/:id/reject", rejectRequest);
 
 // Notification routes
 router.get("/notifications/subscribe", subscribeToNotifications);

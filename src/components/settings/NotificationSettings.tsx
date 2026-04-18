@@ -5,7 +5,6 @@ import {
   useUpdateNotificationPreferencesMutation,
 } from "../../services/api";
 import { useAppSelector } from "../../app/hooks";
-import { canApproveDelete, canApproveEdit } from "../../utils/orderPermissions";
 
 export function NotificationSettings() {
   const { t } = useTranslation();
@@ -14,9 +13,6 @@ export function NotificationSettings() {
   const [updatePreferences, { isLoading: isSaving }] =
     useUpdateNotificationPreferencesMutation();
 
-  // Check if user has approval permissions
-  const hasApprovalPermissions = user && (canApproveDelete(user) || canApproveEdit(user));
-  
   // Check if user is admin (only admins can control Telegram notifications)
   const isAdmin = user?.role === "admin";
 
@@ -100,42 +96,6 @@ export function NotificationSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Approval Notifications */}
-      <div className="bg-white rounded-lg border border-slate-200 p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">
-          {t("notifications.approvalNotifications") || "Approval Notifications"}
-        </h3>
-        <PreferenceToggle
-          label={t("notifications.notifyApprovalApproved") || "Request Approved"}
-          description={
-            t("notifications.notifyApprovalApprovedDesc") ||
-            "Get notified when your approval requests are approved"
-          }
-          checked={prefs.notifyApprovalApproved}
-          onChange={() => handleToggle("notifyApprovalApproved")}
-        />
-        <PreferenceToggle
-          label={t("notifications.notifyApprovalRejected") || "Request Rejected"}
-          description={
-            t("notifications.notifyApprovalRejectedDesc") ||
-            "Get notified when your approval requests are rejected"
-          }
-          checked={prefs.notifyApprovalRejected}
-          onChange={() => handleToggle("notifyApprovalRejected")}
-        />
-        {hasApprovalPermissions && (
-          <PreferenceToggle
-            label={t("notifications.notifyApprovalPending") || "New Approval Requests"}
-            description={
-              t("notifications.notifyApprovalPendingDesc") ||
-              "Get notified when someone requests your approval"
-            }
-            checked={prefs.notifyApprovalPending}
-            onChange={() => handleToggle("notifyApprovalPending")}
-          />
-        )}
-      </div>
-
       {/* Order Notifications */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-4">

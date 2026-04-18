@@ -27,8 +27,6 @@ interface OrdersTableRowProps {
   onView: (orderId: number) => void;
   onCancel: (orderId: number) => void;
   onDelete: (orderId: number) => void;
-  onRequestDelete?: (orderId: number) => void;
-  onRequestEdit?: (orderId: number) => void;
   canCancelOrder: boolean;
   canDeleteOrder: boolean;
   isDeleting: boolean;
@@ -58,8 +56,6 @@ export function OrdersTableRow({
   onView,
   onCancel,
   onDelete,
-  onRequestDelete,
-  onRequestEdit,
   canCancelOrder,
   canDeleteOrder,
   isDeleting,
@@ -121,8 +117,6 @@ export function OrdersTableRow({
                 onView={onView}
                 onCancel={onCancel}
                 onDelete={onDelete}
-                onRequestDelete={onRequestDelete}
-                onRequestEdit={onRequestEdit}
                 canCancelOrder={canCancelOrder}
                 canDeleteOrder={canDeleteOrder}
                 isDeleting={isDeleting}

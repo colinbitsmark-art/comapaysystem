@@ -17,6 +17,12 @@ export interface UseTableColumnsOptions {
   defaultVisibleColumns?: string[];
 }
 
+/** Rename legacy table column keys (e.g. orders table: handler → createdBy). */
+function migrateStoredColumnKey(key: string): string {
+  if (key === "handler") return "createdBy";
+  return key;
+}
+
 export function useTableColumns({
   columnKeys,
   getColumnDefinitions,
@@ -42,11 +48,12 @@ export function useTableColumns({
         const parsed = JSON.parse(saved);
         // Validate that it's an array of strings
         if (Array.isArray(parsed) && parsed.every((item): item is string => typeof item === "string")) {
+          const migrated = [...new Set(parsed.map(migrateStoredColumnKey))];
           // Validate that all columns are present
-          const savedSet = new Set(parsed);
+          const savedSet = new Set(migrated);
           const defaultSet = new Set(columnKeys);
-          if (savedSet.size === defaultSet.size && [...savedSet].every(key => defaultSet.has(key))) {
-            return parsed;
+          if (savedSet.size === defaultSet.size && [...savedSet].every((key) => defaultSet.has(key))) {
+            return migrated;
           }
         }
       } catch {
@@ -74,13 +81,17 @@ export function useTableColumns({
         if (!Array.isArray(parsed)) {
           return new Set<string>(defaultVisibleColumns || columnKeys);
         }
-        const savedSet = new Set<string>(parsed.filter((item): item is string => typeof item === "string"));
-        // Merge with current columnKeys to ensure new columns are included
-        // Start with saved columns, then add any new columns that aren't in saved
-        const merged = new Set<string>(savedSet);
-        columnKeys.forEach(key => {
-          if (!savedSet.has(key)) {
-            merged.add(key); // Add new columns to visible columns
+        const migratedList = parsed
+          .filter((item): item is string => typeof item === "string")
+          .map(migrateStoredColumnKey);
+        const migratedSet = new Set<string>(migratedList);
+        const merged = new Set<string>();
+        migratedSet.forEach((k) => {
+          if (columnKeys.includes(k)) merged.add(k);
+        });
+        columnKeys.forEach((key) => {
+          if (!migratedSet.has(key)) {
+            merged.add(key);
           }
         });
         return merged;
