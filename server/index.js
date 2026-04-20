@@ -10,7 +10,7 @@ const server = app.listen(PORT, () => {
 
 // Wallet Auto-Refresh Configuration
 const WALLET_REFRESH_INTERVAL = parseInt(process.env.WALLET_REFRESH_INTERVAL_SECONDS || '5') * 1000; // Default: 5 seconds
-const WALLET_AUTO_REFRESH_ENABLED = process.env.WALLET_AUTO_REFRESH_ENABLED !== 'false'; // Default: enabled
+const WALLET_AUTO_REFRESH_ENABLED = process.env.WALLET_AUTO_REFRESH_ENABLED === 'true'; // Default: disabled
 let walletRefreshTimer = null;
 let isPollingActive = WALLET_AUTO_REFRESH_ENABLED;
 
