@@ -14,17 +14,11 @@ import { OrdersTable } from "../components/orders/OrdersTable";
 import { OrdersColumnDropdown } from "../components/orders/OrdersColumnDropdown";
 import { CreateCustomerModal } from "../components/orders/CreateCustomerModal";
 import { ImportOrdersModal } from "../components/orders/ImportOrdersModal";
-import { OrderWarningModals } from "../components/orders/OrderWarningModals";
-import { ReceiptUploadSection } from "../components/orders/ReceiptUploadSection";
-import { PaymentUploadSection } from "../components/orders/PaymentUploadSection";
 import { ProfitServiceChargeSection } from "../components/orders/ProfitServiceChargeSection";
 import { ViewOrderModal } from "../components/orders/ViewOrderModal";
-import { OnlineOrderUploadsSection } from "../components/orders/OnlineOrderUploadsSection";
-import { CompleteOrderButton } from "../components/orders/CompleteOrderButton";
 import { OnlineOrderSummary } from "../components/orders/OnlineOrderSummary";
 import { TagSelectionModal } from "../components/common/TagSelectionModal";
 import { RemarksSection } from "../components/orders/RemarksSection";
-import { calculateAmountSell as calculateAmountSellUtil } from "../utils/orders/orderCalculations";
 import { useOrdersFilters } from "../hooks/orders/useOrdersFilters";
 import { useOrdersTable } from "../hooks/orders/useOrdersTable";
 import { useUnifiedOrderModal } from "../hooks/orders/useUnifiedOrderModal";
@@ -34,7 +28,6 @@ import { useOrdersModals } from "../hooks/orders/useOrdersModals";
 import { useOrdersImportExport } from "../hooks/orders/useOrdersImportExport";
 import { useOrdersCustomer } from "../hooks/orders/useOrdersCustomer";
 import { useOrdersActions } from "../hooks/orders/useOrdersActions";
-import { useOrdersFileUpload } from "../hooks/orders/useOrdersFileUpload";
 import { useBatchDelete } from "../hooks/useBatchDelete";
 
 import {
@@ -47,8 +40,6 @@ import {
   useUpdateOrderStatusMutation,
   useDeleteOrderMutation,
   useGetOrderDetailsQuery,
-  useAddReceiptMutation,
-  useUpdateReceiptMutation,
   useDeleteReceiptMutation,
   useConfirmReceiptMutation,
   useDeleteProfitMutation,
@@ -56,8 +47,6 @@ import {
   useDeleteServiceChargeMutation,
   useConfirmServiceChargeMutation,
   useAddBeneficiaryMutation,
-  useAddPaymentMutation,
-  useUpdatePaymentMutation,
   useDeletePaymentMutation,
   useConfirmPaymentMutation,
   useGetCustomerBeneficiariesQuery,
@@ -192,11 +181,6 @@ export default function OrdersPage() {
     }
   }, []);
 
-  // Helper function to calculate amountSell from amountBuy using the same logic as order creation
-  const calculateAmountSell = useCallback((amountBuy: number, rate: number, fromCurrency: string, toCurrency: string): number => {
-    return calculateAmountSellUtil(amountBuy, rate, fromCurrency, toCurrency, currencies);
-  }, [currencies]);
-
   const [updateOrder] = useUpdateOrderMutation();
   const [updateOrderStatus] = useUpdateOrderStatusMutation();
   const [deleteOrder, { isLoading: isDeleting }] = useDeleteOrderMutation();
@@ -256,8 +240,6 @@ export default function OrdersPage() {
     setAlertModal,
     t,
   });
-  const [addReceipt] = useAddReceiptMutation();
-  const [updateReceipt] = useUpdateReceiptMutation();
   const [deleteReceipt] = useDeleteReceiptMutation();
   const [confirmReceipt] = useConfirmReceiptMutation();
   const [deleteProfit] = useDeleteProfitMutation();
@@ -265,8 +247,6 @@ export default function OrdersPage() {
   const [deleteServiceCharge] = useDeleteServiceChargeMutation();
   const [confirmServiceCharge] = useConfirmServiceChargeMutation();
   const [addBeneficiary] = useAddBeneficiaryMutation();
-  const [addPayment] = useAddPaymentMutation();
-  const [updatePayment] = useUpdatePaymentMutation();
   const [deletePayment] = useDeletePaymentMutation();
   const [confirmPayment] = useConfirmPaymentMutation();
   const [addCustomerBeneficiary] = useAddCustomerBeneficiaryMutation();
@@ -357,35 +337,13 @@ export default function OrdersPage() {
   } = useOrdersTable();
 
   
-  // View order modal state and handlers
+  // View order modal state and handlers (read-only summary for completed/cancelled)
   const {
     viewModalOrderId,
     setViewModalOrderId,
     makePaymentModalOrderId,
     setMakePaymentModalOrderId,
     closeViewModal,
-    receiptUploads,
-    setReceiptUploads,
-    paymentUploads,
-    setPaymentUploads,
-    receiptUploadKey,
-    setReceiptUploadKey,
-    paymentUploadKey,
-    setPaymentUploadKey,
-    showReceiptUpload,
-    setShowReceiptUpload,
-    showPaymentUpload,
-    setShowPaymentUpload,
-    receiptDragOver,
-    setReceiptDragOver,
-    paymentDragOver,
-    setPaymentDragOver,
-    activeUploadType,
-    setActiveUploadType,
-    receiptFileInputRefs,
-    paymentFileInputRefs,
-    excessPaymentWarning,
-    setExcessPaymentWarning,
     profitAmount,
     setProfitAmount,
     profitCurrency,
@@ -406,22 +364,6 @@ export default function OrdersPage() {
     setRemarks,
     showRemarks,
     setShowRemarks,
-    showExcessPaymentModal,
-    setShowExcessPaymentModal,
-    excessPaymentModalData,
-    setExcessPaymentModalData,
-    showMissingPaymentModal,
-    setShowMissingPaymentModal,
-    missingPaymentModalData,
-    setMissingPaymentModalData,
-    showExcessReceiptModal,
-    setShowExcessReceiptModal,
-    excessReceiptModalData,
-    setExcessReceiptModalData,
-    showExcessPaymentModalNormal,
-    setShowExcessPaymentModalNormal,
-    excessPaymentModalNormalData,
-    setExcessPaymentModalNormalData,
   } = useViewOrderModal();
   
   const renderProfitServiceCharges = () => {
@@ -747,18 +689,8 @@ export default function OrdersPage() {
     resetBeneficiaryForm,
     closeMakePaymentModal,
     handleAddBeneficiary,
-  } = useBeneficiaryForm(
-    orders,
-    accounts,
-    makePaymentModalOrderId,
-    setOpenMenuId,
-    setViewModalOrderId,
-    setMakePaymentModalOrderId,
-    t
-  );
+  } = useBeneficiaryForm(orders, accounts, makePaymentModalOrderId, setOpenMenuId, setMakePaymentModalOrderId, t);
 
-  // receiptUploads and paymentUploads are now provided by useViewOrderModal hook
-  
   // Order actions (edit, delete, status updates)
   const {
     setStatus,
@@ -786,50 +718,6 @@ export default function OrdersPage() {
 
   const { data: orderDetails } = useGetOrderDetailsQuery(viewModalOrderId || 0, {
     skip: !viewModalOrderId,
-  });
-
-  // File upload handling
-  const {
-    handleAddReceipt,
-    handleAddPayment,
-    handleImageUpload,
-    handleDrop,
-    handleDragOver,
-    handleDragLeave,
-    handleFileChange,
-    getFileType,
-  } = useOrdersFileUpload({
-    viewModalOrderId,
-    makePaymentModalOrderId,
-    receiptUploads,
-    setReceiptUploads,
-    paymentUploads,
-    setPaymentUploads,
-    receiptUploadKey,
-    setReceiptUploadKey,
-    paymentUploadKey,
-    setPaymentUploadKey,
-    showReceiptUpload,
-    setShowReceiptUpload,
-    showPaymentUpload,
-    setShowPaymentUpload,
-    receiptDragOver,
-    setReceiptDragOver,
-    paymentDragOver,
-    setPaymentDragOver,
-    activeUploadType,
-    setActiveUploadType,
-    receiptFileInputRefs,
-    paymentFileInputRefs,
-    orderDetails,
-    addReceipt,
-    addPayment,
-    setExcessReceiptModalData,
-    setShowExcessReceiptModal,
-    setExcessPaymentModalNormalData,
-    setShowExcessPaymentModalNormal,
-    setExcessPaymentWarning,
-    t,
   });
 
   // Helper function to determine which currency is the base (stronger) currency
@@ -933,14 +821,12 @@ export default function OrdersPage() {
       viewModalOrderId &&
       orderDetails?.order?.status === "completed" &&
       previousOrderStatusRef.current !== "completed" &&
-      previousOrderStatusRef.current !== null &&
-      !excessPaymentWarning
+      previousOrderStatusRef.current !== null
     ) {
-      // Order just transitioned to completed, auto-close
       setViewModalOrderId(null);
       previousOrderStatusRef.current = null;
     }
-  }, [orderDetails?.order?.status, excessPaymentWarning, viewModalOrderId]);
+  }, [orderDetails?.order?.status, viewModalOrderId, setViewModalOrderId]);
 
   // OTC order state and handlers are now provided by useOtcOrder hook
 
@@ -1125,12 +1011,60 @@ export default function OrdersPage() {
 
   // Action buttons and status tone are now handled by OrderActionsMenu component
 
+  const getFileType = useCallback((imagePath: string): "image" | "pdf" | null => {
+    if (!imagePath) return null;
+    if (imagePath.startsWith("data:image/")) return "image";
+    if (imagePath.startsWith("data:application/pdf")) return "pdf";
+
+    let pathForExt = imagePath;
+    if (imagePath.startsWith("/api/uploads/")) {
+      pathForExt = imagePath;
+    } else if (/^https?:\/\//i.test(imagePath)) {
+      try {
+        const u = new URL(imagePath);
+        if (u.pathname.startsWith("/api/uploads/")) {
+          pathForExt = u.pathname;
+        } else {
+          return null;
+        }
+      } catch {
+        return null;
+      }
+    } else {
+      return null;
+    }
+
+    const lowerPath = pathForExt.toLowerCase();
+    if (lowerPath.endsWith(".pdf")) return "pdf";
+    if (
+      lowerPath.endsWith(".jpg") ||
+      lowerPath.endsWith(".jpeg") ||
+      lowerPath.endsWith(".png") ||
+      lowerPath.endsWith(".gif") ||
+      lowerPath.endsWith(".webp")
+    ) {
+      return "image";
+    }
+    return null;
+  }, []);
+
   // Helper function to open PDF data URI in a new tab
   const openPdfInNewTab = useCallback((dataUri: string) => {
     // If it's a server URL, open it directly
     if (dataUri.startsWith('/api/uploads/')) {
       window.open(dataUri, '_blank');
       return;
+    }
+    if (/^https?:\/\//i.test(dataUri)) {
+      try {
+        const u = new URL(dataUri);
+        if (u.pathname.startsWith('/api/uploads/')) {
+          window.open(dataUri, '_blank');
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
     }
     
     try {
@@ -1217,7 +1151,7 @@ export default function OrdersPage() {
         document.removeEventListener("keydown", handleEscKey);
       };
     }
-  }, [viewModalOrderId]);
+  }, [viewModalOrderId, closeViewModal]);
 
   // Handle Esc key to close unified new order modal
   useEffect(() => {
@@ -1253,11 +1187,7 @@ export default function OrdersPage() {
 
   // Column management and rendering is now handled by OrdersTable component
 
-  const currentOrder = orders.find((o) => o.id === viewModalOrderId);
   const makePaymentOrder = orders.find((o) => o.id === makePaymentModalOrderId);
-  // Use orderDetails.order.status if available (more up-to-date), otherwise fall back to currentOrder
-  const orderStatusForView = orderDetails?.order?.status || currentOrder?.status;
-  const isSavedOrder = orderStatusForView === "saved";
 
   const { data: customerBeneficiaries = [] } = useGetCustomerBeneficiariesQuery(
     makePaymentOrder?.customerId ?? 0,
@@ -1526,134 +1456,25 @@ export default function OrdersPage() {
           title={t("orders.orderDetails")}
         >
           <div className="space-y-4">
-            {isSavedOrder ? (
-              <OnlineOrderUploadsSection
-                orderDetails={orderDetails}
-                accounts={accounts}
-                orders={orders}
-                viewModalOrderId={viewModalOrderId}
-                authUser={authUser}
-                receipts={orderDetails.receipts}
-                totalReceiptAmount={orderDetails.totalReceiptAmount}
-                receiptBalance={orderDetails.receiptBalance}
-                showReceiptUpload={showReceiptUpload}
-                setShowReceiptUpload={setShowReceiptUpload}
-                receiptUploads={receiptUploads}
-                setReceiptUploads={setReceiptUploads}
-                receiptUploadKey={receiptUploadKey}
-                receiptDragOver={receiptDragOver}
-                setReceiptDragOver={setReceiptDragOver}
-                receiptFileInputRefs={receiptFileInputRefs}
-                handleAddReceipt={handleAddReceipt}
-                confirmReceipt={confirmReceipt}
-                deleteReceipt={deleteReceipt}
-                payments={orderDetails.payments}
-                totalPaymentAmount={orderDetails.totalPaymentAmount}
-                paymentBalance={orderDetails.paymentBalance}
-                excessPaymentWarning={excessPaymentWarning}
-                showPaymentUpload={showPaymentUpload}
-                setShowPaymentUpload={setShowPaymentUpload}
-                paymentUploads={paymentUploads}
-                setPaymentUploads={setPaymentUploads}
-                paymentUploadKey={paymentUploadKey}
-                paymentDragOver={paymentDragOver}
-                setPaymentDragOver={setPaymentDragOver}
-                paymentFileInputRefs={paymentFileInputRefs}
-                handleAddPayment={handleAddPayment}
-                confirmPayment={confirmPayment}
-                deletePayment={deletePayment}
-                handleImageUpload={handleImageUpload}
-                handleDrop={handleDrop}
-                handleDragOver={handleDragOver}
-                handleDragLeave={handleDragLeave}
-                handleFileChange={handleFileChange}
-                handleNumberInputWheel={handleNumberInputWheel}
-                setActiveUploadType={setActiveUploadType}
-                getFileType={getFileType}
-                setViewerModal={setViewerModal}
-                openPdfInNewTab={openPdfInNewTab}
-                onReplaceDraftReceiptFile={async (receiptId, file) => {
-                  await updateReceipt({ receiptId, file }).unwrap();
-                }}
-                onReplaceDraftPaymentFile={async (paymentId, file) => {
-                  await updatePayment({ paymentId, file }).unwrap();
-                }}
-                showCancelButtons={true}
-                layout="vertical"
-                t={t}
-              />
-            ) : (
-              <OnlineOrderSummary
-                orderDetails={orderDetails}
-                accounts={accounts}
-                viewModalOrderId={viewModalOrderId}
-                confirmReceipt={confirmReceipt}
-                deleteReceipt={deleteReceipt}
-                confirmPayment={confirmPayment}
-                deletePayment={deletePayment}
-                getFileType={getFileType}
-                setViewerModal={setViewerModal}
-                openPdfInNewTab={openPdfInNewTab}
-                t={t}
-              />
-            )}
+            <OnlineOrderSummary
+              orderDetails={orderDetails}
+              accounts={accounts}
+              viewModalOrderId={viewModalOrderId}
+              confirmReceipt={confirmReceipt}
+              deleteReceipt={deleteReceipt}
+              confirmPayment={confirmPayment}
+              deletePayment={deletePayment}
+              getFileType={getFileType}
+              setViewerModal={setViewerModal}
+              openPdfInNewTab={openPdfInNewTab}
+              t={t}
+            />
 
             {renderProfitServiceCharges()}
             {renderRemarks()}
-
-            {isSavedOrder && (
-              <CompleteOrderButton
-                orderId={viewModalOrderId}
-                orderDetails={orderDetails}
-                currencies={currencies}
-                updateOrderStatus={updateOrderStatus}
-                calculateAmountSell={calculateAmountSell}
-                authUser={authUser}
-                layout="vertical"
-                t={t}
-              />
-            )}
           </div>
         </ViewOrderModal>
       )}
-
-
-      {/* Order Warning Modals */}
-      <OrderWarningModals
-        showExcessPaymentModal={showExcessPaymentModal}
-        excessPaymentModalData={excessPaymentModalData}
-        onCloseExcessPayment={() => {
-          setShowExcessPaymentModal(false);
-          setExcessPaymentModalData(null);
-        }}
-        showMissingPaymentModal={showMissingPaymentModal}
-        missingPaymentModalData={missingPaymentModalData}
-        onCloseMissingPayment={() => {
-          setShowMissingPaymentModal(false);
-          setMissingPaymentModalData(null);
-        }}
-        showExcessReceiptModal={showExcessReceiptModal}
-        excessReceiptModalData={excessReceiptModalData}
-        onCloseExcessReceipt={() => {
-          setShowExcessReceiptModal(false);
-          setExcessReceiptModalData(null);
-        }}
-        showExcessPaymentModalNormal={showExcessPaymentModalNormal}
-        excessPaymentModalNormalData={excessPaymentModalNormalData}
-        onCloseExcessPaymentNormal={() => {
-          setShowExcessPaymentModalNormal(false);
-          setExcessPaymentModalNormalData(null);
-        }}
-      />
-
-      {/* Excess Payment Warning Modal - Replaced by OrderWarningModals */}
-      {/* Removed old modal code - now using OrderWarningModals component */}
-
-      {/* Excess Receipt Warning Modal - Replaced by OrderWarningModals */}
-      {/* Removed old modal code - now using OrderWarningModals component */}
-
-      {/* Excess Payment Warning Modal for Normal Orders - Replaced by OrderWarningModals */}
-      {/* Removed old modal code - now using OrderWarningModals component */}
 
       {/* Image/PDF Viewer Modal */}
       {viewerModal && (

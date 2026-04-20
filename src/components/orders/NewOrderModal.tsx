@@ -1,4 +1,4 @@
-import React, { useRef, type FormEvent } from "react";
+import React, { useEffect, useRef, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Account, Currency } from "../../types";
 import type { UnifiedLine, UnifiedLineKind } from "../../hooks/orders/useUnifiedOrderModal";
@@ -95,6 +95,13 @@ export default function NewOrderModal({
 }: Props) {
   const { t } = useTranslation();
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const customerNameInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (isOpen && !editingOrderId) {
+      customerNameInputRef.current?.focus();
+    }
+  }, [isOpen, editingOrderId]);
 
   if (!isOpen) return null;
 
@@ -130,14 +137,13 @@ export default function NewOrderModal({
   return (
     <div
       className="fixed inset-0 z-[8000] flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-order-modal-title"
     >
-      <div
-        className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">
+          <h2 id="new-order-modal-title" className="text-lg font-semibold text-slate-900">
             {editingOrderId ? t("orders.editOrderTitle") : t("orders.newOrder")}
           </h2>
           <button
@@ -151,23 +157,23 @@ export default function NewOrderModal({
         </div>
 
         <form className="space-y-5 px-6 py-5" onSubmit={(e) => e.preventDefault()}>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.customerName")}</label>
-            <input
-              type="text"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder={t("orders.customerNamePlaceholder")}
-              disabled={!!editingOrderId}
-            />
-            {editingOrderId ? (
-              <p className="mt-1 text-xs text-slate-500">{t("orders.customerNameLockedWhenEditing")}</p>
-            ) : null}
-          </div>
-
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-            <div className="min-w-0 flex-1">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-end">
+            <div className="min-w-0">
+              <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.customerName")}</label>
+              <input
+                ref={customerNameInputRef}
+                type="text"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder={t("orders.customerNamePlaceholder")}
+                disabled={!!editingOrderId}
+              />
+              {editingOrderId ? (
+                <p className="mt-1 text-xs text-slate-500">{t("orders.customerNameLockedWhenEditing")}</p>
+              ) : null}
+            </div>
+            <div className="min-w-0">
               <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.from")}</label>
               <select
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -184,7 +190,7 @@ export default function NewOrderModal({
                 ))}
               </select>
             </div>
-            <div className="flex justify-center sm:pb-0.5">
+            <div className="flex justify-center xl:pb-0.5">
               <CurrencyPairSwapButton
                 label={t("orders.swapCurrencies")}
                 disabled={!fromCurrency && !toCurrency}
@@ -196,7 +202,7 @@ export default function NewOrderModal({
                 }}
               />
             </div>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0">
               <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.to")}</label>
               <select
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -215,20 +221,19 @@ export default function NewOrderModal({
             </div>
           </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.exchangeRate")}</label>
-            <input
-              type="number"
-              step="0.0001"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              value={rate}
-              onChange={(e) => onRateChange(e.target.value)}
-              onWheel={handleNumberInputWheel}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+            <div className="min-w-0">
+              <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.exchangeRate")}</label>
+              <input
+                type="number"
+                step="0.0001"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={rate}
+                onChange={(e) => onRateChange(e.target.value)}
+                onWheel={handleNumberInputWheel}
+              />
+            </div>
+            <div className="min-w-0">
               <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.amountBuy")}</label>
               <input
                 type="number"
@@ -239,7 +244,7 @@ export default function NewOrderModal({
                 onWheel={handleNumberInputWheel}
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.amountSell")}</label>
               <input
                 type="number"
@@ -250,24 +255,26 @@ export default function NewOrderModal({
                 onWheel={handleNumberInputWheel}
               />
             </div>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={onAutoFill}
+                disabled={
+                  !amountBuy ||
+                  !amountSell ||
+                  Number(amountBuy) <= 0 ||
+                  Number(amountSell) <= 0
+                }
+                title={t("orders.autoFillTooltip")}
+                className="w-full rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t("orders.autoFill")}
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
-            <h3 className="text-sm font-semibold text-slate-800">{t("orders.linesSection")}</h3>
-            <button
-              type="button"
-              onClick={onAutoFill}
-              disabled={
-                !amountBuy ||
-                !amountSell ||
-                Number(amountBuy) <= 0 ||
-                Number(amountSell) <= 0
-              }
-              title={t("orders.autoFillTooltip")}
-              className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-purple-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t("orders.autoFill")}
-            </button>
+            {/* <h3 className="text-sm font-semibold text-slate-800">{t("orders.linesSection")}</h3> */}
           </div>
           <div>
             <div className="space-y-3">

@@ -6,6 +6,7 @@ import {
   generateOrderPaymentFilename,
   base64ToBuffer,
   getFileUrl,
+  normalizeStoredImagePath,
 } from "../utils/fileStorage.js";
 import { getUserIdFromHeader } from "../utils/auth.js";
 import { createNotification } from "../services/notification/notificationService.js";
@@ -1869,12 +1870,12 @@ export const getOrderDetails = (req, res, next) => {
     // Convert file paths to URLs for receipts and payments
     const receiptsWithUrls = receipts.map(r => ({
       ...r,
-      imagePath: r.imagePath.startsWith('data:') ? r.imagePath : getFileUrl(r.imagePath),
+      imagePath: r.imagePath?.startsWith('data:') ? r.imagePath : getFileUrl(r.imagePath),
     }));
     
     const paymentsWithUrls = payments.map(p => ({
       ...p,
-      imagePath: p.imagePath.startsWith('data:') ? p.imagePath : getFileUrl(p.imagePath),
+      imagePath: p.imagePath?.startsWith('data:') ? p.imagePath : getFileUrl(p.imagePath),
     }));
 
     // Get tags for the order
@@ -2049,8 +2050,8 @@ export const addReceipt = (req, res, next) => {
             imagePath = base64Path;
           }
         } else {
-          // Already a file path
-          imagePath = base64Path;
+          // Relative path or "/api/uploads/..." from client — persist relative only
+          imagePath = normalizeStoredImagePath(base64Path);
         }
       }
     }
@@ -2349,8 +2350,7 @@ export const addPayment = (req, res, next) => {
             imagePath = base64Path;
           }
         } else {
-          // Already a file path
-          imagePath = base64Path;
+          imagePath = normalizeStoredImagePath(base64Path);
         }
       }
     }
