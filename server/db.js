@@ -649,7 +649,7 @@ const seedData = () => {
       `INSERT INTO users (name, email, password, role) VALUES (@name, @email, @password, @role);`,
     );
     const seed = [
-      { name: "Admin", email: "admin@test.com", password: "$2a$10$7zYd9Yz0Q7qZfyq/BKUKee9ZCBAWNRwJj4tUNsGrD/qVUKPTySGfa", role: "admin" }, // password: admin123
+      { name: "Admin", email: "admin@test.com", password: "$2a$10$5THacbZ24lgrg1X/yIwNCernzsTWIJQLakSAdhpJ6R8AAWJXq5Ycm", role: "admin" }, // password: admin123
     ];
     const insertMany = db.transaction((rows) => rows.forEach((row) => insert.run(row)));
     insertMany(seed);
