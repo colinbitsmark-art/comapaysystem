@@ -1,4 +1,4 @@
-import { db, resetDbInstance, dbPath } from "../db.js";
+import { db, resetDbInstance, dbPath, initDatabase } from "../db.js";
 import fs from "fs";
 import path from "path";
 import archiver from "archiver";
@@ -399,6 +399,73 @@ export const getDbSchema = (req, res, next) => {
     res.json({ schema });
   } catch (error) {
     console.error("Get schema error:", error);
+    next(error);
+  }
+};
+
+// Clear all data and recreate fresh tables (keeps schema + seed data)
+export const clearDatabase = (req, res, next) => {
+  try {
+    const { confirmPhrase } = req.body;
+
+    if (confirmPhrase !== "CLEAR DATABASE") {
+      return res.status(400).json({ message: "Invalid confirmation phrase" });
+    }
+
+    // Drop all application tables in reverse dependency order
+    const tablesToDrop = [
+      "_schema_migrations",
+      "order_tag_assignments",
+      "transfer_tag_assignments",
+      "expense_tag_assignments",
+      "tags",
+      "approval_requests",
+      "notifications",
+      "user_notification_preferences",
+      "order_changes",
+      "order_receipts",
+      "order_payments",
+      "order_profits",
+      "order_service_charges",
+      "order_beneficiaries",
+      "account_transactions",
+      "profit_account_multipliers",
+      "profit_exchange_rates",
+      "profit_calculations",
+      "expense_changes",
+      "expenses",
+      "transfer_changes",
+      "internal_transfers",
+      "tron_wallet_transactions",
+      "tron_wallets",
+      "orders",
+      "customer_beneficiaries",
+      "customers",
+      "accounts",
+      "roles",
+      "users",
+      "currencies",
+      "settings",
+    ];
+
+    db.exec("PRAGMA foreign_keys = OFF;");
+    try {
+      const dropAll = db.transaction(() => {
+        for (const table of tablesToDrop) {
+          db.prepare(`DROP TABLE IF EXISTS "${table}"`).run();
+        }
+      });
+      dropAll();
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON;");
+    }
+
+    // Recreate all tables and reseed defaults
+    initDatabase();
+
+    res.json({ message: "Database cleared and recreated successfully" });
+  } catch (error) {
+    console.error("Clear database error:", error);
     next(error);
   }
 };

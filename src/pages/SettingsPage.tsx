@@ -12,6 +12,7 @@ import {
   useGetDbSchemaQuery,
   useExecuteQueryMutation,
   useClearAllNotificationsMutation,
+  useClearDatabaseMutation,
 } from "../services/api";
 
 export default function SettingsPage() {
@@ -206,6 +207,27 @@ export default function SettingsPage() {
         success: false,
         message: error.data?.message || error.message || "Query failed",
       });
+    }
+  };
+
+  // Clear database state
+  const [showClearDbConfirm, setShowClearDbConfirm] = useState(false);
+  const [clearDbPhrase, setClearDbPhrase] = useState("");
+  const [clearDatabase, { isLoading: isClearingDb }] = useClearDatabaseMutation();
+
+  const handleClearDatabase = async () => {
+    if (clearDbPhrase !== "CLEAR DATABASE") {
+      alert('Please type "CLEAR DATABASE" exactly to confirm.');
+      return;
+    }
+    try {
+      await clearDatabase({ confirmPhrase: clearDbPhrase }).unwrap();
+      setShowClearDbConfirm(false);
+      setClearDbPhrase("");
+      alert("Database cleared and recreated successfully. Default admin user, currencies, and roles have been restored.");
+    } catch (error: any) {
+      console.error("Clear database error:", error);
+      alert(error?.data?.message || error?.message || "Failed to clear database");
     }
   };
 
@@ -602,6 +624,57 @@ export default function SettingsPage() {
               )}
             </div>
           )}
+        </div>
+      </SectionCard>
+
+      {/* Danger Zone — Clear Database */}
+      <SectionCard
+        title="Danger Zone"
+        description="Irreversible actions that affect all data in the system."
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+            <div className="mb-1 text-sm font-semibold text-red-700">Clear Entire Database</div>
+            <div className="mb-3 text-sm text-red-600">
+              This will permanently delete <strong>all orders, customers, accounts, transfers, expenses, users, currencies, tags, and every other record</strong>. The database will be rebuilt from scratch with only the default admin user, default currencies, and default roles. This action <strong>cannot be undone</strong>.
+            </div>
+            {!showClearDbConfirm ? (
+              <button
+                onClick={() => setShowClearDbConfirm(true)}
+                className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700"
+              >
+                Clear Database
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <div className="text-sm font-medium text-red-700">
+                  Type <span className="font-mono font-bold">CLEAR DATABASE</span> to confirm:
+                </div>
+                <input
+                  type="text"
+                  value={clearDbPhrase}
+                  onChange={(e) => setClearDbPhrase(e.target.value)}
+                  placeholder="CLEAR DATABASE"
+                  className="w-full rounded-lg border border-red-300 px-3 py-2 text-sm font-mono focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleClearDatabase}
+                    disabled={isClearingDb || clearDbPhrase !== "CLEAR DATABASE"}
+                    className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {isClearingDb ? "Clearing..." : "Confirm Clear Database"}
+                  </button>
+                  <button
+                    onClick={() => { setShowClearDbConfirm(false); setClearDbPhrase(""); }}
+                    className="rounded-lg border border-slate-300 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </SectionCard>
 

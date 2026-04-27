@@ -1393,6 +1393,14 @@ export const api = createApi({
         body,
       }),
     }),
+    clearDatabase: builder.mutation<{ message: string }, { confirmPhrase: string }>({
+      query: (body) => ({
+        url: "settings/clear-database",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["Currency", "Customer", "User", "Role", "Order", "Account", "Transfer", "Expense", "ProfitCalculation", "Tag", "Notification"],
+    }),
     getTags: builder.query<Tag[], void>({
       query: () => "tags",
       providesTags: (result) =>
@@ -1724,6 +1732,7 @@ export const {
     useResetTableIdsMutation,
     useGetDbSchemaQuery,
     useExecuteQueryMutation,
+    useClearDatabaseMutation,
     useGetTagsQuery,
     useCreateTagMutation,
     useUpdateTagMutation,

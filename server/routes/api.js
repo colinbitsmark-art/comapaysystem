@@ -112,7 +112,8 @@ import {
   deleteSafetyBackup,
   resetTableIds, 
   getDbSchema, 
-  executeQuery 
+  executeQuery,
+  clearDatabase,
 } from "../controllers/settingsController.js";
 import {
   listTags,
@@ -255,6 +256,7 @@ router.post("/settings/restore/safety", restoreSafetyBackup);
 router.get("/settings/restore/safety/download", downloadSafetyBackup);
 router.post("/settings/restore/safety/delete", deleteSafetyBackup);
 router.post("/settings/reset-ids", resetTableIds);
+router.post("/settings/clear-database", clearDatabase);
 router.get("/settings/debug/schema", getDbSchema);
 router.post("/settings/debug/query", executeQuery);
 

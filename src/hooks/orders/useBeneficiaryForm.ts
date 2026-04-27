@@ -12,7 +12,6 @@ export function useBeneficiaryForm(
   accounts: Account[],
   makePaymentModalOrderId: number | null,
   setOpenMenuId: (id: number | null) => void,
-  setViewModalOrderId: (id: number | null) => void,
   setMakePaymentModalOrderId: (id: number | null) => void,
   t: (key: string) => string
 ) {
@@ -114,11 +113,8 @@ export function useBeneficiaryForm(
     //   await addCustomerBeneficiary(customerPayload);
     // }
     resetBeneficiaryForm();
-    const orderId = makePaymentModalOrderId;
     setMakePaymentModalOrderId(null);
     setOpenMenuId(null);
-    
-    setViewModalOrderId(orderId);
   };
 
   return {

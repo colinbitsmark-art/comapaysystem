@@ -42,6 +42,7 @@ export function OrderActionsMenu({
   const buttons: React.ReactElement[] = [];
   const st = order.status;
   const isCompleted = String(st).toLowerCase() === "completed";
+  const showViewAction = st === "completed" || st === "cancelled";
 
   if (authUser && EDIT_VIEW_STATUSES.includes(st)) {
     if (!isCompleted) {
@@ -55,16 +56,18 @@ export function OrderActionsMenu({
         </button>,
       );
     }
-    buttons.push(
-      <button
-        key="view"
-        className={`w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-slate-50 ${!isCompleted ? "" : "first:rounded-t-lg"}`}
-        onClick={() => onView(order.id)}
-      >
-        {t("orders.view")}
-      </button>,
-    );
-  } else if (EDIT_VIEW_STATUSES.includes(st)) {
+    if (showViewAction) {
+      buttons.push(
+        <button
+          key="view"
+          className={`w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-slate-50 ${!isCompleted ? "" : "first:rounded-t-lg"}`}
+          onClick={() => onView(order.id)}
+        >
+          {t("orders.view")}
+        </button>,
+      );
+    }
+  } else if (EDIT_VIEW_STATUSES.includes(st) && showViewAction) {
     buttons.push(
       <button
         key="view"
