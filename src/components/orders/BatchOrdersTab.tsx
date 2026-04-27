@@ -85,11 +85,51 @@ export function BatchOrdersTab({ currencies, accounts, onDone, setAlertModal }: 
     setRows((prev) => prev.map((r) => (r.id === rowId ? updater(r) : r)));
   };
 
+  /**
+   * Returns true when `from` is the base (stronger) currency, false when `to` is,
+   * null when currencies are unknown. Mirrors useUnifiedOrderModal's getBaseCurrency.
+   */
+  const getBaseCurrency = (from: string, to: string): boolean | null => {
+    const fromC = currencies.find((c) => c.code === from);
+    const toC = currencies.find((c) => c.code === to);
+    if (!fromC || !toC) return null;
+    const fromRate =
+      fromC.conversionRateBuy ?? fromC.baseRateBuy ?? fromC.baseRateSell ?? fromC.conversionRateSell;
+    const toRate =
+      toC.conversionRateBuy ?? toC.baseRateBuy ?? toC.baseRateSell ?? toC.conversionRateSell;
+    const fromIsBase = typeof fromRate === "number" ? fromRate <= 1 : from === "USDT";
+    const toIsBase = typeof toRate === "number" ? toRate <= 1 : to === "USDT";
+    if (fromIsBase !== toIsBase) return fromIsBase;
+    if (typeof fromRate === "number" && typeof toRate === "number" && fromRate !== toRate) {
+      return fromRate < toRate;
+    }
+    return true;
+  };
+
+  /** baseIsFrom=true → sell = buy×rate; false → sell = buy/rate */
+  const computeSellFromBuy = (buy: number, rate: number, from: string, to: string): number => {
+    const baseIsFrom = getBaseCurrency(from, to);
+    return baseIsFrom === false ? buy / rate : buy * rate;
+  };
+
+  /** baseIsFrom=true → buy = sell/rate; false → buy = sell×rate */
+  const computeBuyFromSell = (sell: number, rate: number, from: string, to: string): number => {
+    const baseIsFrom = getBaseCurrency(from, to);
+    return baseIsFrom === false ? sell * rate : sell / rate;
+  };
+
   const applyRateFromBuy = (row: Row, amountBuyInput: string, rateInput?: string) => {
     const buy = Number(amountBuyInput);
     const r = Number(rateInput ?? row.rate);
-    if (!Number.isNaN(buy) && !Number.isNaN(r) && r > 0) {
-      return { ...row, amountBuy: amountBuyInput, amountSell: numberToString(buy * r) };
+    if (!Number.isNaN(buy) && !Number.isNaN(r) && r > 0 && row.fromCurrency && row.toCurrency) {
+      const sellStr = numberToString(computeSellFromBuy(buy, r, row.fromCurrency, row.toCurrency));
+      return {
+        ...row,
+        amountBuy: amountBuyInput,
+        amountSell: sellStr,
+        receiptAmount: amountBuyInput,
+        paymentAmount: sellStr,
+      };
     }
     return { ...row, amountBuy: amountBuyInput };
   };
@@ -97,8 +137,15 @@ export function BatchOrdersTab({ currencies, accounts, onDone, setAlertModal }: 
   const applyRateFromSell = (row: Row, amountSellInput: string, rateInput?: string) => {
     const sell = Number(amountSellInput);
     const r = Number(rateInput ?? row.rate);
-    if (!Number.isNaN(sell) && !Number.isNaN(r) && r > 0) {
-      return { ...row, amountSell: amountSellInput, amountBuy: numberToString(sell / r) };
+    if (!Number.isNaN(sell) && !Number.isNaN(r) && r > 0 && row.fromCurrency && row.toCurrency) {
+      const buyStr = numberToString(computeBuyFromSell(sell, r, row.fromCurrency, row.toCurrency));
+      return {
+        ...row,
+        amountSell: amountSellInput,
+        amountBuy: buyStr,
+        receiptAmount: buyStr,
+        paymentAmount: amountSellInput,
+      };
     }
     return { ...row, amountSell: amountSellInput };
   };
@@ -107,48 +154,67 @@ export function BatchOrdersTab({ currencies, accounts, onDone, setAlertModal }: 
     e.preventDefault();
     setIsSubmitting(true);
     let ok = 0;
-    const errors: string[] = [];
     try {
-      for (const [index, row] of rows.entries()) {
-        if (!row.customerName.trim() || !row.fromCurrency || !row.toCurrency) continue;
+      // Identify rows that have been filled in (skip completely empty rows)
+      const activeRows = rows
+        .map((row, index) => ({ row, index }))
+        .filter(({ row }) => row.customerName.trim() || row.fromCurrency || row.toCurrency);
+
+      if (activeRows.length === 0) {
+        setAlertModal({ isOpen: true, message: t("orders.batchFailed"), type: "error" });
+        return;
+      }
+
+      // --- Validation pass: check every active row before creating anything ---
+      const validationErrors: string[] = [];
+      for (const { row, index } of activeRows) {
+        const rowNo = index + 1;
         const buy = Number(row.amountBuy);
         const sell = Number(row.amountSell);
         const receiptAmount = Number(row.receiptAmount);
         const paymentAmount = Number(row.paymentAmount);
         const r = Number(row.rate);
-        const rowNo = index + 1;
-        if (!row.rate || Number.isNaN(r) || r <= 0) {
-          errors.push(`#${rowNo} invalid exchange rate`);
-          continue;
+
+        if (!row.customerName.trim() || !row.fromCurrency || !row.toCurrency) {
+          validationErrors.push(`#${rowNo} missing customer name or currencies`);
+        } else if (!row.rate || Number.isNaN(r) || r <= 0) {
+          validationErrors.push(`#${rowNo} invalid exchange rate`);
+        } else if (Number.isNaN(buy) || Number.isNaN(sell) || buy <= 0 || sell <= 0) {
+          validationErrors.push(`#${rowNo} invalid amount buy/sell`);
+        } else if (Number.isNaN(receiptAmount) || receiptAmount <= 0) {
+          validationErrors.push(`#${rowNo} invalid receipt amount`);
+        } else if (Number.isNaN(paymentAmount) || paymentAmount <= 0) {
+          validationErrors.push(`#${rowNo} invalid payment amount`);
+        } else if (!row.buyAccountId || !row.sellAccountId) {
+          validationErrors.push(`#${rowNo} select buy/sell accounts`);
+        } else if (
+          Math.abs(computeSellFromBuy(buy, r, row.fromCurrency, row.toCurrency) - sell) >
+          ORDER_RECEIPT_PAYMENT_TOLERANCE
+        ) {
+          validationErrors.push(`#${rowNo} amount sell does not match amount buy × rate`);
+        } else if (Math.abs(receiptAmount - buy) > ORDER_RECEIPT_PAYMENT_TOLERANCE) {
+          validationErrors.push(`#${rowNo} receipt amount does not match amount buy`);
+        } else if (Math.abs(paymentAmount - sell) > ORDER_RECEIPT_PAYMENT_TOLERANCE) {
+          validationErrors.push(`#${rowNo} payment amount does not match amount sell`);
         }
-        if (Number.isNaN(buy) || Number.isNaN(sell) || buy <= 0 || sell <= 0) {
-          errors.push(`#${rowNo} invalid amount buy/sell`);
-          continue;
-        }
-        if (Number.isNaN(receiptAmount) || receiptAmount <= 0) {
-          errors.push(`#${rowNo} invalid receipt amount`);
-          continue;
-        }
-        if (Number.isNaN(paymentAmount) || paymentAmount <= 0) {
-          errors.push(`#${rowNo} invalid payment amount`);
-          continue;
-        }
-        if (!row.buyAccountId || !row.sellAccountId) {
-          errors.push(`#${rowNo} select buy/sell accounts`);
-          continue;
-        }
-        if (Math.abs((buy * r) - sell) > ORDER_RECEIPT_PAYMENT_TOLERANCE) {
-          errors.push(`#${rowNo} amount sell does not match amount buy x rate`);
-          continue;
-        }
-        if (Math.abs(receiptAmount - buy) > ORDER_RECEIPT_PAYMENT_TOLERANCE) {
-          errors.push(`#${rowNo} receipt amount must match amount buy`);
-          continue;
-        }
-        if (Math.abs(paymentAmount - sell) > ORDER_RECEIPT_PAYMENT_TOLERANCE) {
-          errors.push(`#${rowNo} payment amount must match amount sell`);
-          continue;
-        }
+      }
+
+      if (validationErrors.length > 0) {
+        setAlertModal({
+          isOpen: true,
+          message: validationErrors.join("\n"),
+          type: "error",
+        });
+        return;
+      }
+
+      // --- Creation pass: all rows are valid, create them all ---
+      for (const { row } of activeRows) {
+        const buy = Number(row.amountBuy);
+        const sell = Number(row.amountSell);
+        const receiptAmount = Number(row.receiptAmount);
+        const paymentAmount = Number(row.paymentAmount);
+        const r = Number(row.rate);
         const created = await addOrder({
           customerName: row.customerName.trim(),
           fromCurrency: row.fromCurrency,
@@ -211,24 +277,13 @@ export function BatchOrdersTab({ currencies, accounts, onDone, setAlertModal }: 
         await updateOrderStatus({ id: orderId, status: "completed" }).unwrap();
         ok += 1;
       }
-      if (ok > 0) {
-        const warning = errors.length ? ` (${errors.slice(0, 3).join("; ")})` : "";
-        setAlertModal({
-          isOpen: true,
-          message:
-            (t("orders.batchCreated", { count: ok }) || `Created ${ok} order(s).`) +
-            (warning ? ` ${warning}` : ""),
-          type: errors.length ? "error" : "success",
-        });
-        setRows([emptyRow(), emptyRow(), emptyRow()]);
-        onDone();
-      } else {
-        setAlertModal({
-          isOpen: true,
-          message: errors[0] || t("orders.batchFailed"),
-          type: "error",
-        });
-      }
+      setAlertModal({
+        isOpen: true,
+        message: t("orders.batchCreated", { count: ok }) || `Created ${ok} order(s).`,
+        type: "success",
+      });
+      setRows([emptyRow(), emptyRow(), emptyRow()]);
+      onDone();
     } catch (err: any) {
       setAlertModal({
         isOpen: true,
