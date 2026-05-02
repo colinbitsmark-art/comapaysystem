@@ -93,7 +93,15 @@ function SortableAccountCard({ account }: { account: Account }) {
           <div className="text-sm font-semibold text-slate-800 truncate">
             {account.name}
           </div>
-          <div className="mt-1 text-xl font-semibold text-blue-600 leading-tight">
+          <div
+            className={`mt-1 text-xl font-semibold leading-tight ${
+              account.balance < 0
+                ? "text-red-600"
+                : account.balance > 0
+                  ? "text-emerald-600"
+                  : "text-slate-800"
+            }`}
+          >
             {account.balance.toLocaleString("en-US", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
@@ -191,7 +199,15 @@ function SortableCurrencyPool({
             <span className="font-semibold text-slate-800 text-sm">
               {currencyName ? `${currencyName} (${currencyCode})` : currencyCode}
             </span>
-            <span className="text-sm text-slate-500 whitespace-nowrap">
+            <span
+              className={`text-sm whitespace-nowrap font-medium ${
+                totalBalance < 0
+                  ? "text-red-600"
+                  : totalBalance > 0
+                    ? "text-emerald-600"
+                    : "text-slate-500"
+              }`}
+            >
               {totalBalance.toLocaleString("en-US", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
