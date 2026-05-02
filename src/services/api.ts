@@ -529,7 +529,7 @@ export const api = createApi({
       ],
     }),
     updateOrderStatus: builder.mutation<
-      Order,
+      Order & { affectedAccountIds?: number[] },
       { id: number; status: OrderStatus }
     >({
       query: ({ id, status }) => ({
@@ -537,10 +537,19 @@ export const api = createApi({
         method: "PATCH",
         body: { status },
       }),
-      invalidatesTags: (_res, _err, { id }) => [
-        { type: "Order", id },
-        { type: "Order", id: "LIST" },
-      ],
+      invalidatesTags: (res, _err, { id }) => {
+        const tags: Array<{ type: "Order" | "Account"; id: number | "LIST" }> = [
+          { type: "Order", id },
+          { type: "Order", id: "LIST" },
+        ];
+        if (res?.affectedAccountIds?.length) {
+          tags.push({ type: "Account", id: "LIST" });
+          res.affectedAccountIds.forEach((accountId) => {
+            tags.push({ type: "Account", id: accountId });
+          });
+        }
+        return tags;
+      },
     }),
     deleteOrder: builder.mutation<{ success: boolean; affectedAccountIds?: number[] }, number>({
       query: (id) => ({
