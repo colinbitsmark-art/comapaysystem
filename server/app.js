@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config(); // Load environment variables from .env file
 
+import fs from "fs";
 import cors from "cors";
 import express from "express";
 import path from "path";
@@ -41,21 +42,22 @@ app.use((req, res, next) => {
 app.use("/api", apiRouter);
 app.use("/api/bot", botRouter);
 
-// Serve static files from React app in production only
-if (process.env.NODE_ENV === "production") {
-  const distPath = path.join(__dirname, "../dist");
+// Serve Vite build when present (Railway/Nixpacks runs `npm run build`; NODE_ENV may be unset at runtime).
+const distPath = path.join(__dirname, "../dist");
+const distIndexHtml = path.join(distPath, "index.html");
+if (fs.existsSync(distIndexHtml)) {
   app.use(express.static(distPath));
-  
-  // Catch-all handler: send back React's index.html file for all non-API routes
-  // Use middleware approach for Express 5 compatibility
   app.use((req, res, next) => {
-    // Skip API routes
     if (req.path.startsWith("/api")) {
       return next();
     }
-    // For all other routes, serve index.html (SPA routing)
-    res.sendFile(path.join(distPath, "index.html"));
+    res.sendFile(distIndexHtml);
   });
+  console.log(`[app] Serving SPA from ${distPath}`);
+} else if (process.env.NODE_ENV === "production") {
+  console.warn(
+    "[app] NODE_ENV=production but dist/index.html is missing; run `npm run build` before start.",
+  );
 }
 
 app.use((err, req, res, _next) => {
