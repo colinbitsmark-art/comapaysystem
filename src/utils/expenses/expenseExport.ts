@@ -39,6 +39,7 @@ export async function exportExpensesToExcel(
   // Prepare data for Excel
   const excelData = expenses.map((expense: any) => ({
     "Expense ID": expense.id,
+    "Type": expense.type === 'income' ? 'Income' : 'Expense',
     "Date": expense.createdAt ? new Date(expense.createdAt).toLocaleDateString() : "",
     "Account": expense.accountName || "-",
     "Amount": expense.amount,

@@ -1,6 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import SectionCard from "../components/common/SectionCard";
+import { Pagination } from "../components/common/Pagination";
 import AlertModal from "../components/common/AlertModal";
 import ConfirmModal from "../components/common/ConfirmModal";
 import type { Customer, CustomerBeneficiary } from "../types";
@@ -13,11 +15,36 @@ import {
   useGetCustomerBeneficiariesQuery,
   useUpdateCustomerBeneficiaryMutation,
   useDeleteCustomerBeneficiaryMutation,
+  useGetAllCustomersConvertedBalancesQuery,
 } from "../services/api";
+
+const PAGE_SIZE = 20;
 
 export default function CustomersPage() {
   const { t } = useTranslation();
-  const { data: customers = [], isLoading } = useGetCustomersQuery();
+  const navigate = useNavigate();
+
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch]);
+
+  const { data: customersData, isLoading } = useGetCustomersQuery({
+    page: currentPage,
+    limit: PAGE_SIZE,
+    search: debouncedSearch || undefined,
+  });
+  const customers = customersData?.customers ?? [];
+  const totalCustomers = customersData?.total ?? 0;
+  const totalPages = Math.ceil(totalCustomers / PAGE_SIZE);
   const [addCustomer, { isLoading: isSaving }] = useAddCustomerMutation();
   const [addCustomerBeneficiary, { isLoading: isSavingBeneficiary }] =
     useAddCustomerBeneficiaryMutation();
@@ -27,6 +54,15 @@ export default function CustomersPage() {
     useDeleteCustomerBeneficiaryMutation();
   const [updateCustomer] = useUpdateCustomerMutation();
   const [deleteCustomer, { isLoading: isDeleting }] = useDeleteCustomerMutation();
+  const { data: convertedBalancesData } = useGetAllCustomersConvertedBalancesQuery();
+
+  const balanceByCustomer = Object.fromEntries(
+    (convertedBalancesData?.result ?? []).map((b) => [b.customerId, b])
+  );
+  const targetCurrency = convertedBalancesData?.targetCurrency ?? null;
+
+  const fmtBalance = (n: number) =>
+    n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string; type?: "error" | "warning" | "info" | "success" }>({
     isOpen: false,
@@ -74,19 +110,6 @@ export default function CustomersPage() {
         isOpen: true,
         message: t("customers.nameRequired") || "Customer name is required.",
         type: "warning",
-      });
-      return;
-    }
-
-    const duplicate = customers.some(
-      (c: Customer) => (c.name || "").trim().toLowerCase() === trimmedForm.name.toLowerCase(),
-    );
-
-    if (duplicate) {
-      setAlertModal({
-        isOpen: true,
-        message: t("customers.duplicateName") || "Customer with this name already exists.",
-        type: "error",
       });
       return;
     }
@@ -158,8 +181,27 @@ export default function CustomersPage() {
       swiftCode: "",
       bankAddress: "",
     });
+    setIsCreateModalOpen(false);
   };
 
+  const closeCreateModal = () => {
+    setIsCreateModalOpen(false);
+    setForm({ name: "", email: "", phone: "", remarks: "" });
+    setIncludeBeneficiary(false);
+    setBeneficiaryForm({
+      paymentType: "CRYPTO",
+      networkChain: "",
+      walletAddresses: [""],
+      bankName: "",
+      accountTitle: "",
+      accountNumber: "",
+      accountIban: "",
+      swiftCode: "",
+      bankAddress: "",
+    });
+  };
+
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<typeof form | null>(null);
   const [editingBeneficiaryId, setEditingBeneficiaryId] = useState<number | null>(null);
@@ -360,36 +402,96 @@ export default function CustomersPage() {
         title={t("customers.title")}
         // 我 REMOVED DESCRIPTION UNDER THE TITLE BEING DISPLAYED
         // description={t("customers.titledescription")}
-        actions={isLoading ? t("common.loading") : `${customers.length} ${t("customers.records")}`}
+        actions={
+          <div className="flex items-center gap-4">
+            {isLoading ? t("common.loading") : `${totalCustomers} ${t("customers.records")}`}
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 transition-colors"
+            >
+              {t("customers.createNew")}
+            </button>
+          </div>
+        }
       >
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative max-w-md flex-1">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </span>
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder={t("customers.searchPlaceholder")}
+              className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full table-fixed text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-slate-600">
-                <th className="py-2 w-1/5">{t("customers.name")}</th>
-                <th className="py-2 w-1/5">{t("customers.email")}</th>
-                <th className="py-2 w-1/5">{t("customers.phone")}</th>
-                <th className="py-2 w-1/5">{t("customers.remarks") || "Remarks"}</th>
-                <th className="py-2 w-1/5">{t("customers.actions")}</th>
+                <th className="py-2 w-1/6">{t("customers.name")}</th>
+                <th className="py-2 w-1/6">{t("customers.email")}</th>
+                <th className="py-2 w-1/6">{t("customers.phone")}</th>
+                <th className="py-2 w-1/6">{t("customers.remarks") || "Remarks"}</th>
+                <th className="py-2 pr-4 w-1/6">
+                  {t("customerLedger.balance")}
+                  {targetCurrency && <span className="ml-1 text-xs font-normal text-slate-400">({targetCurrency})</span>}
+                </th>
+                <th className="py-2 pl-6 w-1/6">{t("customers.actions")}</th>
               </tr>
             </thead>
             <tbody>
               {customers.map((customer: Customer) => (
                 <tr key={customer.id} className="border-b border-slate-100">
-                  <td className="py-2 w-1/5 font-semibold truncate" title={customer.name}>
+                  <td className="py-2 w-1/6 font-semibold truncate" title={customer.name}>
                     {customer.name}
                   </td>
-                  <td className="py-2 w-1/5 truncate" title={customer.email || undefined}>
+                  <td className="py-2 w-1/6 truncate" title={customer.email || undefined}>
                     {customer.email}
                   </td>
-                  <td className="py-2 w-1/5 truncate" title={customer.phone || undefined}>
+                  <td className="py-2 w-1/6 truncate" title={customer.phone || undefined}>
                     {customer.phone}
                   </td>
-                  <td className="py-2 w-1/5 truncate" title={customer.remarks || undefined}>
+                  <td className="py-2 w-1/6 truncate" title={customer.remarks || undefined}>
                     {customer.remarks || "—"}
                   </td>
-                  <td className="py-2 w-1/5">
+                  <td className="py-2 pr-4 w-1/6">
+                    {(() => {
+                      const b = balanceByCustomer[customer.id];
+                      if (!b) return <span className="text-slate-300">—</span>;
+                      const val = b.convertedBalance;
+                      return (
+                        <span
+                          className={`font-semibold ${val < 0 ? "text-rose-600" : val > 0 ? "text-emerald-700" : "text-slate-500"}`}
+                          title={
+                            b.hasUnknownRate
+                              ? "Some currencies have no exchange rate set"
+                              : b.currencyBreakdown
+                                  .map((c) => `${c.currencyCode}: ${c.balance >= 0 ? "" : "-"}${fmtBalance(Math.abs(c.balance))}`)
+                                  .join("\n")
+                          }
+                        >
+                          {val < 0 ? "-" : ""}{fmtBalance(Math.abs(val))}
+                          {b.hasUnknownRate && <span className="ml-1 text-xs text-amber-500">*</span>}
+                        </span>
+                      );
+                    })()}
+                  </td>
+                  <td className="py-2 pl-6 w-1/6">
                     <div className="flex gap-2 text-sm font-semibold">
+                      <button
+                        className="text-blue-600 hover:text-blue-700"
+                        onClick={() => navigate(`/customers/${customer.id}/ledger`)}
+                      >
+                        {t("customers.ledger")}
+                      </button>
                       <button
                         className="text-amber-600 hover:text-amber-700"
                         onClick={() => startEdit(customer.id)}
@@ -409,7 +511,7 @@ export default function CustomersPage() {
               ))}
               {!customers.length && (
                 <tr>
-                  <td className="py-4 text-sm text-slate-500" colSpan={5}>
+                  <td className="py-4 text-sm text-slate-500" colSpan={6}>
                     {t("customers.noCustomers")}
                   </td>
                 </tr>
@@ -417,6 +519,16 @@ export default function CustomersPage() {
             </tbody>
           </table>
         </div>
+
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalCustomers}
+          itemsPerPage={PAGE_SIZE}
+          onPageChange={setCurrentPage}
+          t={t}
+          entityName={t("customers.title")}
+        />
       </SectionCard>
 
       {editingId && editForm && (
@@ -737,231 +849,266 @@ export default function CustomersPage() {
         </SectionCard>
       )}
 
-      <SectionCard title={t("customers.addTitle")}>
-        <form className="grid gap-3 md:grid-cols-3" onSubmit={handleSubmit}>
-          <input
-            className="rounded-lg border border-slate-200 px-3 py-2"
-            placeholder={t("customers.namePlaceholder")}
-            value={form.name}
-            onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-            required
-          />
-          <input
-            className="rounded-lg border border-slate-200 px-3 py-2"
-            placeholder={t("customers.emailPlaceholder")}
-            value={form.email}
-            onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-            type="email"
-          />
-          <input
-            className="rounded-lg border border-slate-200 px-3 py-2"
-            placeholder={t("customers.phonePlaceholder")}
-            value={form.phone}
-            onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
-          />
-          <textarea
-            className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
-            placeholder={t("customers.remarksPlaceholder") || "Remarks (optional)"}
-            value={form.remarks}
-            onChange={(e) => setForm((p) => ({ ...p, remarks: e.target.value }))}
-            rows={3}
-          />
-          <div className="col-span-full flex items-center gap-3 rounded-lg border border-dashed border-slate-300 px-3 py-2">
-            <input
-              id="include-beneficiary"
-              type="checkbox"
-              checked={includeBeneficiary}
-              onChange={(e) => setIncludeBeneficiary(e.target.checked)}
-              className="h-4 w-4"
-            />
-            <label htmlFor="include-beneficiary" className="text-sm text-slate-700">
-              {t("customers.addBeneficiaryOptional")}
-            </label>
-          </div>
+      {/* Create Customer Modal */}
+      {isCreateModalOpen && (
+        <div
+          className="fixed top-0 left-0 right-0 bottom-0 w-full h-full z-[9999] flex items-center justify-center bg-black bg-opacity-50"
+          style={{ margin: 0, padding: 0 }}
+          onClick={closeCreateModal}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-slate-900">{t("customers.addTitle")}</h2>
+              <button
+                onClick={closeCreateModal}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+                aria-label={t("common.close")}
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
 
-          {includeBeneficiary && (
-            <div className="col-span-full grid gap-3 rounded-lg border border-slate-200 px-3 py-3 bg-slate-50 md:grid-cols-2">
-              <div className="col-span-full">
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  {t("orders.paymentType")}
+            <form className="grid gap-3 md:grid-cols-3" onSubmit={handleSubmit}>
+              <input
+                className="rounded-lg border border-slate-200 px-3 py-2"
+                placeholder={t("customers.namePlaceholder")}
+                value={form.name}
+                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                required
+              />
+              <input
+                className="rounded-lg border border-slate-200 px-3 py-2"
+                placeholder={t("customers.emailPlaceholder")}
+                value={form.email}
+                onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                type="email"
+              />
+              <input
+                className="rounded-lg border border-slate-200 px-3 py-2"
+                placeholder={t("customers.phonePlaceholder")}
+                value={form.phone}
+                onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
+              />
+              <textarea
+                className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
+                placeholder={t("customers.remarksPlaceholder") || "Remarks (optional)"}
+                value={form.remarks}
+                onChange={(e) => setForm((p) => ({ ...p, remarks: e.target.value }))}
+                rows={3}
+              />
+              {/* <div className="col-span-full flex items-center gap-3 rounded-lg border border-dashed border-slate-300 px-3 py-2">
+                <input
+                  id="include-beneficiary"
+                  type="checkbox"
+                  checked={includeBeneficiary}
+                  onChange={(e) => setIncludeBeneficiary(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="include-beneficiary" className="text-sm text-slate-700">
+                  {t("customers.addBeneficiaryOptional")}
                 </label>
-                <div className="flex gap-4">
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="customerBeneficiaryPaymentType"
-                      value="CRYPTO"
-                      checked={beneficiaryForm.paymentType === "CRYPTO"}
-                      onChange={(e) =>
-                        setBeneficiaryForm((p) => ({
-                          ...p,
-                          paymentType: e.target.value as "CRYPTO" | "FIAT",
-                        }))
-                      }
-                      className="mr-2"
-                    />
-                    {t("orders.crypto")}
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="customerBeneficiaryPaymentType"
-                      value="FIAT"
-                      checked={beneficiaryForm.paymentType === "FIAT"}
-                      onChange={(e) =>
-                        setBeneficiaryForm((p) => ({
-                          ...p,
-                          paymentType: e.target.value as "CRYPTO" | "FIAT",
-                        }))
-                      }
-                      className="mr-2"
-                    />
-                    {t("orders.fiat")}
-                  </label>
-                </div>
-              </div>
+              </div> */}
 
-              {beneficiaryForm.paymentType === "CRYPTO" ? (
-                <>
-                  <select
-                    className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
-                    value={beneficiaryForm.networkChain}
-                    onChange={(e) =>
-                      setBeneficiaryForm((p) => ({
-                        ...p,
-                        networkChain: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">{t("orders.selectNetworkChain")}</option>
-                    <option value="TRC20">TRC20</option>
-                    <option value="ERC20">ERC20</option>
-                    <option value="BEP20">BEP20</option>
-                    <option value="POLYGON">POLYGON</option>
-                  </select>
+              {includeBeneficiary && (
+                <div className="col-span-full grid gap-3 rounded-lg border border-slate-200 px-3 py-3 bg-slate-50 md:grid-cols-2">
                   <div className="col-span-full">
                     <label className="block text-sm font-medium text-slate-700 mb-2">
-                      {t("orders.walletAddresses")}
+                      {t("orders.paymentType")}
                     </label>
-                    {beneficiaryForm.walletAddresses.map((addr, index) => (
-                      <div key={index} className="mb-2">
+                    <div className="flex gap-4">
+                      <label className="flex items-center">
                         <input
-                          type="text"
-                          className="w-full rounded-lg border border-slate-200 px-3 py-2"
-                          placeholder="Wallet Address"
-                          value={addr}
-                          onChange={(e) => {
-                            const newAddresses = [...beneficiaryForm.walletAddresses];
-                            newAddresses[index] = e.target.value;
+                          type="radio"
+                          name="customerBeneficiaryPaymentType"
+                          value="CRYPTO"
+                          checked={beneficiaryForm.paymentType === "CRYPTO"}
+                          onChange={(e) =>
                             setBeneficiaryForm((p) => ({
                               ...p,
-                              walletAddresses: newAddresses,
-                            }));
-                          }}
+                              paymentType: e.target.value as "CRYPTO" | "FIAT",
+                            }))
+                          }
+                          className="mr-2"
                         />
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setBeneficiaryForm((p) => ({
-                          ...p,
-                          walletAddresses: [...p.walletAddresses, ""],
-                        }))
-                      }
-                      className="text-sm text-blue-600 hover:underline"
-                    >
-                      {t("orders.addAnotherAddress")}
-                    </button>
+                        {t("orders.crypto")}
+                      </label>
+                      <label className="flex items-center">
+                        <input
+                          type="radio"
+                          name="customerBeneficiaryPaymentType"
+                          value="FIAT"
+                          checked={beneficiaryForm.paymentType === "FIAT"}
+                          onChange={(e) =>
+                            setBeneficiaryForm((p) => ({
+                              ...p,
+                              paymentType: e.target.value as "CRYPTO" | "FIAT",
+                            }))
+                          }
+                          className="mr-2"
+                        />
+                        {t("orders.fiat")}
+                      </label>
+                    </div>
                   </div>
-                </>
-              ) : (
-                <>
-                  <input
-                    type="text"
-                    className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
-                    placeholder={t("orders.bankName")}
-                    value={beneficiaryForm.bankName}
-                    onChange={(e) =>
-                      setBeneficiaryForm((p) => ({
-                        ...p,
-                        bankName: e.target.value,
-                      }))
-                    }
-                  />
-                  <input
-                    type="text"
-                    className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
-                    placeholder={t("orders.accountTitle")}
-                    value={beneficiaryForm.accountTitle}
-                    onChange={(e) =>
-                      setBeneficiaryForm((p) => ({
-                        ...p,
-                        accountTitle: e.target.value,
-                      }))
-                    }
-                  />
-                  <input
-                    type="text"
-                    className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
-                    placeholder={t("orders.accountNumber")}
-                    value={beneficiaryForm.accountNumber}
-                    onChange={(e) =>
-                      setBeneficiaryForm((p) => ({
-                        ...p,
-                        accountNumber: e.target.value,
-                      }))
-                    }
-                  />
-                  <input
-                    type="text"
-                    className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
-                    placeholder={t("orders.accountIban")}
-                    value={beneficiaryForm.accountIban}
-                    onChange={(e) =>
-                      setBeneficiaryForm((p) => ({
-                        ...p,
-                        accountIban: e.target.value,
-                      }))
-                    }
-                  />
-                  <input
-                    type="text"
-                    className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
-                    placeholder={t("orders.swiftCode")}
-                    value={beneficiaryForm.swiftCode}
-                    onChange={(e) =>
-                      setBeneficiaryForm((p) => ({
-                        ...p,
-                        swiftCode: e.target.value,
-                      }))
-                    }
-                  />
-                  <input
-                    type="text"
-                    className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
-                    placeholder={t("orders.bankAddress")}
-                    value={beneficiaryForm.bankAddress}
-                    onChange={(e) =>
-                      setBeneficiaryForm((p) => ({
-                        ...p,
-                        bankAddress: e.target.value,
-                      }))
-                    }
-                  />
-                </>
+
+                  {beneficiaryForm.paymentType === "CRYPTO" ? (
+                    <>
+                      <select
+                        className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
+                        value={beneficiaryForm.networkChain}
+                        onChange={(e) =>
+                          setBeneficiaryForm((p) => ({
+                            ...p,
+                            networkChain: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">{t("orders.selectNetworkChain")}</option>
+                        <option value="TRC20">TRC20</option>
+                        <option value="ERC20">ERC20</option>
+                        <option value="BEP20">BEP20</option>
+                        <option value="POLYGON">POLYGON</option>
+                      </select>
+                      <div className="col-span-full">
+                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                          {t("orders.walletAddresses")}
+                        </label>
+                        {beneficiaryForm.walletAddresses.map((addr, index) => (
+                          <div key={index} className="mb-2">
+                            <input
+                              type="text"
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2"
+                              placeholder="Wallet Address"
+                              value={addr}
+                              onChange={(e) => {
+                                const newAddresses = [...beneficiaryForm.walletAddresses];
+                                newAddresses[index] = e.target.value;
+                                setBeneficiaryForm((p) => ({
+                                  ...p,
+                                  walletAddresses: newAddresses,
+                                }));
+                              }}
+                            />
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setBeneficiaryForm((p) => ({
+                              ...p,
+                              walletAddresses: [...p.walletAddresses, ""],
+                            }))
+                          }
+                          className="text-sm text-blue-600 hover:underline"
+                        >
+                          {t("orders.addAnotherAddress")}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
+                        placeholder={t("orders.bankName")}
+                        value={beneficiaryForm.bankName}
+                        onChange={(e) =>
+                          setBeneficiaryForm((p) => ({
+                            ...p,
+                            bankName: e.target.value,
+                          }))
+                        }
+                      />
+                      <input
+                        type="text"
+                        className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
+                        placeholder={t("orders.accountTitle")}
+                        value={beneficiaryForm.accountTitle}
+                        onChange={(e) =>
+                          setBeneficiaryForm((p) => ({
+                            ...p,
+                            accountTitle: e.target.value,
+                          }))
+                        }
+                      />
+                      <input
+                        type="text"
+                        className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
+                        placeholder={t("orders.accountNumber")}
+                        value={beneficiaryForm.accountNumber}
+                        onChange={(e) =>
+                          setBeneficiaryForm((p) => ({
+                            ...p,
+                            accountNumber: e.target.value,
+                          }))
+                        }
+                      />
+                      <input
+                        type="text"
+                        className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
+                        placeholder={t("orders.accountIban")}
+                        value={beneficiaryForm.accountIban}
+                        onChange={(e) =>
+                          setBeneficiaryForm((p) => ({
+                            ...p,
+                            accountIban: e.target.value,
+                          }))
+                        }
+                      />
+                      <input
+                        type="text"
+                        className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
+                        placeholder={t("orders.swiftCode")}
+                        value={beneficiaryForm.swiftCode}
+                        onChange={(e) =>
+                          setBeneficiaryForm((p) => ({
+                            ...p,
+                            swiftCode: e.target.value,
+                          }))
+                        }
+                      />
+                      <input
+                        type="text"
+                        className="col-span-full rounded-lg border border-slate-200 px-3 py-2"
+                        placeholder={t("orders.bankAddress")}
+                        value={beneficiaryForm.bankAddress}
+                        onChange={(e) =>
+                          setBeneficiaryForm((p) => ({
+                            ...p,
+                            bankAddress: e.target.value,
+                          }))
+                        }
+                      />
+                    </>
+                  )}
+                </div>
               )}
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={isSaving || isSavingBeneficiary}
-            className="col-span-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60"
-          >
-            {isSaving || isSavingBeneficiary ? t("common.saving") : t("customers.saveCustomer")}
-          </button>
-        </form>
-      </SectionCard>
+
+              <div className="col-span-full flex gap-3 mt-1">
+                <button
+                  type="button"
+                  onClick={closeCreateModal}
+                  className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving || isSavingBeneficiary}
+                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {isSaving || isSavingBeneficiary ? t("common.saving") : t("customers.saveCustomer")}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <AlertModal
         isOpen={alertModal.isOpen}

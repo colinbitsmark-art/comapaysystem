@@ -21,11 +21,11 @@ export const listTransfers = (req, res) => {
   const params = {};
   
   if (dateFrom) {
-    conditions.push('DATE(t.createdAt) >= DATE(@dateFrom)');
+    conditions.push('DATE(COALESCE(t.entryDate, t.createdAt)) >= DATE(@dateFrom)');
     params.dateFrom = dateFrom;
   }
   if (dateTo) {
-    conditions.push('DATE(t.createdAt) <= DATE(@dateTo)');
+    conditions.push('DATE(COALESCE(t.entryDate, t.createdAt)) <= DATE(@dateTo)');
     params.dateTo = dateTo;
   }
   if (fromAccountId) {
@@ -90,6 +90,7 @@ export const listTransfers = (req, res) => {
         t.transactionFee,
         t.createdBy,
         t.createdAt,
+        t.entryDate,
         t.updatedBy,
         t.updatedAt,
         fromAcc.name as fromAccountName,
@@ -102,8 +103,8 @@ export const listTransfers = (req, res) => {
        LEFT JOIN users creator ON creator.id = t.createdBy
        LEFT JOIN users updater ON updater.id = t.updatedBy
        ${whereClause}
-       ORDER BY t.createdAt DESC`;
-  
+       ORDER BY COALESCE(t.entryDate, t.createdAt) DESC`;
+
   // Add pagination if requested
   if (usePagination) {
     query += ` LIMIT @limit OFFSET @offset;`;
@@ -164,11 +165,11 @@ export const exportTransfers = (req, res) => {
   const params = {};
   
   if (dateFrom) {
-    conditions.push('DATE(t.createdAt) >= DATE(@dateFrom)');
+    conditions.push('DATE(COALESCE(t.entryDate, t.createdAt)) >= DATE(@dateFrom)');
     params.dateFrom = dateFrom;
   }
   if (dateTo) {
-    conditions.push('DATE(t.createdAt) <= DATE(@dateTo)');
+    conditions.push('DATE(COALESCE(t.entryDate, t.createdAt)) <= DATE(@dateTo)');
     params.dateTo = dateTo;
   }
   if (fromAccountId) {
@@ -221,6 +222,7 @@ export const exportTransfers = (req, res) => {
         t.transactionFee,
         t.createdBy,
         t.createdAt,
+        t.entryDate,
         t.updatedBy,
         t.updatedAt,
         fromAcc.name as fromAccountName,
@@ -233,7 +235,7 @@ export const exportTransfers = (req, res) => {
        LEFT JOIN users creator ON creator.id = t.createdBy
        LEFT JOIN users updater ON updater.id = t.updatedBy
        ${whereClause}
-       ORDER BY t.createdAt DESC;`;
+       ORDER BY COALESCE(t.entryDate, t.createdAt) DESC;`;
   
   const rows = db.prepare(query).all(params);
   
@@ -333,9 +335,10 @@ export const createTransfer = async (req, res, next) => {
     const transaction = db.transaction(() => {
       // Create transfer record first to get the transfer ID
       const stmt = db.prepare(
-        `INSERT INTO internal_transfers (fromAccountId, toAccountId, amount, currencyCode, description, transactionFee, createdBy, createdAt)
-         VALUES (@fromAccountId, @toAccountId, @amount, @currencyCode, @description, @transactionFee, @createdBy, @createdAt);`
+        `INSERT INTO internal_transfers (fromAccountId, toAccountId, amount, currencyCode, description, transactionFee, createdBy, createdAt, entryDate)
+         VALUES (@fromAccountId, @toAccountId, @amount, @currencyCode, @description, @transactionFee, @createdBy, @createdAt, @entryDate);`
       );
+      const entryDateValue = req.body?.entryDate ? new Date(req.body.entryDate).toISOString() : finalCreatedAt;
       const result = stmt.run({
         fromAccountId,
         toAccountId,
@@ -345,6 +348,7 @@ export const createTransfer = async (req, res, next) => {
         transactionFee: feeAmount > 0 ? feeAmount : null,
         createdBy: createdBy || null,
         createdAt: finalCreatedAt,
+        entryDate: entryDateValue,
       });
 
       const transferId = result.lastInsertRowid;
@@ -509,7 +513,7 @@ export const createTransfer = async (req, res, next) => {
 export const updateTransfer = (req, res, next) => {
   try {
     const { id } = req.params;
-    const { fromAccountId, toAccountId, amount, description, transactionFee, updatedBy, tagIds } = req.body || {};
+    const { fromAccountId, toAccountId, amount, description, transactionFee, updatedBy, tagIds, entryDate } = req.body || {};
 
     // Get existing transfer
     const existingTransfer = db.prepare("SELECT * FROM internal_transfers WHERE id = ?;").get(id);
@@ -688,7 +692,8 @@ export const updateTransfer = (req, res, next) => {
       if (amount !== undefined) updateFields.push("amount = ?"), updateValues.push(finalAmount);
       if (description !== undefined) updateFields.push("description = ?"), updateValues.push(finalDescription || null);
       if (transactionFee !== undefined) updateFields.push("transactionFee = ?"), updateValues.push(finalTransactionFee);
-      
+      if (entryDate !== undefined) updateFields.push("entryDate = ?"), updateValues.push(entryDate ? new Date(entryDate).toISOString() : null);
+
       updateFields.push("updatedBy = ?"), updateValues.push(updatedBy || null);
       updateFields.push("updatedAt = ?"), updateValues.push(new Date().toISOString());
       updateValues.push(id);

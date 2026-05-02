@@ -1,9 +1,9 @@
 import { useTableColumns, type ColumnDefinition } from "../useTableColumns";
 
-const COLUMN_KEYS = ["id", "date", "description", "account", "amount", "currency", "proof", "tags", "createdBy", "updatedBy", "updatedAt"];
+const COLUMN_KEYS = ["id", "type", "date", "description", "account", "amount", "currency", "proof", "tags", "createdBy", "updatedBy", "updatedAt"];
 
 // Default visible columns (excluding updatedBy, updatedAt, and tags)
-const DEFAULT_VISIBLE_COLUMNS = ["id", "date", "description", "account", "amount", "currency", "proof", "createdBy"];
+const DEFAULT_VISIBLE_COLUMNS = ["id", "type", "date", "description", "account", "amount", "currency", "proof", "createdBy"];
 
 export type { ColumnDefinition };
 
@@ -12,6 +12,7 @@ export function useExpensesTable() {
     columnKeys: COLUMN_KEYS,
     getColumnDefinitions: (t) => [
       { key: "id", label: t("expenses.expenseId") },
+      { key: "type", label: t("expenses.type") },
       { key: "date", label: t("expenses.date") },
       { key: "description", label: t("expenses.description") },
       { key: "account", label: t("expenses.account") },

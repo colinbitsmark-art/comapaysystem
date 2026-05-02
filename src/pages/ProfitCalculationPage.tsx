@@ -21,6 +21,7 @@ import {
   useUnsetDefaultProfitCalculationMutation,
 } from "../services/api";
 import { useProfitSummary } from "../hooks/useProfitSummary";
+import { convertCurrency } from "../utils/orders/orderCalculations";
 import type { Account, ProfitAccountMultiplier, ProfitExchangeRate } from "../types";
 
 // Helper function to format currency with proper number formatting
@@ -72,6 +73,8 @@ export default function ProfitCalculationPage() {
   const [groupAssignmentModalOpen, setGroupAssignmentModalOpen] = useState(false);
   // Track multiplier input values to allow empty state
   const [multiplierInputs, setMultiplierInputs] = useState<Map<number, string>>(new Map());
+  // Track exchange rate input values as raw strings to allow 0 and partial input
+  const [exchangeRateInputs, setExchangeRateInputs] = useState<Map<string, string>>(new Map());
   
   // Track pending changes that haven't been saved to DB
   const [pendingMultipliers, setPendingMultipliers] = useState<Map<number, { multiplier: number; groupId?: string; groupName?: string }>>(new Map());
@@ -89,6 +92,7 @@ export default function ProfitCalculationPage() {
   useEffect(() => {
     setCreatedGroups([]);
     setMultiplierInputs(new Map()); // Reset multiplier inputs when calculation changes
+    setExchangeRateInputs(new Map()); // Reset exchange rate inputs when calculation changes
     // Reset all pending changes when calculation changes
     setPendingMultipliers(new Map());
     setPendingExchangeRates(new Map());
@@ -248,7 +252,7 @@ export default function ProfitCalculationPage() {
           const key = `${currency}_${calculationDetails.targetCurrencyCode}`;
           const rate = exchangeRateMap.get(key) || 0;
           if (rate > 0) {
-            const convertedAmount = sum * rate;
+            const convertedAmount = convertCurrency(sum, rate, currency, calculationDetails.targetCurrencyCode, currencies);
             const current = converted.get(calculationDetails.targetCurrencyCode) || 0;
             converted.set(calculationDetails.targetCurrencyCode, current + convertedAmount);
           }
@@ -257,7 +261,7 @@ export default function ProfitCalculationPage() {
     });
     
     return converted;
-  }, [calculationDetails, groupSums, exchangeRateMap]);
+  }, [calculationDetails, groupSums, exchangeRateMap, currencies]);
 
   // Calculate total converted amount
   const totalConverted = useMemo(() => {
@@ -402,9 +406,10 @@ export default function ProfitCalculationPage() {
       setPendingExchangeRates(new Map());
       setPendingInitialInvestment(null);
       setPendingGroupAssignments(new Map());
-      
-      // Clear multiplier inputs to sync with database
+
+      // Clear multiplier and exchange rate inputs to sync with database
       setMultiplierInputs(new Map());
+      setExchangeRateInputs(new Map());
 
       setAlertModal({
         isOpen: true,
@@ -721,7 +726,7 @@ export default function ProfitCalculationPage() {
   );
 
   // Use shared hook for profit summary calculation
-  const defaultSummary = useProfitSummary(defaultCalculationDetails, accounts);
+  const defaultSummary = useProfitSummary(defaultCalculationDetails, accounts, currencies);
 
   return (
     <div className="space-y-6">
@@ -733,7 +738,7 @@ export default function ProfitCalculationPage() {
           // description={t("profit.defaultCalculationSummaryDesc") || "Summary of the default profit calculation"}
           
         >
-          <ProfitSummaryDisplay summary={defaultSummary} />
+          <ProfitSummaryDisplay summary={defaultSummary} currencies={currencies} />
         </SectionCard>
       )}
 
@@ -1178,7 +1183,9 @@ export default function ProfitCalculationPage() {
                 const rate = exchangeRateMap.get(key) || defaultRate;
                 const currencySum = Array.from(groupSums.values())
                   .reduce((sum, currencySums) => sum + (currencySums.get(currency) || 0), 0);
-                const converted = rate > 0 ? currencySum * rate : currencySum;
+                const converted = rate > 0
+                  ? convertCurrency(currencySum, rate, currency, calculationDetails.targetCurrencyCode, currencies)
+                  : currencySum;
                 
                 return (
                   <div key={currency} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
@@ -1200,13 +1207,23 @@ export default function ProfitCalculationPage() {
                           step="0.0001"
                           min="0"
                           className="w-full rounded border border-slate-200 px-2 py-1"
-                          value={rate > 0 ? rate : (currency === calculationDetails.targetCurrencyCode ? 1 : "")}
+                          value={
+                            exchangeRateInputs.has(key)
+                              ? exchangeRateInputs.get(key)
+                              : (rate > 0 ? rate : (currency === calculationDetails.targetCurrencyCode ? 1 : ""))
+                          }
                           onChange={(e) => {
                             const inputValue = e.target.value;
-                            const newRate = parseFloat(inputValue) || (currency === calculationDetails.targetCurrencyCode ? 1 : 0);
-                            
-                            // Store as pending change
-                            const key = `${currency}_${calculationDetails.targetCurrencyCode}`;
+                            // Track raw string for display (allows "0", "", partial input)
+                            setExchangeRateInputs((prev) => {
+                              const newMap = new Map(prev);
+                              newMap.set(key, inputValue);
+                              return newMap;
+                            });
+                            const parsed = parseFloat(inputValue);
+                            const newRate = Number.isFinite(parsed) && parsed >= 0
+                              ? parsed
+                              : (currency === calculationDetails.targetCurrencyCode ? 1 : 0);
                             setPendingExchangeRates((prev) => {
                               const newMap = new Map(prev);
                               newMap.set(key, newRate);

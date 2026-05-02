@@ -17,6 +17,13 @@ export interface Customer {
   remarks?: string;
 }
 
+export interface CustomerListResponse {
+  customers: Customer[];
+  total: number;
+  page: number | null;
+  limit: number | null;
+}
+
 export interface User {
   id: number;
   name: string;
@@ -108,6 +115,7 @@ export interface Order {
   tags?: Tag[];
   remarks?: string;
   createdAt: string;
+  orderDate?: string | null;
 }
 
 export interface OrderReceipt {
@@ -207,6 +215,7 @@ export interface OrderInput {
   handlerId?: number;
   tagIds?: number[];
   remarks?: string;
+  orderDate?: string | null;
 }
 
 export interface Account {
@@ -247,6 +256,7 @@ export interface Transfer {
   createdBy?: number;
   createdByName?: string;
   createdAt: string;
+  entryDate?: string | null;
   updatedBy?: number;
   updatedByName?: string;
   updatedAt?: string;
@@ -278,7 +288,10 @@ export interface TransferInput {
   tagIds?: number[];
   currencyCode?: string;
   createdAt?: string;
+  entryDate?: string | null;
 }
+
+export type ExpenseType = 'expense' | 'income';
 
 export interface Expense {
   id: number;
@@ -288,9 +301,11 @@ export interface Expense {
   currencyCode: string;
   description?: string;
   imagePath?: string;
+  type: ExpenseType;
   createdBy?: number;
   createdByName?: string;
   createdAt: string;
+  entryDate?: string | null;
   updatedBy?: number;
   updatedByName?: string;
   updatedAt?: string;
@@ -305,10 +320,12 @@ export interface ExpenseInput {
   amount: number;
   description?: string;
   imagePath?: string;
+  type?: ExpenseType;
   createdBy?: number;
   tagIds?: number[];
   currencyCode?: string;
   createdAt?: string;
+  entryDate?: string | null;
 }
 
 export interface ExpenseChange {
@@ -321,6 +338,7 @@ export interface ExpenseChange {
   accountName?: string;
   amount: number;
   description?: string;
+  type?: ExpenseType;
 }
 
 export interface ProfitCalculation {
@@ -360,6 +378,66 @@ export interface ProfitExchangeRate {
 export interface ProfitCalculationDetails extends ProfitCalculation {
   multipliers: ProfitAccountMultiplier[];
   exchangeRates: ProfitExchangeRate[];
+}
+
+export interface CustomerLedgerEntry {
+  id: number;
+  customerId: number;
+  customerName?: string;
+  currencyCode: string;
+  type: "credit" | "debit";
+  amount: number;
+  description?: string;
+  createdBy?: number;
+  createdByName?: string;
+  createdAt: string;
+  entryDate?: string | null;
+  updatedBy?: number;
+  updatedByName?: string;
+  updatedAt?: string;
+  deletedBy?: number;
+  deletedByName?: string;
+  deletedAt?: string;
+}
+
+export interface CustomerLedgerEntryInput {
+  customerId: number;
+  currencyCode: string;
+  type: "credit" | "debit";
+  amount: number;
+  description?: string;
+  entryDate?: string | null;
+}
+
+export interface CustomerLedgerChange {
+  id: number;
+  entryId: number;
+  changedBy?: number;
+  changedByName?: string;
+  changedAt: string;
+  type: "credit" | "debit";
+  amount: number;
+  description?: string;
+  currencyCode: string;
+}
+
+export interface CustomerLedgerSummary {
+  currencyCode: string;
+  totalCredit: number;
+  totalDebit: number;
+  balance: number;
+}
+
+export interface CustomerConvertedBalance {
+  customerId: number;
+  convertedBalance: number;
+  hasUnknownRate: boolean;
+  currencyBreakdown: Array<{ currencyCode: string; balance: number }>;
+}
+
+export interface AllCustomersConvertedBalances {
+  targetCurrency: string | null;
+  result: CustomerConvertedBalance[];
 }
 
 // Notification types

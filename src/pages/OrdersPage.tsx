@@ -101,7 +101,8 @@ export default function OrdersPage() {
     return Math.ceil(totalOrders / 20);
   }, [totalOrders]);
 
-  const { data: customers = [] } = useGetCustomersQuery();
+  const { data: customersData } = useGetCustomersQuery();
+  const customers = customersData?.customers ?? [];
   const { data: currencies = [] } = useGetCurrenciesQuery();
   const { data: users = [] } = useGetUsersQuery();
   const { data: accounts = [] } = useGetAccountsQuery();
@@ -1006,8 +1007,8 @@ export default function OrdersPage() {
 
   const canActOnOrders = Boolean(authUser);
   const canCancelOrder = canActOnOrders;
-  const canDeleteOrder = canActOnOrders;
-  const canDeleteManyOrders = canActOnOrders;
+  const canDeleteOrder = hasActionPermission(authUser, "deleteOrder");
+  const canDeleteManyOrders = hasActionPermission(authUser, "deleteManyOrders");
 
   // Action buttons and status tone are now handled by OrderActionsMenu component
 
@@ -1424,6 +1425,13 @@ export default function OrdersPage() {
         setRemarks={unifiedOrder.setRemarks}
         showRemarks={unifiedOrder.showRemarks}
         setShowRemarks={unifiedOrder.setShowRemarks}
+        tags={tags}
+        selectedTagIds={unifiedOrder.selectedTagIds}
+        setSelectedTagIds={unifiedOrder.setSelectedTagIds}
+        showTagPicker={unifiedOrder.showTagPicker}
+        setShowTagPicker={unifiedOrder.setShowTagPicker}
+        orderDate={unifiedOrder.orderDate}
+        setOrderDate={unifiedOrder.setOrderDate}
         currencies={currencies}
         accounts={accounts}
         handleNumberInputWheel={handleNumberInputWheel}

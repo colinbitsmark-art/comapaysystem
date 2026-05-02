@@ -18,6 +18,7 @@ export const listExpenses = (req, res) => {
     createdBy,
     tagId,
     tagIds,
+    type,
     page,
     limit,
   } = req.query;
@@ -27,11 +28,11 @@ export const listExpenses = (req, res) => {
   const params = {};
   
   if (dateFrom) {
-    conditions.push('DATE(e.createdAt) >= DATE(@dateFrom)');
+    conditions.push('DATE(COALESCE(e.entryDate, e.createdAt)) >= DATE(@dateFrom)');
     params.dateFrom = dateFrom;
   }
   if (dateTo) {
-    conditions.push('DATE(e.createdAt) <= DATE(@dateTo)');
+    conditions.push('DATE(COALESCE(e.entryDate, e.createdAt)) <= DATE(@dateTo)');
     params.dateTo = dateTo;
   }
   if (accountId) {
@@ -45,6 +46,10 @@ export const listExpenses = (req, res) => {
   if (createdBy) {
     conditions.push('e.createdBy = @createdBy');
     params.createdBy = parseInt(createdBy, 10);
+  }
+  if (type && (type === 'expense' || type === 'income')) {
+    conditions.push('e.type = @type');
+    params.type = type;
   }
   
   // Handle tag filtering (support both single tagId and multiple tagIds)
@@ -92,8 +97,8 @@ export const listExpenses = (req, res) => {
        LEFT JOIN users creator ON creator.id = e.createdBy
        LEFT JOIN users updater ON updater.id = e.updatedBy
        ${whereClause}
-       ORDER BY e.createdAt DESC`;
-  
+       ORDER BY COALESCE(e.entryDate, e.createdAt) DESC`;
+
   // Add pagination if requested
   if (usePagination) {
     query += ` LIMIT @limit OFFSET @offset;`;
@@ -149,6 +154,7 @@ export const exportExpenses = (req, res) => {
     createdBy,
     tagId,
     tagIds,
+    type,
   } = req.query;
   
   // Build WHERE conditions (same logic as listExpenses)
@@ -156,11 +162,11 @@ export const exportExpenses = (req, res) => {
   const params = {};
   
   if (dateFrom) {
-    conditions.push('DATE(e.createdAt) >= DATE(@dateFrom)');
+    conditions.push('DATE(COALESCE(e.entryDate, e.createdAt)) >= DATE(@dateFrom)');
     params.dateFrom = dateFrom;
   }
   if (dateTo) {
-    conditions.push('DATE(e.createdAt) <= DATE(@dateTo)');
+    conditions.push('DATE(COALESCE(e.entryDate, e.createdAt)) <= DATE(@dateTo)');
     params.dateTo = dateTo;
   }
   if (accountId) {
@@ -174,6 +180,10 @@ export const exportExpenses = (req, res) => {
   if (createdBy) {
     conditions.push('e.createdBy = @createdBy');
     params.createdBy = parseInt(createdBy, 10);
+  }
+  if (type && (type === 'expense' || type === 'income')) {
+    conditions.push('e.type = @type');
+    params.type = type;
   }
   
   // Handle tag filtering (support both single tagId and multiple tagIds)
@@ -209,7 +219,7 @@ export const exportExpenses = (req, res) => {
        LEFT JOIN users creator ON creator.id = e.createdBy
        LEFT JOIN users updater ON updater.id = e.updatedBy
        ${whereClause}
-       ORDER BY e.createdAt DESC;`;
+       ORDER BY COALESCE(e.entryDate, e.createdAt) DESC;`;
   
   const rows = db.prepare(query).all(params);
   
@@ -246,6 +256,7 @@ export const createExpense = async (req, res, next) => {
     const description = req.body?.description;
     const createdBy = req.body?.createdBy;
     const tagIds = req.body?.tagIds ? (Array.isArray(req.body.tagIds) ? req.body.tagIds : JSON.parse(req.body.tagIds)) : undefined;
+    const type = (req.body?.type === 'income') ? 'income' : 'expense';
     const file = req.file; // Multer file object
 
     // Validate accountId - handle both string and number inputs (FormData sends strings)
@@ -329,35 +340,45 @@ export const createExpense = async (req, res, next) => {
     const transaction = db.transaction(() => {
       // Create expense record first to get the expense ID
       const stmt = db.prepare(
-        `INSERT INTO expenses (accountId, amount, currencyCode, description, imagePath, createdBy, createdAt)
-         VALUES (@accountId, @amount, @currencyCode, @description, @imagePath, @createdBy, @createdAt);`
+        `INSERT INTO expenses (accountId, amount, currencyCode, description, imagePath, type, createdBy, createdAt, entryDate)
+         VALUES (@accountId, @amount, @currencyCode, @description, @imagePath, @type, @createdBy, @createdAt, @entryDate);`
       );
+      const entryDateValue = req.body?.entryDate ? new Date(req.body.entryDate).toISOString() : finalCreatedAt;
       const result = stmt.run({
         accountId: accountIdNum,
         amount: expenseAmount,
         currencyCode: finalCurrencyCode,
         description: description || null,
         imagePath: imagePath || null,
+        type: type,
         createdBy: createdBy || null,
         createdAt: finalCreatedAt,
+        entryDate: entryDateValue,
       });
 
       expenseId = result.lastInsertRowid;
 
-      // Deduct amount from account balance (allow negative)
-      db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(expenseAmount, accountIdNum);
-
-      // Create transaction record for the account with expense ID
+      // Update account balance: deduct for expense, add for income
       const isImported = req.body?.isImported === true || req.body?.isImported === "true";
+      const recordPrefix = type === 'income' ? 'Income' : 'Expense';
+      if (type === 'income') {
+        db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(expenseAmount, accountIdNum);
+      } else {
+        db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(expenseAmount, accountIdNum);
+      }
+
+      // Create transaction record for the account
+      const txType = type === 'income' ? 'add' : 'withdraw';
       const expenseDescription = description 
-        ? (isImported ? `Expense #${expenseId} - ${description} (Imported)` : `Expense #${expenseId} - ${description}`)
-        : (isImported ? `Expense #${expenseId} (Imported)` : `Expense #${expenseId}`);
+        ? (isImported ? `${recordPrefix} #${expenseId} - ${description} (Imported)` : `${recordPrefix} #${expenseId} - ${description}`)
+        : (isImported ? `${recordPrefix} #${expenseId} (Imported)` : `${recordPrefix} #${expenseId}`);
 
       db.prepare(
         `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
-         VALUES (?, 'withdraw', ?, ?, ?);`
+         VALUES (?, ?, ?, ?, ?);`
       ).run(
         accountIdNum,
+        txType,
         expenseAmount,
         expenseDescription,
         finalCreatedAt
@@ -376,8 +397,8 @@ export const createExpense = async (req, res, next) => {
 
       // Log the initial creation as a change
       db.prepare(
-        `INSERT INTO expense_changes (expenseId, changedBy, changedAt, accountId, accountName, amount, description)
-         VALUES (?, ?, ?, ?, ?, ?, ?);`
+        `INSERT INTO expense_changes (expenseId, changedBy, changedAt, accountId, accountName, amount, description, type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`
       ).run(
         expenseId,
         createdBy || null,
@@ -385,7 +406,8 @@ export const createExpense = async (req, res, next) => {
         accountIdNum,
         account.name,
         expenseAmount,
-        description || null
+        description || null,
+        type
       );
 
       return expenseId;
@@ -452,11 +474,12 @@ export const createExpense = async (req, res, next) => {
     const creatorUser = db.prepare("SELECT name FROM users WHERE id = ?").get(createdBy);
     const accountInfo = db.prepare("SELECT name, currencyCode FROM accounts WHERE id = ?").get(accountIdNum);
     
+    const notifLabel = type === 'income' ? 'Income' : 'Expense';
     await createNotification({
       userId: allUserIds,
       type: 'expense_created',
-      title: 'New Expense Created',
-      message: `Expense #${expenseId} created by ${creatorUser?.name || 'User'} - ${expenseAmount} ${expense.currencyCode} (${accountInfo?.name || 'Account'})${description ? ': ' + description : ''}`,
+      title: `New ${notifLabel} Created`,
+      message: `${notifLabel} #${expenseId} created by ${creatorUser?.name || 'User'} - ${expenseAmount} ${expense.currencyCode} (${accountInfo?.name || 'Account'})${description ? ': ' + description : ''}`,
       entityType: 'expense',
       entityId: expenseId,
       actionUrl: `/expenses`,
@@ -471,7 +494,7 @@ export const createExpense = async (req, res, next) => {
 export const updateExpense = (req, res, next) => {
   try {
     const { id } = req.params;
-    const { accountId, amount, description, updatedBy, tagIds } = req.body || {};
+    const { accountId, amount, description, updatedBy, tagIds, type, entryDate } = req.body || {};
     const tagIdsArray = tagIds ? (Array.isArray(tagIds) ? tagIds : JSON.parse(tagIds)) : undefined;
     const file = req.file; // Multer file object
 
@@ -558,67 +581,79 @@ export const updateExpense = (req, res, next) => {
     }
 
     const amountChanged = amount !== undefined && amount !== existingExpense.amount;
+    const finalType = (type !== undefined && (type === 'expense' || type === 'income')) ? type : existingExpense.type || 'expense';
+    const typeChanged = type !== undefined && type !== (existingExpense.type || 'expense');
 
     // Perform update in a transaction
     const transaction = db.transaction(() => {
-      // Handle account or amount changes - need to reverse old transaction and create new one
-      if (accountChanged || amountChanged) {
+      // Handle account, amount, or type changes - need to reverse old transaction and create new one
+      if (accountChanged || amountChanged || typeChanged) {
+        const oldType = existingExpense.type || 'expense';
+        const oldPrefix = oldType === 'income' ? 'Income' : 'Expense';
         const oldDescription = existingExpense.description 
-          ? `Expense #${id} - ${existingExpense.description}`
-          : `Expense #${id}`;
+          ? `${oldPrefix} #${id} - ${existingExpense.description}`
+          : `${oldPrefix} #${id}`;
         
-        // Reverse old transaction (add back the old amount to old account)
+        // Reverse old transaction: if old was expense (withdrew), reverse with 'add'; if old was income (added), reverse with 'withdraw'
+        const reversalTxType = oldType === 'income' ? 'withdraw' : 'add';
         db.prepare(
           `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
-           VALUES (?, 'add', ?, ?, ?);`
+           VALUES (?, ?, ?, ?, ?);`
         ).run(
           existingExpense.accountId,
+          reversalTxType,
           existingExpense.amount,
-          `Reversal: ${oldDescription} (Order updated)`,
+          `Reversal: ${oldDescription} (Record updated)`,
           new Date().toISOString()
         );
 
-        // Create new transaction (deduct new amount from new account)
+        // Create new transaction based on finalType
+        const newPrefix = finalType === 'income' ? 'Income' : 'Expense';
         const newDescription = description !== undefined 
-          ? (description ? `Expense #${id} - ${description}` : `Expense #${id}`)
-          : oldDescription;
+          ? (description ? `${newPrefix} #${id} - ${description}` : `${newPrefix} #${id}`)
+          : (existingExpense.description ? `${newPrefix} #${id} - ${existingExpense.description}` : `${newPrefix} #${id}`);
+        const newTxType = finalType === 'income' ? 'add' : 'withdraw';
         
         db.prepare(
           `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
-           VALUES (?, 'withdraw', ?, ?, ?);`
+           VALUES (?, ?, ?, ?, ?);`
         ).run(
           finalAccountId,
+          newTxType,
           expenseAmount,
           newDescription,
           new Date().toISOString()
         );
 
         // Update account balances
-        // Add back to old account
-        db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(
-          existingExpense.amount, 
-          existingExpense.accountId
-        );
+        // Reverse old balance effect
+        if (oldType === 'income') {
+          db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(existingExpense.amount, existingExpense.accountId);
+        } else {
+          db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(existingExpense.amount, existingExpense.accountId);
+        }
         
-        // Deduct from new account
-        db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(
-          expenseAmount, 
-          finalAccountId
-        );
+        // Apply new balance effect
+        if (finalType === 'income') {
+          db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(expenseAmount, finalAccountId);
+        } else {
+          db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(expenseAmount, finalAccountId);
+        }
       } else if (description !== undefined && description !== existingExpense.description) {
         // Only description changed, update the latest transaction
+        const recordPrefix = finalType === 'income' ? 'Income' : 'Expense';
         const expenseDescription = description 
-          ? `Expense #${id} - ${description}`
-          : `Expense #${id}`;
+          ? `${recordPrefix} #${id} - ${description}`
+          : `${recordPrefix} #${id}`;
         
         // Update the most recent transaction for this expense
         const latestTransaction = db
           .prepare(
             `SELECT id FROM account_transactions 
-             WHERE accountId = ? AND description LIKE ? 
+             WHERE accountId = ? AND (description LIKE ? OR description LIKE ?)
              ORDER BY createdAt DESC LIMIT 1;`
           )
-          .get(existingExpense.accountId, `Expense #${id}%`);
+          .get(existingExpense.accountId, `Expense #${id}%`, `Income #${id}%`);
         
         if (latestTransaction) {
           db.prepare("UPDATE account_transactions SET description = ? WHERE id = ?;")
@@ -637,6 +672,8 @@ export const updateExpense = (req, res, next) => {
       if (amount !== undefined) updateFields.push("amount = ?"), updateValues.push(expenseAmount);
       if (description !== undefined) updateFields.push("description = ?"), updateValues.push(description || null);
       if (imagePath !== undefined) updateFields.push("imagePath = ?"), updateValues.push(imagePath || null);
+      if (typeChanged) updateFields.push("type = ?"), updateValues.push(finalType);
+      if (entryDate !== undefined) updateFields.push("entryDate = ?"), updateValues.push(entryDate ? new Date(entryDate).toISOString() : null);
       
       updateFields.push("updatedBy = ?"), updateValues.push(updatedBy || null);
       updateFields.push("updatedAt = ?"), updateValues.push(new Date().toISOString());
@@ -645,11 +682,11 @@ export const updateExpense = (req, res, next) => {
       if (updateFields.length > 2) { // More than just updatedBy and updatedAt
         db.prepare(`UPDATE expenses SET ${updateFields.join(", ")} WHERE id = ?;`).run(...updateValues);
         
-        // Log the change if account, amount, or description changed
-        if (accountId !== undefined || amount !== undefined || description !== undefined) {
+        // Log the change if account, amount, description, or type changed
+        if (accountId !== undefined || amount !== undefined || description !== undefined || typeChanged) {
           db.prepare(
-            `INSERT INTO expense_changes (expenseId, changedBy, changedAt, accountId, accountName, amount, description)
-             VALUES (?, ?, ?, ?, ?, ?, ?);`
+            `INSERT INTO expense_changes (expenseId, changedBy, changedAt, accountId, accountName, amount, description, type)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?);`
           ).run(
             id,
             updatedBy || null,
@@ -657,7 +694,8 @@ export const updateExpense = (req, res, next) => {
             finalAccountId,
             newAccount.name,
             finalAmount,
-            finalDescription
+            finalDescription,
+            finalType
           );
         }
       }
@@ -797,22 +835,31 @@ export const deleteExpense = async (req, res, next) => {
         throw new Error(`Account ${accountId} not found`);
       }
       
-      // Reverse the expense (add back the amount to account)
-      db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(expenseAmount, accountId);
+      const recordType = expense.type || 'expense';
+      const recordPrefix = recordType === 'income' ? 'Income' : 'Expense';
+
+      // Reverse the balance effect: expense was deducted so add back; income was added so subtract back
+      if (recordType === 'income') {
+        db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(expenseAmount, accountId);
+      } else {
+        db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(expenseAmount, accountId);
+      }
 
       // Create reversal transaction record
       const expenseDescription = expense.description 
-        ? `Expense #${id} - ${expense.description}`
-        : `Expense #${id}`;
+        ? `${recordPrefix} #${id} - ${expense.description}`
+        : `${recordPrefix} #${id}`;
       
       // Always use current time for reversal to ensure it appears as the latest transaction
       const reversalCreatedAt = new Date().toISOString();
+      const reversalTxType = recordType === 'income' ? 'withdraw' : 'add';
       
       db.prepare(
         `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
-         VALUES (?, 'add', ?, ?, ?);`
+         VALUES (?, ?, ?, ?, ?);`
       ).run(
         accountId,
+        reversalTxType,
         expenseAmount,
         `Reversal: ${expenseDescription} (Deleted)`,
         reversalCreatedAt
@@ -830,11 +877,12 @@ export const deleteExpense = async (req, res, next) => {
     const userName = db.prepare("SELECT name FROM users WHERE id = ?").get(userId);
     const account = db.prepare("SELECT name FROM accounts WHERE id = ?").get(expense.accountId);
     
+    const deletedRecordLabel = (expense.type || 'expense') === 'income' ? 'Income' : 'Expense';
     await createNotification({
       userId: allUserIds,
       type: 'expense_deleted',
-      title: 'Expense Deleted',
-      message: `Expense #${id} - ${expense.amount} ${expense.currencyCode} (${account?.name || 'Account'}) deleted by ${userName?.name || 'User'}${expense.description ? ': ' + expense.description : ''}`,
+      title: `${deletedRecordLabel} Deleted`,
+      message: `${deletedRecordLabel} #${id} - ${expense.amount} ${expense.currencyCode} (${account?.name || 'Account'}) deleted by ${userName?.name || 'User'}${expense.description ? ': ' + expense.description : ''}`,
       entityType: 'expense',
       entityId: id,
       actionUrl: `/expenses`,

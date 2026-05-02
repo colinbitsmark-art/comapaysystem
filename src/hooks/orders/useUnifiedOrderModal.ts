@@ -13,7 +13,7 @@ import {
   useConfirmProfitMutation,
   useConfirmServiceChargeMutation,
 } from "../../services/api";
-import type { Account, AuthResponse, Currency } from "../../types";
+import type { Account, AuthResponse, Currency, Tag } from "../../types";
 import { ORDER_RECEIPT_PAYMENT_TOLERANCE } from "../../utils/orders/orderAmountTolerance";
 
 export type UnifiedLineKind = "receipt" | "payment" | "profit" | "service_charge";
@@ -39,6 +39,15 @@ function newLine(kind: UnifiedLineKind): UnifiedLine {
   };
 }
 
+function toDatetimeLocal(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 export function useUnifiedOrderModal(
   currencies: Currency[],
   accounts: Account[],
@@ -58,6 +67,9 @@ export function useUnifiedOrderModal(
   const [lines, setLines] = useState<UnifiedLine[]>([newLine("receipt"), newLine("payment")]);
   const [remarks, setRemarks] = useState("");
   const [showRemarks, setShowRemarks] = useState(false);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [showTagPicker, setShowTagPicker] = useState(false);
+  const [orderDate, setOrderDate] = useState(() => toDatetimeLocal(new Date()));
 
   const amountsRef = useRef({ amountBuy, amountSell, rate, fromCurrency, toCurrency });
   amountsRef.current = { amountBuy, amountSell, rate, fromCurrency, toCurrency };
@@ -227,6 +239,9 @@ export function useUnifiedOrderModal(
     setLines([newLine("receipt"), newLine("payment")]);
     setRemarks("");
     setShowRemarks(false);
+    setSelectedTagIds([]);
+    setShowTagPicker(false);
+    setOrderDate(toDatetimeLocal(new Date()));
   }, []);
 
   const closeModal = useCallback(() => {
@@ -303,6 +318,23 @@ export function useUnifiedOrderModal(
       setRemarks("");
       setShowRemarks(false);
     }
+    const tagList = (order as { tags?: Tag[] }).tags;
+    if (tagList && Array.isArray(tagList) && tagList.length > 0) {
+      setSelectedTagIds(tagList.map((x) => x.id));
+      setShowTagPicker(true);
+    } else {
+      setSelectedTagIds([]);
+      setShowTagPicker(false);
+    }
+    const existingDate = (order as { orderDate?: string | null; createdAt?: string | null }).orderDate
+      || (order as { createdAt?: string | null }).createdAt;
+    if (existingDate) {
+      try {
+        setOrderDate(toDatetimeLocal(new Date(existingDate)));
+      } catch {
+        setOrderDate(toDatetimeLocal(new Date()));
+      }
+    }
   }, [editingOrderId, orderDetails]);
 
   const addLineRow = useCallback((kind: UnifiedLineKind) => {
@@ -325,6 +357,8 @@ export function useUnifiedOrderModal(
       buyAccountId: firstReceiptAcc ? Number(firstReceiptAcc) : undefined,
       sellAccountId: firstPayAcc ? Number(firstPayAcc) : undefined,
       remarks: showRemarks && remarks.trim() ? remarks.trim() : null,
+      orderDate: orderDate ? new Date(orderDate).toISOString() : new Date().toISOString(),
+      tagIds: selectedTagIds,
     };
     if (profitLine?.amount && profitLine.accountId) {
       const acc = accounts.find((a) => a.id === Number(profitLine.accountId));
@@ -343,7 +377,19 @@ export function useUnifiedOrderModal(
       }
     }
     return { payload, receiptLines, paymentLines };
-  }, [lines, fromCurrency, toCurrency, amountBuy, amountSell, rate, remarks, showRemarks, accounts]);
+  }, [
+    lines,
+    fromCurrency,
+    toCurrency,
+    amountBuy,
+    amountSell,
+    rate,
+    remarks,
+    showRemarks,
+    accounts,
+    orderDate,
+    selectedTagIds,
+  ]);
 
   const replaceReceiptsPayments = async (orderId: number, confirmEach: boolean) => {
     if (orderDetails) {
@@ -598,6 +644,12 @@ export function useUnifiedOrderModal(
     setRemarks,
     showRemarks,
     setShowRemarks,
+    selectedTagIds,
+    setSelectedTagIds,
+    showTagPicker,
+    setShowTagPicker,
+    orderDate,
+    setOrderDate,
     orderDetails,
     closeModal,
     openNew,

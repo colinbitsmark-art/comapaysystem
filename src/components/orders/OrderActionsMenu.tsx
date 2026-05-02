@@ -41,11 +41,12 @@ export function OrderActionsMenu({
 
   const buttons: React.ReactElement[] = [];
   const st = order.status;
-  const isCompleted = String(st).toLowerCase() === "completed";
   const showViewAction = st === "completed" || st === "cancelled";
+  /** Only draft (saved) orders are editable; completed/cancelled are view-only. */
+  const canEdit = st === "saved";
 
   if (authUser && EDIT_VIEW_STATUSES.includes(st)) {
-    if (!isCompleted) {
+    if (canEdit) {
       buttons.push(
         <button
           key="edit"
@@ -60,7 +61,7 @@ export function OrderActionsMenu({
       buttons.push(
         <button
           key="view"
-          className={`w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-slate-50 ${!isCompleted ? "" : "first:rounded-t-lg"}`}
+          className={`w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-slate-50 ${canEdit ? "" : "first:rounded-t-lg"}`}
           onClick={() => onView(order.id)}
         >
           {t("orders.view")}

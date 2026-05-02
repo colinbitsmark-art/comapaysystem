@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 import Badge from "../common/Badge";
 import type { ProfitSummaryData } from "../../hooks/useProfitSummary";
+import type { Currency } from "../../types";
+import { convertCurrency } from "../../utils/orders/orderCalculations";
 
 // Helper function to format currency with proper number formatting
 const formatCurrency = (amount: number, currencyCode: string) => {
@@ -12,6 +14,7 @@ const formatCurrency = (amount: number, currencyCode: string) => {
 
 interface ProfitSummaryDisplayProps {
   summary: ProfitSummaryData;
+  currencies?: Currency[];
   showTitle?: boolean;
   title?: string;
   description?: string;
@@ -19,6 +22,7 @@ interface ProfitSummaryDisplayProps {
 
 export default function ProfitSummaryDisplay({
   summary,
+  currencies = [],
   showTitle = false,
   title,
   description,
@@ -50,7 +54,9 @@ export default function ProfitSummaryDisplay({
                     const key = `${currency}_${summary.targetCurrency}`;
                     const defaultRate = currency === summary.targetCurrency ? 1 : 0;
                     const rate = summary.exchangeRateMap.get(key) || defaultRate;
-                    const converted = rate > 0 ? sum * rate : sum;
+                    const converted = rate > 0
+                      ? convertCurrency(sum, rate, currency, summary.targetCurrency, currencies)
+                      : sum;
                     return (
                       <div key={currency} className="space-y-1">
                         <div className="flex justify-between text-sm">

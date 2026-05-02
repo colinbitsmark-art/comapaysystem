@@ -586,6 +586,57 @@ const ensureSchema = () => {
   if (!hasTelegramEnabled) {
     db.prepare("ALTER TABLE user_notification_preferences ADD COLUMN enableTelegramNotifications INTEGER DEFAULT 1").run();
   }
+
+  // Customer ledger entries (standalone deposits/withdrawals per client per currency)
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS customer_ledger_entries (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      customerId   INTEGER NOT NULL,
+      currencyCode TEXT NOT NULL,
+      type         TEXT NOT NULL CHECK(type IN ('credit', 'debit')),
+      amount       REAL NOT NULL CHECK(amount > 0),
+      description  TEXT,
+      createdBy    INTEGER,
+      createdAt    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      entryDate    TEXT,
+      updatedBy    INTEGER,
+      updatedAt    TEXT,
+      deletedBy    INTEGER,
+      deletedAt    TEXT,
+      FOREIGN KEY(customerId)   REFERENCES customers(id) ON DELETE RESTRICT,
+      FOREIGN KEY(currencyCode) REFERENCES currencies(code),
+      FOREIGN KEY(createdBy)    REFERENCES users(id),
+      FOREIGN KEY(updatedBy)    REFERENCES users(id),
+      FOREIGN KEY(deletedBy)    REFERENCES users(id)
+    );`,
+  ).run();
+
+  // Audit log for edits to customer ledger entries
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS customer_ledger_entry_changes (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      entryId      INTEGER NOT NULL,
+      changedBy    INTEGER,
+      changedAt    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      type         TEXT NOT NULL,
+      amount       REAL NOT NULL,
+      description  TEXT,
+      currencyCode TEXT NOT NULL,
+      FOREIGN KEY(entryId)   REFERENCES customer_ledger_entries(id) ON DELETE CASCADE,
+      FOREIGN KEY(changedBy) REFERENCES users(id)
+    );`,
+  ).run();
+
+  // Indexes for ledger performance
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_ledger_customer
+     ON customer_ledger_entries(customerId);`,
+  ).run();
+
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_ledger_customer_currency
+     ON customer_ledger_entries(customerId, currencyCode);`,
+  ).run();
 };
 
 const seedData = () => {
@@ -822,6 +873,9 @@ const migrateDatabase = () => {
     if (!columnNames.includes("createdBy")) {
       db.prepare("ALTER TABLE orders ADD COLUMN createdBy INTEGER REFERENCES users(id)").run();
     }
+    if (!columnNames.includes("orderDate")) {
+      db.prepare("ALTER TABLE orders ADD COLUMN orderDate TEXT").run();
+    }
 
     // Best-effort: older rows had NULL createdBy; copy handler user when present so "Created by" can resolve.
     const ordersColNames = db.prepare("PRAGMA table_info(orders)").all().map((col) => col.name);
@@ -869,6 +923,18 @@ const migrateDatabase = () => {
       db.prepare("UPDATE order_payments SET status = 'confirmed' WHERE status IS NULL").run();
     }
 
+    // Check expenses table for type column
+    const expenseTableInfo = db.prepare("PRAGMA table_info(expenses)").all();
+    const expenseColumnNames = expenseTableInfo.map((col) => col.name);
+    if (!expenseColumnNames.includes("type")) {
+      db.prepare("ALTER TABLE expenses ADD COLUMN type TEXT NOT NULL DEFAULT 'expense'").run();
+      // Also add type to expense_changes for audit trail
+      db.prepare("ALTER TABLE expense_changes ADD COLUMN type TEXT NOT NULL DEFAULT 'expense'").run();
+    }
+    if (!expenseColumnNames.includes("entryDate")) {
+      db.prepare("ALTER TABLE expenses ADD COLUMN entryDate TEXT").run();
+    }
+
     // Check transfers table for new columns
     const transferTableInfo = db.prepare("PRAGMA table_info(internal_transfers)").all();
     const transferColumnNames = transferTableInfo.map((col) => col.name);
@@ -889,6 +955,9 @@ const migrateDatabase = () => {
     
     if (!transferChangesColumnNames.includes("transactionFee")) {
       db.prepare("ALTER TABLE transfer_changes ADD COLUMN transactionFee REAL").run();
+    }
+    if (!transferColumnNames.includes("entryDate")) {
+      db.prepare("ALTER TABLE internal_transfers ADD COLUMN entryDate TEXT").run();
     }
 
     // Check profit_calculations table for groups column

@@ -180,26 +180,48 @@ export default function ExpensesPage() {
   const canViewExpenseAuditTrail = hasActionPermission(authUser, "viewExpenseAuditTrail");
   const hasAnyActionPermission = canDeleteExpense || canEditExpense || canViewExpenseAuditTrail;
 
+  const toDatetimeLocalParts = (date: Date) => {
+    const y = date.getFullYear();
+    const mo = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    const h = String(date.getHours()).padStart(2, "0");
+    const mi = String(date.getMinutes()).padStart(2, "0");
+    return { datePart: `${y}-${mo}-${d}`, timePart: `${h}:${mi}` };
+  };
+
   const [form, setForm] = useState<{
     accountId: string;
     amount: string;
     description: string;
     imagePath: string;
+    type: 'expense' | 'income';
     file?: File;
-  }>({
-    accountId: "",
-    amount: "",
-    description: "",
-    imagePath: "",
+    entryDatePart: string;
+    entryTimePart: string;
+  }>(() => {
+    const { datePart, timePart } = toDatetimeLocalParts(new Date());
+    return {
+      accountId: "",
+      amount: "",
+      description: "",
+      imagePath: "",
+      type: "expense",
+      entryDatePart: datePart,
+      entryTimePart: timePart,
+    };
   });
 
   const resetForm = () => {
+    const { datePart, timePart } = toDatetimeLocalParts(new Date());
     setForm({
       accountId: "",
       amount: "",
       description: "",
       imagePath: "",
+      type: "expense",
       file: undefined,
+      entryDatePart: datePart,
+      entryTimePart: timePart,
     });
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
@@ -217,11 +239,18 @@ export default function ExpensesPage() {
     if (!expense) return;
     
     setEditingExpenseId(expenseId);
+    const existingDate = expense.entryDate || expense.createdAt;
+    const { datePart, timePart } = existingDate
+      ? toDatetimeLocalParts(new Date(existingDate))
+      : toDatetimeLocalParts(new Date());
     setForm({
       accountId: String(expense.accountId),
       amount: String(expense.amount),
       description: expense.description || "",
       imagePath: expense.imagePath || "",
+      type: (expense.type === 'income') ? 'income' : 'expense',
+      entryDatePart: datePart,
+      entryTimePart: timePart,
     });
     setIsModalOpen(true);
   };
@@ -355,6 +384,8 @@ export default function ExpensesPage() {
       return;
     }
 
+    const entryDateIso = new Date(`${form.entryDatePart}T${form.entryTimePart}`).toISOString();
+
     try {
       if (editingExpenseId) {
         // Update existing expense
@@ -362,7 +393,9 @@ export default function ExpensesPage() {
           accountId: accountIdNum,
           amount: amountNum,
           description: description,
+          type: form.type,
           updatedBy: authUser?.id,
+          entryDate: entryDateIso,
         };
         // Send File object if available, otherwise fallback to base64 (backward compatibility)
         if (form.file) {
@@ -380,7 +413,9 @@ export default function ExpensesPage() {
           accountId: accountIdNum,
           amount: amountNum,
           description: description,
+          type: form.type,
           createdBy: authUser?.id,
+          entryDate: entryDateIso,
         };
         // Send File object if available, otherwise fallback to base64 (backward compatibility)
         if (form.file) {
@@ -663,8 +698,22 @@ export default function ExpensesPage() {
     switch (columnKey) {
       case "id":
         return <td key={columnKey} className="py-2 font-mono text-slate-600">#{expense.id}</td>;
+      case "type":
+        return (
+          <td key={columnKey} className="py-2">
+            {expense.type === 'income' ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+                ↓ {t("expenses.typeIncome")}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-700">
+                ↑ {t("expenses.typeExpense")}
+              </span>
+            )}
+          </td>
+        );
       case "date":
-        return <td key={columnKey} className="py-2">{formatDate(expense.createdAt)}</td>;
+        return <td key={columnKey} className="py-2">{formatDate(expense.entryDate || expense.createdAt)}</td>;
       case "description":
         return (
           <td key={columnKey} className="py-2 text-slate-600">
@@ -694,8 +743,8 @@ export default function ExpensesPage() {
         );
       case "amount":
         return (
-          <td key={columnKey} className="py-2 font-semibold text-slate-900">
-            {formatCurrency(expense.amount, expense.currencyCode)}
+          <td key={columnKey} className={`py-2 font-semibold ${expense.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+            {expense.type === 'income' ? '+' : '-'}{formatCurrency(expense.amount, expense.currencyCode)}
           </td>
         );
       case "currency":
@@ -1031,8 +1080,8 @@ export default function ExpensesPage() {
             <div className="sticky top-0 bg-white z-10 p-6 pb-4 border-b border-slate-200 flex items-center justify-between rounded-t-2xl">
               <h2 className="text-xl font-semibold text-slate-900">
                 {editingExpenseId
-                  ? t("expenses.editExpenseTitle")
-                  : t("expenses.createExpenseTitle")}
+                  ? (form.type === 'income' ? t("expenses.editIncomeTitle") : t("expenses.editExpenseTitle"))
+                  : (form.type === 'income' ? t("expenses.createIncomeTitle") : t("expenses.createExpenseTitle"))}
               </h2>
               <button
                 onClick={closeModal}
@@ -1056,6 +1105,52 @@ export default function ExpensesPage() {
             </div>
             <div className="overflow-y-auto flex-1 p-6 pt-4">
               <form className="grid gap-3" onSubmit={handleSubmit}>
+              {/* Type Segmented Control */}
+              <div className="flex rounded-lg border border-slate-200 p-1 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setForm(p => ({ ...p, type: 'expense' }))}
+                  className={`flex-1 rounded-md py-2 text-sm font-semibold transition-all ${
+                    form.type === 'expense'
+                      ? 'bg-rose-500 text-white shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  ↑ {t("expenses.typeExpense")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm(p => ({ ...p, type: 'income' }))}
+                  className={`flex-1 rounded-md py-2 text-sm font-semibold transition-all ${
+                    form.type === 'income'
+                      ? 'bg-emerald-500 text-white shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  ↓ {t("expenses.typeIncome")}
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  {t("common.entryDate")}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    value={form.entryDatePart}
+                    onChange={(e) => setForm((p) => ({ ...p, entryDatePart: e.target.value }))}
+                  />
+                  <input
+                    type="time"
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    value={form.entryTimePart}
+                    onChange={(e) => setForm((p) => ({ ...p, entryTimePart: e.target.value }))}
+                  />
+                </div>
+              </div>
+
               <AccountSelect
                 value={form.accountId}
                 onChange={(accountId) => setForm((p) => ({ ...p, accountId }))}
@@ -1086,8 +1181,7 @@ export default function ExpensesPage() {
                   required
                   disabled={!form.accountId}
                 />
-                {selectedAccount &&
-                  form.amount &&
+                {selectedAccount && form.amount && form.type === 'expense' &&
                   Number(form.amount) > selectedAccount.balance && (
                     <div className="mt-1 text-xs text-amber-600">
                       {t("expenses.insufficientBalance")} -{" "}
@@ -1098,6 +1192,15 @@ export default function ExpensesPage() {
                       )}
                     </div>
                   )}
+                {selectedAccount && form.amount && form.type === 'income' && Number(form.amount) > 0 && (
+                  <div className="mt-1 text-xs text-emerald-600">
+                    {t("expenses.newBalanceWillBeAdded")}:{" "}
+                    {formatCurrency(
+                      selectedAccount.balance + Number(form.amount),
+                      selectedAccount.currencyCode
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1111,14 +1214,14 @@ export default function ExpensesPage() {
                   onChange={(e) =>
                     setForm((p) => ({ ...p, description: e.target.value }))
                   }
-                  placeholder={t("expenses.descriptionPlaceholder")}
+                  placeholder={form.type === 'income' ? t("expenses.descriptionPlaceholderIncome") : t("expenses.descriptionPlaceholder")}
                   required
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  {t("expenses.proofOfPayment")} ({t("common.optional")})
+                  {form.type === 'income' ? t("expenses.proofOfIncome") : t("expenses.proofOfPayment")} ({t("common.optional")})
                 </label>
                 <div
                   className={`p-3 border-2 border-dashed rounded-lg transition-colors relative ${
@@ -1243,13 +1346,17 @@ export default function ExpensesPage() {
                     !form.amount ||
                     !form.description
                   }
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60 transition-colors"
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold text-white shadow disabled:opacity-60 transition-colors ${
+                    form.type === 'income'
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : 'bg-rose-600 hover:bg-rose-700'
+                  }`}
                 >
                   {isCreating || isUpdating
                     ? t("common.saving")
                     : editingExpenseId
-                    ? t("expenses.updateExpense")
-                    : t("expenses.createExpense")}
+                    ? (form.type === 'income' ? t("expenses.updateIncome") : t("expenses.updateExpense"))
+                    : (form.type === 'income' ? t("expenses.createIncomeTitle") : t("expenses.createExpense"))}
                 </button>
               </div>
               </form>
@@ -1329,7 +1436,7 @@ export default function ExpensesPage() {
       {viewAuditTrailExpenseId && (
         <div className="fixed top-0 left-0 right-0 bottom-0 w-full h-full z-[9999] flex items-center justify-center bg-black bg-opacity-50" style={{ margin: 0, padding: 0 }}>
           <div
-            className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-h-[90vh] overflow-y-auto"
+            className="w-full max-w-4xl rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">
@@ -1422,6 +1529,9 @@ export default function ExpensesPage() {
                                 {t("expenses.account")}
                               </th>
                               <th className="py-2 px-3 border-b border-slate-200 font-semibold text-slate-700">
+                                {t("expenses.type")}
+                              </th>
+                              <th className="py-2 px-3 border-b border-slate-200 font-semibold text-slate-700">
                                 {t("expenses.amount")}
                               </th>
                               <th className="py-2 px-3 border-b border-slate-200 font-semibold text-slate-700">
@@ -1444,8 +1554,19 @@ export default function ExpensesPage() {
                                 <td className="py-2 px-3 border-b border-slate-100 text-slate-600">
                                   {change.accountName || change.accountId}
                                 </td>
-                                <td className="py-2 px-3 border-b border-slate-100 font-semibold text-slate-900">
-                                  {formatCurrency(change.amount, expense.currencyCode)}
+                                <td className="py-2 px-3 border-b border-slate-100">
+                                  {change.type === 'income' ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+                                      ↓ {t("expenses.typeIncome")}
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-700">
+                                      ↑ {t("expenses.typeExpense")}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className={`py-2 px-3 border-b border-slate-100 font-semibold ${change.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                  {change.type === 'income' ? '+' : '-'}{formatCurrency(change.amount, expense.currencyCode)}
                                 </td>
                                 <td className="py-2 px-3 border-b border-slate-100 text-slate-600">
                                   {change.description || "-"}

@@ -162,11 +162,11 @@ export const listOrders = (req, res) => {
   const params = {};
 
   if (dateFrom) {
-    conditions.push('DATE(o.createdAt) >= DATE(@dateFrom)');
+    conditions.push('DATE(COALESCE(o.orderDate, o.createdAt)) >= DATE(@dateFrom)');
     params.dateFrom = dateFrom;
   }
   if (dateTo) {
-    conditions.push('DATE(o.createdAt) <= DATE(@dateTo)');
+    conditions.push('DATE(COALESCE(o.orderDate, o.createdAt)) <= DATE(@dateTo)');
     params.dateTo = dateTo;
   }
   if (handlerId) {
@@ -253,7 +253,7 @@ export const listOrders = (req, res) => {
     LEFT JOIN accounts buyAcc ON buyAcc.id = o.buyAccountId
     LEFT JOIN accounts sellAcc ON sellAcc.id = o.sellAccountId
     ${whereClause}
-    ORDER BY o.createdAt DESC
+    ORDER BY COALESCE(o.orderDate, o.createdAt) DESC
     LIMIT @limit OFFSET @offset;
   `;
 
@@ -481,11 +481,11 @@ export const exportOrders = (req, res) => {
   const params = {};
 
   if (dateFrom) {
-    conditions.push('DATE(o.createdAt) >= DATE(@dateFrom)');
+    conditions.push('DATE(COALESCE(o.orderDate, o.createdAt)) >= DATE(@dateFrom)');
     params.dateFrom = dateFrom;
   }
   if (dateTo) {
-    conditions.push('DATE(o.createdAt) <= DATE(@dateTo)');
+    conditions.push('DATE(COALESCE(o.orderDate, o.createdAt)) <= DATE(@dateTo)');
     params.dateTo = dateTo;
   }
   if (handlerId) {
@@ -559,7 +559,7 @@ export const exportOrders = (req, res) => {
     LEFT JOIN accounts buyAcc ON buyAcc.id = o.buyAccountId
     LEFT JOIN accounts sellAcc ON sellAcc.id = o.sellAccountId
     ${whereClause}
-    ORDER BY o.createdAt DESC;
+    ORDER BY COALESCE(o.orderDate, o.createdAt) DESC;
   `;
 
   const rows = db.prepare(query).all(params);
@@ -761,7 +761,8 @@ export const createOrder = async (req, res, next) => {
          serviceChargeCurrency,
          serviceChargeAccountId,
          createdBy,
-         createdAt
+         createdAt,
+         orderDate
        ) VALUES (
          @customerId,
          @fromCurrency,
@@ -781,12 +782,14 @@ export const createOrder = async (req, res, next) => {
          @serviceChargeCurrency,
          @serviceChargeAccountId,
          @createdBy,
-         @createdAt
+         @createdAt,
+         @orderDate
        );`,
     );
     const rowForInsert = { ...orderData };
     delete rowForInsert.customerName;
     delete rowForInsert.remarks;
+    const nowIso = new Date().toISOString();
     const result = stmt.run({
       ...rowForInsert,
       status: orderData.status || "saved",
@@ -803,8 +806,9 @@ export const createOrder = async (req, res, next) => {
       serviceChargeAmount: orderData.serviceChargeAmount ?? null,
       serviceChargeCurrency: orderData.serviceChargeCurrency ?? null,
       serviceChargeAccountId: orderData.serviceChargeAccountId ?? null,
-      createdBy: userId, // userId is already validated above
-      createdAt: new Date().toISOString(),
+      createdBy: userId,
+      createdAt: nowIso,
+      orderDate: orderData.orderDate ? new Date(orderData.orderDate).toISOString() : nowIso,
     });
     
     const orderId = result.lastInsertRowid;
@@ -1082,6 +1086,7 @@ export const updateOrder = (req, res, next) => {
       "buyAccountId",
       "sellAccountId",
       "remarks",
+      "orderDate",
     ];
     
     // Separate updates into pending-only and always-updatable
@@ -1226,6 +1231,9 @@ export const updateOrder = (req, res, next) => {
         } else {
           updateValues[field] = String(value);
         }
+      } else if (field === "orderDate") {
+        // For orderDate: convert to ISO string if provided
+        updateValues[field] = value ? new Date(value).toISOString() : null;
       } else if (value === null || value === "" || (typeof value === "string" && value.trim() === "")) {
         updateValues[field] = null;
       } else if (field === "profitAccountId" || field === "serviceChargeAccountId") {
@@ -1537,6 +1545,11 @@ export const deleteOrder = async (req, res, next) => {
 
     if (!userId) {
       return res.status(401).json({ message: "User ID is required" });
+    }
+
+    const userPermissions = getUserPermissions(userId);
+    if (!userPermissions?.actions?.deleteOrder) {
+      return res.status(403).json({ message: "You do not have permission to delete orders" });
     }
 
     // Get all confirmed receipts with accountId and amount for reversing balances (only reverse confirmed ones)

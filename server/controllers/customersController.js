@@ -4,9 +4,57 @@ const trimValue = (value) => (typeof value === "string" ? value.trim() : value);
 const sanitizePayload = (payload = {}) =>
   Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, trimValue(value)]));
 
-export const listCustomers = (_req, res) => {
-  const rows = db.prepare("SELECT * FROM customers ORDER BY name ASC;").all();
-  res.json(rows);
+export const listCustomers = (req, res, next) => {
+  try {
+    const search =
+      typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const pageRaw = req.query.page;
+    const limitRaw = req.query.limit;
+
+    const page = parseInt(pageRaw, 10);
+    const limit = Math.min(Math.max(parseInt(limitRaw, 10) || 20, 1), 100);
+
+    const params = {};
+    let whereSql = "";
+    if (search) {
+      whereSql =
+        "WHERE (lower(name) LIKE @q OR lower(COALESCE(email, '')) LIKE @q)";
+      params.q = `%${search.toLowerCase()}%`;
+    }
+
+    const total = db
+      .prepare(`SELECT COUNT(*) as c FROM customers ${whereSql}`)
+      .get(params).c;
+
+    const usePaging =
+      pageRaw !== undefined &&
+      pageRaw !== "" &&
+      Number.isFinite(page) &&
+      page >= 1;
+
+    let rows;
+    if (usePaging) {
+      const offset = (page - 1) * limit;
+      rows = db
+        .prepare(
+          `SELECT * FROM customers ${whereSql} ORDER BY name ASC LIMIT @limit OFFSET @offset`,
+        )
+        .all({ ...params, limit, offset });
+    } else {
+      rows = db
+        .prepare(`SELECT * FROM customers ${whereSql} ORDER BY name ASC`)
+        .all(params);
+    }
+
+    res.json({
+      customers: rows,
+      total,
+      page: usePaging ? page : null,
+      limit: usePaging ? limit : null,
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
 export const createCustomer = (req, res, next) => {

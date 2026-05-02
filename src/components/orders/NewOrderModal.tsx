@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import type { Account, Currency } from "../../types";
+import type { Account, Currency, Tag } from "../../types";
+import Badge from "../common/Badge";
 import type { UnifiedLine, UnifiedLineKind } from "../../hooks/orders/useUnifiedOrderModal";
 import { CurrencyPairSwapButton } from "./CurrencyPairSwapButton";
 
@@ -33,6 +34,13 @@ type Props = {
   setRemarks: (v: string) => void;
   showRemarks: boolean;
   setShowRemarks: (v: boolean) => void;
+  tags: Tag[];
+  selectedTagIds: number[];
+  setSelectedTagIds: React.Dispatch<React.SetStateAction<number[]>>;
+  showTagPicker: boolean;
+  setShowTagPicker: (v: boolean) => void;
+  orderDate: string;
+  setOrderDate: (v: string) => void;
   currencies: Currency[];
   accounts: Account[];
   handleNumberInputWheel: (e: React.WheelEvent<HTMLInputElement>) => void;
@@ -82,6 +90,13 @@ export default function NewOrderModal({
   setRemarks,
   showRemarks,
   setShowRemarks,
+  tags,
+  selectedTagIds,
+  setSelectedTagIds,
+  showTagPicker,
+  setShowTagPicker,
+  orderDate,
+  setOrderDate,
   currencies,
   accounts,
   handleNumberInputWheel,
@@ -419,15 +434,50 @@ export default function NewOrderModal({
             </div>
           </div>
 
-          {!showRemarks ? (
-            <button
-              type="button"
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-              onClick={() => setShowRemarks(true)}
-            >
-              {t("orders.addRemarks")}
-            </button>
-          ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            {!showRemarks ? (
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => setShowRemarks(true)}
+              >
+                {t("orders.addRemarks")}
+              </button>
+            ) : null}
+            {!showTagPicker ? (
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => setShowTagPicker(true)}
+              >
+                {t("orders.tag")}
+              </button>
+            ) : null}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-slate-600 whitespace-nowrap">
+                {t("orders.orderDate")}
+              </label>
+              <input
+                type="date"
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={orderDate.split("T")[0] ?? ""}
+                onChange={(e) => {
+                  const time = orderDate.split("T")[1] ?? "00:00";
+                  setOrderDate(`${e.target.value}T${time}`);
+                }}
+              />
+              <input
+                type="time"
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={orderDate.split("T")[1] ?? ""}
+                onChange={(e) => {
+                  const date = orderDate.split("T")[0] ?? new Date().toISOString().split("T")[0];
+                  setOrderDate(`${date}T${e.target.value}`);
+                }}
+              />
+            </div>
+          </div>
+          {showRemarks && (
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.remarks")}</label>
               <textarea
@@ -436,6 +486,50 @@ export default function NewOrderModal({
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
               />
+            </div>
+          )}
+
+          {showTagPicker && (
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-slate-700">{t("orders.tags")}</span>
+                {tags.length > 0 && selectedTagIds.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-xs text-slate-600 hover:text-slate-900"
+                    onClick={() => setSelectedTagIds([])}
+                  >
+                    {t("common.clear")}
+                  </button>
+                )}
+              </div>
+              {tags.length === 0 ? (
+                <p className="text-sm text-slate-500">{t("orders.noTagsAvailable")}</p>
+              ) : (
+                <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                  {tags.map((tag) => (
+                    <label
+                      key={tag.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={selectedTagIds.includes(tag.id)}
+                        onChange={(e) => {
+                          const on = e.target.checked;
+                          setSelectedTagIds((prev) =>
+                            on ? [...prev, tag.id] : prev.filter((id) => id !== tag.id),
+                          );
+                        }}
+                      />
+                      <Badge tone="slate" backgroundColor={tag.color}>
+                        {tag.name}
+                      </Badge>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

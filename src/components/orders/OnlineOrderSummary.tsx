@@ -14,6 +14,7 @@ interface OrderDetails {
     amountSell: number;
     handlerName?: string;
     createdAt: string;
+    orderDate?: string | null;
     paymentType?: "CRYPTO" | "FIAT";
     networkChain?: string;
     walletAddresses?: string[];
@@ -119,7 +120,7 @@ export const OnlineOrderSummary: React.FC<OnlineOrderSummaryProps> = ({
             <div>
               <span className="text-slate-500">{t("orders.date")}:</span>
               <span className="ml-2 text-slate-700">
-                {formatDate(orderDetails.order.createdAt)}
+                {formatDate(orderDetails.order.orderDate || orderDetails.order.createdAt)}
               </span>
             </div>
           </div>

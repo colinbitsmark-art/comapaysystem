@@ -2,6 +2,7 @@ import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import type {
   Currency,
   Customer,
+  CustomerListResponse,
   User,
   Role,
   Order,
@@ -31,6 +32,11 @@ import type {
   TagInput,
   Notification,
   NotificationPreferences,
+  CustomerLedgerEntry,
+  CustomerLedgerEntryInput,
+  CustomerLedgerChange,
+  CustomerLedgerSummary,
+  AllCustomersConvertedBalances,
 } from "../types";
 
 const baseQuery = fetchBaseQuery({
@@ -66,7 +72,7 @@ const baseQuery = fetchBaseQuery({
 export const api = createApi({
   reducerPath: "api",
   baseQuery,
-  tagTypes: ["Currency", "Customer", "CustomerBeneficiary", "User", "Role", "Order", "Auth", "Account", "Transfer", "Expense", "ProfitCalculation", "Setting", "Tag", "Notification", "Wallet"],
+  tagTypes: ["Currency", "Customer", "CustomerBeneficiary", "CustomerLedger", "User", "Role", "Order", "Auth", "Account", "Transfer", "Expense", "ProfitCalculation", "Setting", "Tag", "Notification", "Wallet"],
   refetchOnReconnect: true,
   endpoints: (builder) => ({
     getCurrencies: builder.query<Currency[], void>({
@@ -111,12 +117,26 @@ export const api = createApi({
         { type: "Currency", id: "LIST" },
       ],
     }),
-    getCustomers: builder.query<Customer[], void>({
-      query: () => "customers",
+    getCustomers: builder.query<
+      CustomerListResponse,
+      { page?: number; limit?: number; search?: string } | void
+    >({
+      query: (arg) => {
+        const params = new URLSearchParams();
+        if (arg && arg.page != null) params.set("page", String(arg.page));
+        if (arg && arg.limit != null) params.set("limit", String(arg.limit));
+        if (arg && arg.search != null && arg.search.trim() !== "")
+          params.set("search", arg.search.trim());
+        const qs = params.toString();
+        return qs ? `customers?${qs}` : "customers";
+      },
       providesTags: (result) =>
-        result
+        result?.customers?.length
           ? [
-              ...result.map(({ id }) => ({ type: "Customer" as const, id })),
+              ...result.customers.map(({ id }) => ({
+                type: "Customer" as const,
+                id,
+              })),
               { type: "Customer" as const, id: "LIST" },
             ]
           : [{ type: "Customer" as const, id: "LIST" }],
@@ -232,6 +252,81 @@ export const api = createApi({
         { type: "CustomerBeneficiary", id: `LIST-${customerId}` },
       ],
     }),
+
+    // ─── Customer Ledger ───────────────────────────────────
+    getAllCustomersConvertedBalances: builder.query<AllCustomersConvertedBalances, void>({
+      query: () => "customers/ledger/converted-balances",
+      providesTags: [{ type: "CustomerLedger" as const, id: "CONVERTED-BALANCES" }],
+    }),
+    getCustomerLedgerEntries: builder.query<
+      CustomerLedgerEntry[],
+      { customerId: number; currencyCode?: string; dateFrom?: string; dateTo?: string; showDeleted?: boolean }
+    >({
+      query: ({ customerId, ...params }) => {
+        const search = new URLSearchParams();
+        if (params.currencyCode) search.set("currencyCode", params.currencyCode);
+        if (params.dateFrom) search.set("dateFrom", params.dateFrom);
+        if (params.dateTo) search.set("dateTo", params.dateTo);
+        if (params.showDeleted) search.set("showDeleted", "true");
+        const qs = search.toString();
+        return `customers/${customerId}/ledger${qs ? `?${qs}` : ""}`;
+      },
+      providesTags: (_res, _err, { customerId }) => [
+        { type: "CustomerLedger" as const, id: `LIST-${customerId}` },
+      ],
+    }),
+    getCustomerLedgerSummary: builder.query<CustomerLedgerSummary[], number>({
+      query: (customerId) => `customers/${customerId}/ledger/summary`,
+      providesTags: (_res, _err, customerId) => [
+        { type: "CustomerLedger" as const, id: `SUMMARY-${customerId}` },
+      ],
+    }),
+    createLedgerEntry: builder.mutation<CustomerLedgerEntry, CustomerLedgerEntryInput>({
+      query: ({ customerId, ...body }) => ({
+        url: `customers/${customerId}/ledger`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (_res, _err, { customerId }) => [
+        { type: "CustomerLedger", id: `LIST-${customerId}` },
+        { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
+      ],
+    }),
+    updateLedgerEntry: builder.mutation<
+      CustomerLedgerEntry,
+      { customerId: number; entryId: number; data: Partial<CustomerLedgerEntryInput> }
+    >({
+      query: ({ customerId, entryId, data }) => ({
+        url: `customers/${customerId}/ledger/${entryId}`,
+        method: "PUT",
+        body: data,
+      }),
+      invalidatesTags: (_res, _err, { customerId, entryId }) => [
+        { type: "CustomerLedger", id: `LIST-${customerId}` },
+        { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: entryId },
+        { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
+      ],
+    }),
+    deleteLedgerEntry: builder.mutation<void, { customerId: number; entryId: number }>({
+      query: ({ customerId, entryId }) => ({
+        url: `customers/${customerId}/ledger/${entryId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: (_res, _err, { customerId }) => [
+        { type: "CustomerLedger", id: `LIST-${customerId}` },
+        { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
+      ],
+    }),
+    getLedgerEntryChanges: builder.query<CustomerLedgerChange[], number>({
+      query: (entryId) => `customers/ledger/${entryId}/changes`,
+      providesTags: (_res, _err, entryId) => [
+        { type: "CustomerLedger" as const, id: `CHANGES-${entryId}` },
+      ],
+    }),
+
     login: builder.mutation<AuthResponse, { email: string; password: string }>({
       query: (body) => ({
         url: "auth/login",
@@ -1097,6 +1192,7 @@ export const api = createApi({
           formData.append("amount", String(body.amount));
           // Always append description (even if empty) since backend requires it
           formData.append("description", body.description || "");
+          formData.append("type", body.type || "expense");
           if (body.createdBy !== undefined) {
             formData.append("createdBy", String(body.createdBy));
           }
@@ -1141,6 +1237,9 @@ export const api = createApi({
           if (body.imagePath !== undefined) {
             // For removing image, send empty string
             formData.append("imagePath", body.imagePath || "");
+          }
+          if (body.type !== undefined) {
+            formData.append("type", body.type);
           }
           if (body.updatedBy !== undefined) {
             formData.append("updatedBy", String(body.updatedBy));
@@ -1758,6 +1857,13 @@ export const {
   useGetPollingStatusQuery,
   useStopWalletPollingMutation,
   useStartWalletPollingMutation,
+  useGetAllCustomersConvertedBalancesQuery,
+  useGetCustomerLedgerEntriesQuery,
+  useGetCustomerLedgerSummaryQuery,
+  useCreateLedgerEntryMutation,
+  useUpdateLedgerEntryMutation,
+  useDeleteLedgerEntryMutation,
+  useGetLedgerEntryChangesQuery,
 } = api;
 
 

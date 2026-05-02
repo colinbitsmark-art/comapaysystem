@@ -17,6 +17,15 @@ import {
   deleteCustomerBeneficiary,
 } from "../controllers/customersController.js";
 import {
+  listLedgerEntries,
+  getLedgerSummary,
+  createLedgerEntry,
+  updateLedgerEntry,
+  deleteLedgerEntry,
+  getLedgerEntryChanges,
+  getAllCustomersConvertedBalances,
+} from "../controllers/customerLedgerController.js";
+import {
   listUsers,
   createUser,
   updateUser,
@@ -167,6 +176,15 @@ router.get("/customers/:id/beneficiaries", listCustomerBeneficiaries);
 router.post("/customers/:id/beneficiaries", addCustomerBeneficiary);
 router.put("/customers/:id/beneficiaries/:beneficiaryId", updateCustomerBeneficiary);
 router.delete("/customers/:id/beneficiaries/:beneficiaryId", deleteCustomerBeneficiary);
+
+// Customer ledger routes (static routes must come before /:id routes)
+router.get("/customers/ledger/converted-balances", getAllCustomersConvertedBalances);
+router.get("/customers/:id/ledger", listLedgerEntries);
+router.get("/customers/:id/ledger/summary", getLedgerSummary);
+router.post("/customers/:id/ledger", createLedgerEntry);
+router.get("/customers/ledger/:entryId/changes", getLedgerEntryChanges);
+router.put("/customers/:id/ledger/:entryId", updateLedgerEntry);
+router.delete("/customers/:id/ledger/:entryId", deleteLedgerEntry);
 
 router.get("/users", listUsers);
 router.post("/users", createUser);

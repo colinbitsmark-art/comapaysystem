@@ -178,21 +178,38 @@ export default function TransfersPage() {
   const canViewTransferAuditTrail = hasActionPermission(authUser, "viewTransferAuditTrail");
   const hasAnyActionPermission = canDeleteTransfer || canEditTransfer || canViewTransferAuditTrail;
 
-  const [form, setForm] = useState({
-    fromAccountId: "",
-    toAccountId: "",
-    amount: "",
-    description: "",
-    transactionFee: "",
+  const toDatetimeLocalParts = (date: Date) => {
+    const y = date.getFullYear();
+    const mo = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    const h = String(date.getHours()).padStart(2, "0");
+    const mi = String(date.getMinutes()).padStart(2, "0");
+    return { datePart: `${y}-${mo}-${d}`, timePart: `${h}:${mi}` };
+  };
+
+  const [form, setForm] = useState(() => {
+    const { datePart, timePart } = toDatetimeLocalParts(new Date());
+    return {
+      fromAccountId: "",
+      toAccountId: "",
+      amount: "",
+      description: "",
+      transactionFee: "",
+      entryDatePart: datePart,
+      entryTimePart: timePart,
+    };
   });
 
   const resetForm = () => {
+    const { datePart, timePart } = toDatetimeLocalParts(new Date());
     setForm({
       fromAccountId: "",
       toAccountId: "",
       amount: "",
       description: "",
       transactionFee: "",
+      entryDatePart: datePart,
+      entryTimePart: timePart,
     });
     setEditingTransferId(null);
   };
@@ -207,12 +224,18 @@ export default function TransfersPage() {
     if (!transfer) return;
     
     setEditingTransferId(transferId);
+    const existingDate = transfer.entryDate || transfer.createdAt;
+    const { datePart, timePart } = existingDate
+      ? toDatetimeLocalParts(new Date(existingDate))
+      : toDatetimeLocalParts(new Date());
     setForm({
       fromAccountId: String(transfer.fromAccountId),
       toAccountId: String(transfer.toAccountId),
       amount: String(transfer.amount),
       description: transfer.description || "",
       transactionFee: transfer.transactionFee ? String(transfer.transactionFee) : "",
+      entryDatePart: datePart,
+      entryTimePart: timePart,
     });
     setIsModalOpen(true);
   };
@@ -220,6 +243,8 @@ export default function TransfersPage() {
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!form.fromAccountId || !form.toAccountId || !form.amount || !form.description) return;
+
+    const entryDateIso = new Date(`${form.entryDatePart}T${form.entryTimePart}`).toISOString();
 
     try {
       if (editingTransferId) {
@@ -232,6 +257,7 @@ export default function TransfersPage() {
             description: form.description,
             transactionFee: form.transactionFee ? Number(form.transactionFee) : undefined,
             updatedBy: authUser?.id,
+            entryDate: entryDateIso,
           },
         }).unwrap();
       } else {
@@ -242,6 +268,7 @@ export default function TransfersPage() {
           description: form.description,
           transactionFee: form.transactionFee ? Number(form.transactionFee) : undefined,
           createdBy: authUser?.id,
+          entryDate: entryDateIso,
         }).unwrap();
       }
       closeModal();
@@ -498,7 +525,7 @@ export default function TransfersPage() {
       case "id":
         return <td key={columnKey} className="py-2 font-mono text-slate-600">#{transfer.id}</td>;
       case "date":
-        return <td key={columnKey} className="py-2">{formatDate(transfer.createdAt)}</td>;
+        return <td key={columnKey} className="py-2">{formatDate(transfer.entryDate || transfer.createdAt)}</td>;
       case "description":
         return (
           <td key={columnKey} className="py-2 text-slate-600">
@@ -959,6 +986,26 @@ export default function TransfersPage() {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  {t("common.entryDate")}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    value={form.entryDatePart}
+                    onChange={(e) => setForm((p) => ({ ...p, entryDatePart: e.target.value }))}
+                  />
+                  <input
+                    type="time"
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    value={form.entryTimePart}
+                    onChange={(e) => setForm((p) => ({ ...p, entryTimePart: e.target.value }))}
+                  />
+                </div>
+              </div>
+
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"
@@ -988,7 +1035,7 @@ export default function TransfersPage() {
       {viewAuditTrailTransferId && (
         <div className="fixed top-0 left-0 right-0 bottom-0 w-full h-full z-[9999] flex items-center justify-center bg-black bg-opacity-50" style={{ margin: 0, padding: 0 }}>
           <div
-            className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-h-[90vh] overflow-y-auto"
+            className="w-full max-w-4xl rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">

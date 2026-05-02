@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import type { Account, ProfitCalculationDetails, ProfitAccountMultiplier } from "../types";
+import type { Account, Currency, ProfitCalculationDetails, ProfitAccountMultiplier } from "../types";
+import { convertCurrency } from "../utils/orders/orderCalculations";
 
 export interface ProfitSummaryData {
   groupSums: Map<string, Map<string, number>>;
@@ -15,7 +16,8 @@ export interface ProfitSummaryData {
 
 export function useProfitSummary(
   calculationDetails: ProfitCalculationDetails | undefined,
-  accounts: Account[]
+  accounts: Account[],
+  currencies: Currency[] = []
 ): ProfitSummaryData | null {
   return useMemo(() => {
     if (!calculationDetails) return null;
@@ -84,7 +86,9 @@ export function useProfitSummary(
       const rate = defaultExchangeRateMap.get(key) || defaultRate;
       const currencySum = Array.from(groupSums.values())
         .reduce((sum, currencySums) => sum + (currencySums.get(currency) || 0), 0);
-      const converted = rate > 0 ? currencySum * rate : currencySum;
+      const converted = rate > 0
+        ? convertCurrency(currencySum, rate, currency, calculationDetails.targetCurrencyCode, currencies)
+        : currencySum;
       convertedAmounts.set(currency, converted);
     });
 
@@ -111,7 +115,9 @@ export function useProfitSummary(
         const key = `${currency}_${calculationDetails.targetCurrencyCode}`;
         const defaultRate = currency === calculationDetails.targetCurrencyCode ? 1 : 0;
         const rate = defaultExchangeRateMap.get(key) || defaultRate;
-        const converted = rate > 0 ? sum * rate : sum;
+        const converted = rate > 0
+          ? convertCurrency(sum, rate, currency, calculationDetails.targetCurrencyCode, currencies)
+          : sum;
         groupTotal += converted;
       });
       groupConvertedTotals.set(groupId, groupTotal);
@@ -134,6 +140,6 @@ export function useProfitSummary(
       targetCurrency: calculationDetails.targetCurrencyCode,
       exchangeRateMap: defaultExchangeRateMap,
     };
-  }, [calculationDetails, accounts]);
+  }, [calculationDetails, accounts, currencies]);
 }
 

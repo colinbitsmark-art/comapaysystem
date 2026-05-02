@@ -10,6 +10,7 @@ export interface ExpenseFilters {
   currencyCode: string | null;
   createdBy: number | null;
   tagIds: number[];
+  type: 'all' | 'expense' | 'income';
 }
 
 export interface ExpenseQueryParams {
@@ -19,6 +20,7 @@ export interface ExpenseQueryParams {
   currencyCode?: string;
   createdBy?: number;
   tagIds?: string;
+  type?: string;
   page?: number;
   limit?: number;
 }
@@ -31,6 +33,7 @@ const defaultFilters: ExpenseFilters = {
   currencyCode: null,
   createdBy: null,
   tagIds: [],
+  type: 'all',
 };
 
 export function useExpensesFilters(
@@ -56,6 +59,7 @@ export function useExpensesFilters(
     if (filterState.currencyCode) params.currencyCode = filterState.currencyCode;
     if (filterState.createdBy !== null) params.createdBy = filterState.createdBy;
     if (filterState.tagIds.length > 0) params.tagIds = filterState.tagIds.join(',');
+    if (filterState.type && filterState.type !== 'all') params.type = filterState.type;
 
     if (includePagination) {
       params.page = page ?? currentPage;

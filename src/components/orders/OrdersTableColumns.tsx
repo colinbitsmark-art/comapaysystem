@@ -28,7 +28,7 @@ export function renderOrderCell({
     case "id":
       return <td key={columnKey} className="py-2 font-mono text-slate-600">#{order.id}</td>;
     case "date":
-      return <td key={columnKey} className="py-2">{formatDate(order.createdAt)}</td>;
+      return <td key={columnKey} className="py-2">{formatDate(order.orderDate || order.createdAt)}</td>;
     case "createdBy": {
       const creatorLabel =
         (order.createdByName && String(order.createdByName).trim()) ||
@@ -46,13 +46,13 @@ export function renderOrderCell({
           <div className="flex items-center gap-2">
             {order.customerName || order.customerId}
 
-            {/* 我 TAGS DISPLAY NEXT TO CUSTOMER NAME */} 
+            {/* 我 TAGS DISPLAY NEXT TO CUSTOMER NAME 
             {order.tags && Array.isArray(order.tags) && order.tags.length > 0 &&
               order.tags.map((tag: { id: number; name: string; color: string }) => (
                 <Badge key={tag.id} tone="slate" backgroundColor={tag.color} lightStyle={true}>
                   {tag.name}
                 </Badge>
-              ))}
+              ))} */}
           </div>
         </td>
       );

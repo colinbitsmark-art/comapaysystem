@@ -403,7 +403,8 @@ export default function AccountsPage() {
   // Use shared hook for profit summary calculation
   const profitSummary = useProfitSummary(
     displayType === "profit" ? defaultCalculationDetails : undefined,
-    accounts
+    accounts,
+    currencies
   );
 
   const handleToggleDisplay = async (newType: "currency" | "profit") => {
@@ -722,7 +723,7 @@ export default function AccountsPage() {
         }
       >
         {displayType === "profit" && profitSummary ? (
-          <ProfitSummaryDisplay summary={profitSummary} />
+          <ProfitSummaryDisplay summary={profitSummary} currencies={currencies} />
         ) : (
           <>
             {isLoadingSummary ? (
