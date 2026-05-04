@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import SectionCard from "../components/common/SectionCard";
 import ConfirmModal from "../components/common/ConfirmModal";
@@ -13,7 +13,10 @@ import {
   useExecuteQueryMutation,
   useClearAllNotificationsMutation,
   useClearDatabaseMutation,
+  useGetSettingQuery,
+  useSetSettingMutation,
 } from "../services/api";
+import { APP_DISPLAY_NAME_EN_KEY, APP_DISPLAY_NAME_ZH_KEY } from "../constants/appBrandSettings";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -48,6 +51,45 @@ export default function SettingsPage() {
   const [executeQuery, { isLoading: isExecuting }] = useExecuteQueryMutation();
   const { data: safetyListData, isFetching: isLoadingSafetyList, refetch: refetchSafetyList } = useListSafetyBackupsQuery(undefined, { skip: !showSafetyModal });
   const [clearAllNotifications, { isLoading: isClearingNotifications }] = useClearAllNotificationsMutation();
+
+  const { data: appNameEnData, isSuccess: appNameEnLoaded } = useGetSettingQuery(APP_DISPLAY_NAME_EN_KEY);
+  const { data: appNameZhData, isSuccess: appNameZhLoaded } = useGetSettingQuery(APP_DISPLAY_NAME_ZH_KEY);
+  const [appNameEnDraft, setAppNameEnDraft] = useState("");
+  const [appNameZhDraft, setAppNameZhDraft] = useState("");
+  const [setSetting, { isLoading: isSavingAppBrand }] = useSetSettingMutation();
+
+  useEffect(() => {
+    if (appNameEnLoaded && appNameEnData) {
+      setAppNameEnDraft(appNameEnData.value ?? "");
+    }
+  }, [appNameEnLoaded, appNameEnData]);
+
+  useEffect(() => {
+    if (appNameZhLoaded && appNameZhData) {
+      setAppNameZhDraft(appNameZhData.value ?? "");
+    }
+  }, [appNameZhLoaded, appNameZhData]);
+
+  const handleSaveAppBrand = async () => {
+    try {
+      await setSetting({
+        key: APP_DISPLAY_NAME_EN_KEY,
+        value: appNameEnDraft.trim(),
+      }).unwrap();
+      await setSetting({
+        key: APP_DISPLAY_NAME_ZH_KEY,
+        value: appNameZhDraft.trim(),
+      }).unwrap();
+      alert(t("settings.appBranding.saveSuccess"));
+    } catch (error: any) {
+      console.error("Save app brand error:", error);
+      alert(
+        error?.data?.message ||
+          error?.message ||
+          t("settings.appBranding.saveError")
+      );
+    }
+  };
 
   // Backup handlers
   const handleCreateBackup = async () => {
@@ -258,6 +300,49 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
+      <SectionCard
+        title={t("settings.appBranding.title")}
+        description={t("settings.appBranding.description")}
+      >
+        <div className="space-y-4 max-w-xl">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              {t("settings.appBranding.englishName")}
+            </label>
+            <input
+              type="text"
+              value={appNameEnDraft}
+              onChange={(e) => setAppNameEnDraft(e.target.value)}
+              placeholder={t("settings.appBranding.englishPlaceholder")}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              autoComplete="off"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              {t("settings.appBranding.chineseName")}
+            </label>
+            <input
+              type="text"
+              value={appNameZhDraft}
+              onChange={(e) => setAppNameZhDraft(e.target.value)}
+              placeholder={t("settings.appBranding.chinesePlaceholder")}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              autoComplete="off"
+            />
+          </div>
+          <p className="text-sm text-slate-600">{t("settings.appBranding.hint")}</p>
+          <button
+            type="button"
+            onClick={handleSaveAppBrand}
+            disabled={isSavingAppBrand}
+            className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {isSavingAppBrand ? t("common.saving") : t("common.save")}
+          </button>
+        </div>
+      </SectionCard>
+
       {/* Backup & Restore Section */}
       <SectionCard
         title={t("settings.backupRestore.title")}

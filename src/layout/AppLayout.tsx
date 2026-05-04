@@ -11,8 +11,10 @@ import {
   useGetNotificationsQuery,
   useMarkNotificationAsReadMutation,
   useMarkAllNotificationsAsReadMutation,
+  useGetSettingQuery,
   api
 } from "../services/api";
+import { APP_DISPLAY_NAME_EN_KEY, APP_DISPLAY_NAME_ZH_KEY } from "../constants/appBrandSettings";
 
 export default function AppLayout() {
   const { t, i18n } = useTranslation();
@@ -42,6 +44,17 @@ export default function AppLayout() {
   );
   const [markAsRead] = useMarkNotificationAsReadMutation();
   const [markAllAsRead] = useMarkAllNotificationsAsReadMutation();
+
+  const { data: appNameEn } = useGetSettingQuery(APP_DISPLAY_NAME_EN_KEY, { skip: !user });
+  const { data: appNameZh } = useGetSettingQuery(APP_DISPLAY_NAME_ZH_KEY, { skip: !user });
+  const sidebarAppName = (() => {
+    const lang = i18n.resolvedLanguage || i18n.language;
+    const raw = lang.startsWith("zh")
+      ? appNameZh?.value ?? ""
+      : appNameEn?.value ?? "";
+    const trimmed = typeof raw === "string" ? raw.trim() : "";
+    return trimmed || null;
+  })();
 
   // Use realtime count from SSE if available, otherwise fall back to API data
   const unreadCount = realtimeUnreadCount;
@@ -447,11 +460,10 @@ export default function AppLayout() {
           : '-translate-x-full lg:translate-x-0'
       }`}>
         <div className={`transition-opacity duration-300 ${isSidebarCollapsed ? 'opacity-0 lg:w-0 lg:overflow-hidden' : 'opacity-100'}`}>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-slate-300">{t("app.testSystem")}</div>
-            <div className="text-lg font-semibold">{t("app.sevenGoldenGates")}</div>
-          </div>
-          <nav className="flex flex-wrap gap-2 lg:flex-col mt-6">
+          {sidebarAppName ? (
+            <div className="text-lg font-semibold text-slate-50 leading-snug">{sidebarAppName}</div>
+          ) : null}
+          <nav className={`flex flex-wrap gap-2 lg:flex-col ${sidebarAppName ? "mt-6" : ""}`}>
             {navItems
               .filter((item) => {
                 // Admin-only items

@@ -65,10 +65,6 @@
     "approval_requests": "Approval Requests",
     "settings": "Settings"
   },
-  "app": {
-    "testSystem": "Test System",
-    "sevenGoldenGates": "Seven Golden Gates"
-  },
   "dashboard": {
     "title": "Dashboard",
     "currencies": "Currencies",
@@ -1059,6 +1055,17 @@
   },
   "settings": {
     "title": "Settings",
+    "appBranding": {
+      "title": "App name (sidebar)",
+      "description": "Shown at the top of the sidebar. Each language uses its own field; leave blank to hide the name for that language.",
+      "englishName": "English name",
+      "chineseName": "Chinese name",
+      "englishPlaceholder": "e.g. Seven Golden Gates",
+      "chinesePlaceholder": "e.g. 七金门",
+      "hint": "If the name for the current interface language is empty, nothing is shown in the sidebar.",
+      "saveSuccess": "App name saved.",
+      "saveError": "Could not save app name."
+    },
     "backupRestore": {
       "title": "Backup & Restore",
       "description": "Create backups of your database and restore from previous backups",
