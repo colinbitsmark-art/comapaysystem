@@ -18,6 +18,8 @@ interface AccountSelectProps {
   required?: boolean;
   disabled?: boolean;
   showBalance?: boolean;
+  showSelectedBalanceBelow?: boolean;
+  showOptionBalanceInline?: boolean;
   // Optional filters
   filterByCurrency?: string; // Only show accounts with this currency
   excludeAccountIds?: number[]; // Exclude these account IDs
@@ -34,6 +36,8 @@ export function AccountSelect({
   required = false,
   disabled = false,
   showBalance = true,
+  showSelectedBalanceBelow = true,
+  showOptionBalanceInline = false,
   filterByCurrency,
   excludeAccountIds = [],
   t = (key: string) => key,
@@ -158,6 +162,12 @@ export function AccountSelect({
     setIsDropdownOpen(true);
   };
 
+  const getBalanceTextClass = (balance: number) => {
+    if (balance < 0) return "text-red-600";
+    if (balance > 0) return "text-emerald-600";
+    return "text-slate-500";
+  };
+
   return (
     <div>
       {label && (
@@ -231,6 +241,11 @@ export function AccountSelect({
                 setIsDropdownOpen(false);
                 setHighlightedIndex(-1);
                 break;
+              case "Tab":
+                setIsDropdownOpen(false);
+                setHighlightedIndex(-1);
+                setSearchQuery("");
+                break;
             }
           }}
           required={required}
@@ -239,6 +254,7 @@ export function AccountSelect({
         {value && !disabled && (
           <button
             type="button"
+            tabIndex={-1}
             onClick={(e) => {
               e.stopPropagation();
               handleClear();
@@ -301,17 +317,29 @@ export function AccountSelect({
                       onMouseEnter={() => setHighlightedIndex(index)}
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium text-slate-900 truncate">
-                          {account.name}
-                        </div>
-                        {showBalance && (
-                          <div className="text-xs text-slate-500">
-                            {formatCurrency(account.balance, account.currencyCode)}
+                        {showBalance && showOptionBalanceInline ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="font-medium text-slate-900 truncate">{account.name}</div>
+                            <div className={`text-xs font-semibold ${getBalanceTextClass(account.balance)}`}>
+                              {formatCurrency(account.balance, account.currencyCode)}
+                            </div>
                           </div>
+                        ) : (
+                          <>
+                            <div className="font-medium text-slate-900 truncate">
+                              {account.name}
+                            </div>
+                            {showBalance && (
+                              <div className={`text-xs ${getBalanceTextClass(account.balance)}`}>
+                                {formatCurrency(account.balance, account.currencyCode)}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                       <button
                         type="button"
+                        tabIndex={-1}
                         onClick={(e) => toggleFavorite(account.id, e)}
                         className="ml-2 flex-shrink-0 p-1 hover:bg-slate-100 rounded transition-colors"
                         title={isFavorite ? (t("expenses.removeFavorite") || "Remove favorite") : (t("expenses.addFavorite") || "Add favorite")}
@@ -336,15 +364,11 @@ export function AccountSelect({
           </div>
         )}
       </div>
-      {selectedAccount && showBalance && (
+      {selectedAccount && showBalance && showSelectedBalanceBelow && (
         <div className="mt-1 text-xs text-slate-500">
           {t("expenses.currentBalance") || "Current Balance"}:{" "}
           <span
-            className={
-              selectedAccount.balance < 0
-                ? "text-red-600"
-                : "text-slate-900"
-            }
+            className={getBalanceTextClass(selectedAccount.balance)}
           >
             {formatCurrency(selectedAccount.balance, selectedAccount.currencyCode)}
           </span>

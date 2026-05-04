@@ -1413,6 +1413,10 @@ export default function OrdersPage() {
         setFromCurrency={unifiedOrder.setFromCurrency}
         toCurrency={unifiedOrder.toCurrency}
         setToCurrency={unifiedOrder.setToCurrency}
+        defaultFromCurrency={unifiedOrder.defaultFromCurrency}
+        defaultToCurrency={unifiedOrder.defaultToCurrency}
+        onSetDefaultFromCurrency={unifiedOrder.setDefaultFromCurrencyForUser}
+        onSetDefaultToCurrency={unifiedOrder.setDefaultToCurrencyForUser}
         amountBuy={unifiedOrder.amountBuy}
         amountSell={unifiedOrder.amountSell}
         rate={unifiedOrder.rate}

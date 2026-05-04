@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, type FormEvent } from "react";
+import React, { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Account, Currency, Tag } from "../../types";
 import Badge from "../common/Badge";
 import type { UnifiedLine, UnifiedLineKind } from "../../hooks/orders/useUnifiedOrderModal";
 import { CurrencyPairSwapButton } from "./CurrencyPairSwapButton";
+import { AccountSelect } from "../common/AccountSelect";
 
 export type NewOrderViewerState = {
   isOpen: boolean;
@@ -22,6 +23,10 @@ type Props = {
   setFromCurrency: (v: string) => void;
   toCurrency: string;
   setToCurrency: (v: string) => void;
+  defaultFromCurrency: string;
+  defaultToCurrency: string;
+  onSetDefaultFromCurrency: (v: string) => void;
+  onSetDefaultToCurrency: (v: string) => void;
   amountBuy: string;
   amountSell: string;
   rate: string;
@@ -68,6 +73,232 @@ const kindLabel = (k: UnifiedLineKind, t: (k: string) => string) => {
   }
 };
 
+type CurrencySelectorProps = {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  currencies: Currency[];
+  excludeCurrency: string;
+  defaultCurrency: string;
+  onSetDefault: (v: string) => void;
+  t: (k: string) => string;
+};
+
+function CurrencySelector({
+  label,
+  value,
+  onChange,
+  currencies,
+  excludeCurrency,
+  defaultCurrency,
+  onSetDefault,
+  t,
+}: CurrencySelectorProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const availableCurrencies = useMemo(() => {
+    return currencies.filter((c) => c.code !== excludeCurrency);
+  }, [currencies, excludeCurrency]);
+
+  const filteredCurrencies = useMemo(() => {
+    if (!searchQuery.trim()) return availableCurrencies;
+    const q = searchQuery.toLowerCase();
+    return availableCurrencies.filter((c) => c.code.toLowerCase().includes(q));
+  }, [availableCurrencies, searchQuery]);
+
+  const sortedCurrencies = useMemo(() => {
+    const defaultMatch = filteredCurrencies.filter((c) => c.code === defaultCurrency);
+    const rest = filteredCurrencies
+      .filter((c) => c.code !== defaultCurrency)
+      .sort((a, b) => a.code.localeCompare(b.code));
+    return [...defaultMatch, ...rest];
+  }, [filteredCurrencies, defaultCurrency]);
+
+  const selectedCurrency = currencies.find((c) => c.code === value);
+
+  useEffect(() => {
+    if (!isDropdownOpen) {
+      setHighlightedIndex(-1);
+    }
+  }, [isDropdownOpen]);
+
+  useEffect(() => {
+    setHighlightedIndex(-1);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (isDropdownOpen && highlightedIndex >= 0 && listRef.current) {
+      const optionElement = listRef.current.children[highlightedIndex] as HTMLElement;
+      optionElement?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [highlightedIndex, isDropdownOpen]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    if (isDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [isDropdownOpen]);
+
+  const handleSelect = (code: string) => {
+    onChange(code);
+    setSearchQuery("");
+    setIsDropdownOpen(false);
+    setHighlightedIndex(-1);
+  };
+
+  const handleClear = () => {
+    onChange("");
+    setSearchQuery("");
+    setIsDropdownOpen(true);
+  };
+
+  return (
+    <div className="min-w-0">
+      <label className="mb-1 block text-sm font-medium text-slate-700">{label}</label>
+      <div className="relative" ref={containerRef}>
+        <input
+          type="text"
+          className={`w-full rounded-lg border border-slate-200 px-3 py-2 text-sm ${value ? "pr-20" : "pr-10"}`}
+          placeholder={t("orders.selectCurrency")}
+          value={isDropdownOpen ? searchQuery : selectedCurrency?.code || ""}
+          onFocus={() => {
+            setIsDropdownOpen(true);
+            if (value) setSearchQuery(selectedCurrency?.code || "");
+          }}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            setIsDropdownOpen(true);
+            if (!e.target.value) onChange("");
+          }}
+          onKeyDown={(e) => {
+            if (!isDropdownOpen && (e.key === "ArrowDown" || e.key === "Enter")) {
+              e.preventDefault();
+              setIsDropdownOpen(true);
+              return;
+            }
+            if (!isDropdownOpen) return;
+            switch (e.key) {
+              case "ArrowDown":
+                e.preventDefault();
+                setHighlightedIndex((prev) => (prev < sortedCurrencies.length - 1 ? prev + 1 : 0));
+                break;
+              case "ArrowUp":
+                e.preventDefault();
+                setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : sortedCurrencies.length - 1));
+                break;
+              case "Enter":
+                e.preventDefault();
+                if (highlightedIndex >= 0 && highlightedIndex < sortedCurrencies.length) {
+                  handleSelect(sortedCurrencies[highlightedIndex].code);
+                }
+                break;
+              case "Escape":
+                e.preventDefault();
+                setIsDropdownOpen(false);
+                setHighlightedIndex(-1);
+                break;
+              case "Tab":
+                setIsDropdownOpen(false);
+                setHighlightedIndex(-1);
+                setSearchQuery("");
+                break;
+            }
+          }}
+        />
+        {value ? (
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleClear();
+            }}
+            className="absolute right-10 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-600"
+            title={t("common.clear")}
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        ) : null}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={t("orders.selectCurrency")}
+          onClick={(e) => {
+            e.preventDefault();
+            setIsDropdownOpen((prev) => !prev);
+          }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 transition-colors hover:text-slate-600"
+        >
+          <svg
+            className={`h-5 w-5 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {isDropdownOpen ? (
+          <div className="absolute z-50 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+            {sortedCurrencies.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-slate-500">{t("orders.selectCurrency")}</div>
+            ) : (
+              <div ref={listRef}>
+                {sortedCurrencies.map((currency, index) => {
+                  const isSelected = currency.code === value;
+                  const isDefault = currency.code === defaultCurrency;
+                  const isHighlighted = highlightedIndex === index;
+                  return (
+                    <div
+                      key={currency.code}
+                      className={`flex cursor-pointer items-center justify-between px-3 py-2 ${
+                        isHighlighted ? "bg-blue-100 text-blue-900" : isSelected ? "bg-blue-50" : "hover:bg-slate-50"
+                      }`}
+                      onClick={() => handleSelect(currency.code)}
+                      onMouseEnter={() => setHighlightedIndex(index)}
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-medium text-slate-900">{currency.code}</span>
+                      </div>
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSetDefault(currency.code);
+                          onChange(currency.code);
+                        }}
+                        className={`ml-3 rounded px-2 py-1 text-xs font-semibold ${
+                          isDefault ? "bg-emerald-100 text-emerald-700" : "text-blue-600 hover:bg-blue-50"
+                        }`}
+                        title={t("orders.setDefault")}
+                      >
+                        {isDefault ? t("common.default") : t("orders.setDefault")}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function NewOrderModal({
   isOpen,
   isSaving,
@@ -78,6 +309,10 @@ export default function NewOrderModal({
   setFromCurrency,
   toCurrency,
   setToCurrency,
+  defaultFromCurrency,
+  defaultToCurrency,
+  onSetDefaultFromCurrency,
+  onSetDefaultToCurrency,
   amountBuy,
   amountSell,
   rate,
@@ -139,12 +374,19 @@ export default function NewOrderModal({
     });
   };
 
+  const removeLineRow = (localId: string) => {
+    setLines((prev) => prev.filter((l) => l.localId !== localId));
+  };
+// 我 filter dropdown list for currencies
   const accountOptionsForLine = (line: UnifiedLine) => {
     if (line.kind === "receipt" || line.kind === "profit") {
       return accounts.filter((a) => a.currencyCode === fromCurrency);
     }
     if (line.kind === "payment") {
       return accounts.filter((a) => a.currencyCode === toCurrency);
+    }
+    if (line.kind === "service_charge") {
+      return accounts.filter((a) => a.currencyCode === fromCurrency || a.currencyCode === toCurrency);
     }
     return accounts;
   };
@@ -189,21 +431,16 @@ export default function NewOrderModal({
               ) : null}
             </div>
             <div className="min-w-0">
-              <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.from")}</label>
-              <select
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              <CurrencySelector
+                label={t("orders.from")}
                 value={fromCurrency}
-                onChange={(e) => setFromCurrency(e.target.value)}
-              >
-                <option value="">{t("orders.selectCurrency")}</option>
-                {activeCurrencies
-                  .filter((c) => c.code !== toCurrency)
-                  .map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.code}
-                  </option>
-                ))}
-              </select>
+                onChange={setFromCurrency}
+                currencies={activeCurrencies}
+                excludeCurrency={toCurrency}
+                defaultCurrency={defaultFromCurrency}
+                onSetDefault={onSetDefaultFromCurrency}
+                t={t}
+              />
             </div>
             <div className="flex justify-center xl:pb-0.5">
               <CurrencyPairSwapButton
@@ -218,21 +455,16 @@ export default function NewOrderModal({
               />
             </div>
             <div className="min-w-0">
-              <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.to")}</label>
-              <select
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              <CurrencySelector
+                label={t("orders.to")}
                 value={toCurrency}
-                onChange={(e) => setToCurrency(e.target.value)}
-              >
-                <option value="">{t("orders.selectCurrency")}</option>
-                {activeCurrencies
-                  .filter((c) => c.code !== fromCurrency)
-                  .map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.code}
-                  </option>
-                ))}
-              </select>
+                onChange={setToCurrency}
+                currencies={activeCurrencies}
+                excludeCurrency={fromCurrency}
+                defaultCurrency={defaultToCurrency}
+                onSetDefault={onSetDefaultToCurrency}
+                t={t}
+              />
             </div>
           </div>
 
@@ -293,14 +525,92 @@ export default function NewOrderModal({
           </div>
           <div>
             <div className="space-y-3">
-              {lines.map((line) => (
+              {lines.map((line) => {
+                const isServiceCharge = line.kind === "service_charge";
+                const isPercentMode = isServiceCharge && line.serviceChargeMode === "percentage";
+
+                // Compute live preview for percentage mode
+                let computedPreview: string | null = null;
+                if (isPercentMode && line.serviceChargePercent && line.accountId) {
+                  const pct = Number(line.serviceChargePercent);
+                  const acc = accounts.find((a) => a.id === Number(line.accountId));
+                  if (acc && !Number.isNaN(pct) && pct !== 0) {
+                    const base = acc.currencyCode === fromCurrency
+                      ? Number(amountBuy || 0)
+                      : Number(amountSell || 0);
+                    if (base > 0) {
+                      const result = (pct / 100) * base;
+                      computedPreview = `≈ ${result.toFixed(2)} ${acc.currencyCode}`;
+                    }
+                  }
+                }
+
+                return (
                 <div
                   key={line.localId}
-                  className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 p-3"
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3"
                 >
                   <span className="text-xs font-semibold uppercase text-slate-500">
                     {kindLabel(line.kind, t)}
                   </span>
+
+                  {isServiceCharge ? (
+                    <div className="flex items-center gap-1.5">
+                      {/* Mode toggle */}
+                      <div className="flex rounded-md border border-slate-200 overflow-hidden text-xs font-semibold">
+                        <button
+                          type="button"
+                          className={`px-2.5 py-1.5 transition-colors ${!isPercentMode ? "bg-slate-700 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                          onClick={() => updateLine(line.localId, { serviceChargeMode: "fixed", serviceChargePercent: "" })}
+                        >
+                          {t("orders.scFixed")}
+                        </button>
+                        <button
+                          type="button"
+                          className={`px-2.5 py-1.5 transition-colors ${isPercentMode ? "bg-slate-700 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                          onClick={() => updateLine(line.localId, { serviceChargeMode: "percentage", amount: "" })}
+                        >
+                          %
+                        </button>
+                      </div>
+
+                      {isPercentMode ? (
+                        <div className="flex items-center gap-1.5">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="0.00"
+                              className="w-24 rounded border border-slate-200 px-2 py-1.5 pr-6 text-sm"
+                              value={line.serviceChargePercent ?? ""}
+                              onChange={(e) => updateLine(line.localId, { serviceChargePercent: e.target.value })}
+                              onWheel={handleNumberInputWheel}
+                            />
+                            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">%</span>
+                          </div>
+                          {computedPreview ? (
+                            <span className="text-xs font-medium text-emerald-600 whitespace-nowrap">
+                              {computedPreview}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-400 whitespace-nowrap">
+                              {t("orders.scSelectAcctForPreview")}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <input
+                          type="number"
+                          placeholder={t("orders.amount")}
+                          className="w-24 rounded border border-slate-200 px-2 py-1.5 text-sm"
+                          value={line.amount}
+                          onChange={(e) => updateLine(line.localId, { amount: e.target.value })}
+                          onWheel={handleNumberInputWheel}
+                        />
+                      )}
+                    </div>
+                  ) : (
                   <input
                     type="number"
                     placeholder={t("orders.amount")}
@@ -309,18 +619,19 @@ export default function NewOrderModal({
                     onChange={(e) => updateLine(line.localId, { amount: e.target.value })}
                     onWheel={handleNumberInputWheel}
                   />
-                  <select
-                    className="min-w-[140px] flex-1 rounded border border-slate-200 px-2 py-1.5 text-sm"
-                    value={line.accountId}
-                    onChange={(e) => updateLine(line.localId, { accountId: e.target.value })}
-                  >
-                    <option value="">{t("orders.selectAccount")}</option>
-                    {accountOptionsForLine(line).map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} ({a.currencyCode})
-                      </option>
-                    ))}
-                  </select>
+                  )}
+                  <div className="min-w-[240px] flex-1">
+                    <AccountSelect
+                      value={line.accountId}
+                      onChange={(accountId) => updateLine(line.localId, { accountId })}
+                      accounts={accountOptionsForLine(line)}
+                      placeholder={t("orders.selectAccount")}
+                      showBalance
+                      showSelectedBalanceBelow={false}
+                      showOptionBalanceInline
+                      t={t}
+                    />
+                  </div>
                   <input
                     ref={(el) => {
                       fileRefs.current[line.localId] = el;
@@ -394,13 +705,22 @@ export default function NewOrderModal({
                   <button
                     type="button"
                     className="rounded-lg border border-dashed border-slate-300 p-1.5 text-slate-600 hover:bg-slate-50"
+                    title={t("common.remove")}
+                    onClick={() => removeLineRow(line.localId)}
+                  >
+                    -
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-dashed border-slate-300 p-1.5 text-slate-600 hover:bg-slate-50"
                     title={t("orders.addLine")}
                     onClick={() => addLineRow(line.kind)}
                   >
                     +
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               <button

@@ -27,6 +27,8 @@ export type UnifiedLine = {
   serverImagePath?: string;
   serverReceiptId?: number;
   serverPaymentId?: number;
+  serviceChargeMode?: "fixed" | "percentage";
+  serviceChargePercent?: string;
 };
 
 function newLine(kind: UnifiedLineKind): UnifiedLine {
@@ -36,6 +38,7 @@ function newLine(kind: UnifiedLineKind): UnifiedLine {
     amount: "",
     accountId: "",
     file: null,
+    ...(kind === "service_charge" ? { serviceChargeMode: "fixed" as const, serviceChargePercent: "" } : {}),
   };
 }
 
@@ -51,7 +54,7 @@ function toDatetimeLocal(date: Date): string {
 export function useUnifiedOrderModal(
   currencies: Currency[],
   accounts: Account[],
-  _authUser: AuthResponse | null,
+  authUser: AuthResponse | null,
 ) {
   const [isOpen, setIsOpen] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
@@ -70,6 +73,12 @@ export function useUnifiedOrderModal(
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [showTagPicker, setShowTagPicker] = useState(false);
   const [orderDate, setOrderDate] = useState(() => toDatetimeLocal(new Date()));
+  const [defaultFromCurrency, setDefaultFromCurrency] = useState("");
+  const [defaultToCurrency, setDefaultToCurrency] = useState("");
+
+  const currencyDefaultsStorageKey = authUser?.id
+    ? `orders_default_currencies_user_${authUser.id}`
+    : null;
 
   const amountsRef = useRef({ amountBuy, amountSell, rate, fromCurrency, toCurrency });
   amountsRef.current = { amountBuy, amountSell, rate, fromCurrency, toCurrency };
@@ -79,6 +88,59 @@ export function useUnifiedOrderModal(
       setToCurrency("");
     }
   }, [fromCurrency, toCurrency]);
+
+  useEffect(() => {
+    if (!currencyDefaultsStorageKey) {
+      setDefaultFromCurrency("");
+      setDefaultToCurrency("");
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(currencyDefaultsStorageKey);
+      if (!raw) {
+        setDefaultFromCurrency("");
+        setDefaultToCurrency("");
+        return;
+      }
+      const parsed = JSON.parse(raw) as { fromCurrency?: string; toCurrency?: string };
+      setDefaultFromCurrency(parsed.fromCurrency ?? "");
+      setDefaultToCurrency(parsed.toCurrency ?? "");
+    } catch {
+      setDefaultFromCurrency("");
+      setDefaultToCurrency("");
+    }
+  }, [currencyDefaultsStorageKey]);
+
+  const persistCurrencyDefaults = useCallback(
+    (nextFrom: string, nextTo: string) => {
+      if (!currencyDefaultsStorageKey) return;
+      try {
+        localStorage.setItem(
+          currencyDefaultsStorageKey,
+          JSON.stringify({ fromCurrency: nextFrom, toCurrency: nextTo }),
+        );
+      } catch {
+        /* ignore storage errors */
+      }
+    },
+    [currencyDefaultsStorageKey],
+  );
+
+  const setDefaultFromCurrencyForUser = useCallback(
+    (code: string) => {
+      setDefaultFromCurrency(code);
+      persistCurrencyDefaults(code, defaultToCurrency);
+    },
+    [defaultToCurrency, persistCurrencyDefaults],
+  );
+
+  const setDefaultToCurrencyForUser = useCallback(
+    (code: string) => {
+      setDefaultToCurrency(code);
+      persistCurrencyDefaults(defaultFromCurrency, code);
+    },
+    [defaultFromCurrency, persistCurrencyDefaults],
+  );
 
   const { data: orderDetails } = useGetOrderDetailsQuery(editingOrderId || 0, {
     skip: !editingOrderId,
@@ -304,6 +366,8 @@ export function useUnifiedOrderModal(
         amount: String(sc.amount ?? ""),
         accountId: sc.accountId ? String(sc.accountId) : "",
         file: null,
+        serviceChargeMode: "fixed",
+        serviceChargePercent: "",
       });
     }
     if (nextLines.length === 0) {
@@ -368,12 +432,24 @@ export function useUnifiedOrderModal(
         payload.profitCurrency = acc.currencyCode;
       }
     }
-    if (scLine?.amount && scLine.accountId) {
+    if (scLine?.accountId) {
       const acc = accounts.find((a) => a.id === Number(scLine.accountId));
       if (acc) {
-        payload.serviceChargeAmount = Number(scLine.amount);
-        payload.serviceChargeAccountId = Number(scLine.accountId);
-        payload.serviceChargeCurrency = acc.currencyCode;
+        let resolvedAmount: number;
+        if (scLine.serviceChargeMode === "percentage" && scLine.serviceChargePercent) {
+          const pct = Number(scLine.serviceChargePercent);
+          const base = acc.currencyCode === fromCurrency
+            ? Number(amountBuy || 0)
+            : Number(amountSell || 0);
+          resolvedAmount = (pct / 100) * base;
+        } else {
+          resolvedAmount = Number(scLine.amount || 0);
+        }
+        if (resolvedAmount !== 0) {
+          payload.serviceChargeAmount = resolvedAmount;
+          payload.serviceChargeAccountId = Number(scLine.accountId);
+          payload.serviceChargeCurrency = acc.currencyCode;
+        }
       }
     }
     return { payload, receiptLines, paymentLines };
@@ -527,6 +603,37 @@ export function useUnifiedOrderModal(
       return;
     }
     const { receiptLines, paymentLines } = buildPayload();
+    const hasValidReceiptLine = receiptLines.some((l) => (Number(l.amount) || 0) > 0 && !!l.accountId);
+    const hasValidPaymentLine = paymentLines.some((l) => (Number(l.amount) || 0) > 0 && !!l.accountId);
+    if (!hasValidReceiptLine) {
+      alert("At least one receipt line must have amount and account before completing.");
+      return;
+    }
+    if (!hasValidPaymentLine) {
+      alert("At least one payment line must have amount and account before completing.");
+      return;
+    }
+
+    const partialReceiptLines = receiptLines.filter((l) => {
+      const hasAmount = (Number(l.amount) || 0) > 0;
+      const hasAccount = !!l.accountId;
+      return hasAmount !== hasAccount;
+    });
+    if (partialReceiptLines.length > 0) {
+      alert("Each receipt line must have both amount and account, or leave both empty.");
+      return;
+    }
+
+    const partialPaymentLines = paymentLines.filter((l) => {
+      const hasAmount = (Number(l.amount) || 0) > 0;
+      const hasAccount = !!l.accountId;
+      return hasAmount !== hasAccount;
+    });
+    if (partialPaymentLines.length > 0) {
+      alert("Each payment line must have both amount and account, or leave both empty.");
+      return;
+    }
+
     const receiptTotal = receiptLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
     const paymentTotal = paymentLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
     const buy = Number(amountBuy || 0);
@@ -610,9 +717,15 @@ export function useUnifiedOrderModal(
 
   const openNew = useCallback(() => {
     resetForm();
+    const activeCodes = new Set(currencies.filter((c) => c.active).map((c) => c.code));
+    const nextFrom = activeCodes.has(defaultFromCurrency) ? defaultFromCurrency : "";
+    const nextTo =
+      activeCodes.has(defaultToCurrency) && defaultToCurrency !== nextFrom ? defaultToCurrency : "";
+    setFromCurrency(nextFrom);
+    setToCurrency(nextTo);
     setEditingOrderId(null);
     setIsOpen(true);
-  }, [resetForm]);
+  }, [resetForm, currencies, defaultFromCurrency, defaultToCurrency]);
 
   const openEdit = useCallback((orderId: number) => {
     resetForm();
@@ -632,6 +745,10 @@ export function useUnifiedOrderModal(
     setFromCurrency,
     toCurrency,
     setToCurrency,
+    defaultFromCurrency,
+    defaultToCurrency,
+    setDefaultFromCurrencyForUser,
+    setDefaultToCurrencyForUser,
     amountBuy,
     setAmountBuy,
     amountSell,
