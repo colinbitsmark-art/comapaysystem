@@ -16,6 +16,7 @@ const ensureUploadsDir = () => {
     uploadsDir,
     path.join(uploadsDir, "orders"),
     path.join(uploadsDir, "expenses"),
+    path.join(uploadsDir, "transfers"),
   ];
   
   dirs.forEach((dir) => {
@@ -72,6 +73,17 @@ export const generateOrderPaymentFilename = (orderId, mimetype, originalname) =>
 };
 
 /**
+ * Generate a unique filename for transfer attachment
+ * Format: transfer_{transferId}_{timestamp}_{hash}.{ext}
+ */
+export const generateTransferFilename = (transferId, mimetype, originalname) => {
+  const timestamp = Date.now();
+  const hash = crypto.randomBytes(4).toString("hex");
+  const ext = getFileExtension(mimetype, originalname);
+  return `transfer_${transferId}_${timestamp}_${hash}${ext}`;
+};
+
+/**
  * Generate a unique filename for expense
  * Format: expense_{expenseId}__{timestamp}_{hash}.{ext}
  */
@@ -92,7 +104,7 @@ export const generateExpenseFilename = (expenseId, mimetype, originalname) => {
 export const saveFile = (buffer, filename, type = "order") => {
   ensureUploadsDir();
   
-  const subDir = type === "expense" ? "expenses" : "orders";
+  const subDir = type === "expense" ? "expenses" : type === "transfer" ? "transfers" : "orders";
   const filePath = path.join(uploadsDir, subDir, filename);
   
   fs.writeFileSync(filePath, buffer);

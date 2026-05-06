@@ -258,6 +258,7 @@
     "updateCurrency": "Update currency",
     "processOrder": "Process order",
     "cancelOrder": "Cancel order",
+    "editAnyOrder": "Edit orders of any status",
     "deleteOrder": "Delete order",
     "deleteManyOrders": "Delete multiple orders",
     "deleteExpense": "Delete expense",
@@ -805,7 +806,12 @@
     "remove": "Remove",
     "applying": "Applying...",
     "confirmDelete": "Are you sure you want to delete this transfer?",
-    "confirmDeleteSelected": "Are you sure you want to delete the selected transfers?"
+    "confirmDeleteSelected": "Are you sure you want to delete the selected transfers?",
+    "attachment": "Attachment",
+    "viewAttachment": "View",
+    "dragDropOrPaste": "Drag & drop file here (image or PDF), paste (Ctrl+V), or",
+    "chooseFile": "Choose File (Image or PDF)",
+    "readyToUpload": "Ready to upload"
   },
   "expenses": {
     "title": "Expense & Income",

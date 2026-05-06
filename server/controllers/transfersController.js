@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { getUserIdFromHeader } from "../utils/auth.js";
 import { createNotification } from "../services/notification/notificationService.js";
+import { generateTransferFilename, saveFile, deleteFile, normalizeStoredImagePath } from "../utils/fileStorage.js";
 
 export const listTransfers = (req, res) => {
   const {
@@ -88,6 +89,7 @@ export const listTransfers = (req, res) => {
         t.currencyCode,
         t.description,
         t.transactionFee,
+        t.imagePath,
         t.createdBy,
         t.createdAt,
         t.entryDate,
@@ -220,6 +222,7 @@ export const exportTransfers = (req, res) => {
         t.currencyCode,
         t.description,
         t.transactionFee,
+        t.imagePath,
         t.createdBy,
         t.createdAt,
         t.entryDate,
@@ -263,6 +266,7 @@ export const exportTransfers = (req, res) => {
 export const createTransfer = async (req, res, next) => {
   try {
     const { fromAccountId, toAccountId, amount, description, transactionFee, createdBy, tagIds } = req.body || {};
+    const file = req.file;
 
     if (!fromAccountId || !toAccountId || !amount) {
       return res.status(400).json({ message: "From account, to account, and amount are required" });
@@ -331,12 +335,25 @@ export const createTransfer = async (req, res, next) => {
       // Allow negative but could add warning here if needed
     }
 
+    // Handle file upload
+    let imagePath = null;
+    if (file) {
+      const tempTransferId = db.prepare("SELECT COALESCE(MAX(id), 0) + 1 as nextId FROM internal_transfers;").get().nextId;
+      const filename = generateTransferFilename(tempTransferId, file.mimetype, file.originalname);
+      imagePath = saveFile(file.buffer, filename, "transfer");
+    } else if (req.body?.imagePath) {
+      const providedPath = req.body.imagePath;
+      if (typeof providedPath === 'string' && providedPath.trim().length > 0) {
+        imagePath = normalizeStoredImagePath(providedPath) || providedPath;
+      }
+    }
+
     // Perform transfer in a transaction
     const transaction = db.transaction(() => {
       // Create transfer record first to get the transfer ID
       const stmt = db.prepare(
-        `INSERT INTO internal_transfers (fromAccountId, toAccountId, amount, currencyCode, description, transactionFee, createdBy, createdAt, entryDate)
-         VALUES (@fromAccountId, @toAccountId, @amount, @currencyCode, @description, @transactionFee, @createdBy, @createdAt, @entryDate);`
+        `INSERT INTO internal_transfers (fromAccountId, toAccountId, amount, currencyCode, description, transactionFee, createdBy, createdAt, entryDate, imagePath)
+         VALUES (@fromAccountId, @toAccountId, @amount, @currencyCode, @description, @transactionFee, @createdBy, @createdAt, @entryDate, @imagePath);`
       );
       const entryDateValue = req.body?.entryDate ? new Date(req.body.entryDate).toISOString() : finalCreatedAt;
       const result = stmt.run({
@@ -349,6 +366,7 @@ export const createTransfer = async (req, res, next) => {
         createdBy: createdBy || null,
         createdAt: finalCreatedAt,
         entryDate: entryDateValue,
+        imagePath: imagePath || null,
       });
 
       const transferId = result.lastInsertRowid;
@@ -458,6 +476,7 @@ export const createTransfer = async (req, res, next) => {
           t.currencyCode,
           t.description,
           t.transactionFee,
+          t.imagePath,
           t.createdBy,
           t.createdAt,
           t.updatedBy,
@@ -510,15 +529,38 @@ export const createTransfer = async (req, res, next) => {
   }
 };
 
-export const updateTransfer = (req, res, next) => {
+export const updateTransfer = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { fromAccountId, toAccountId, amount, description, transactionFee, updatedBy, tagIds, entryDate } = req.body || {};
+    const file = req.file;
 
     // Get existing transfer
     const existingTransfer = db.prepare("SELECT * FROM internal_transfers WHERE id = ?;").get(id);
     if (!existingTransfer) {
       return res.status(404).json({ message: "Transfer not found" });
+    }
+
+    // Handle file upload for update
+    let newImagePath = undefined; // undefined means "don't change"
+    if (file) {
+      // Delete old file if it exists
+      if (existingTransfer.imagePath) {
+        deleteFile(existingTransfer.imagePath);
+      }
+      const filename = generateTransferFilename(id, file.mimetype, file.originalname);
+      newImagePath = saveFile(file.buffer, filename, "transfer");
+    } else if (req.body?.imagePath !== undefined) {
+      const provided = req.body.imagePath;
+      if (!provided || provided === "") {
+        // Explicitly clearing the image
+        if (existingTransfer.imagePath) {
+          deleteFile(existingTransfer.imagePath);
+        }
+        newImagePath = null;
+      } else {
+        newImagePath = normalizeStoredImagePath(provided) || provided;
+      }
     }
 
     // Get account details
@@ -693,6 +735,7 @@ export const updateTransfer = (req, res, next) => {
       if (description !== undefined) updateFields.push("description = ?"), updateValues.push(finalDescription || null);
       if (transactionFee !== undefined) updateFields.push("transactionFee = ?"), updateValues.push(finalTransactionFee);
       if (entryDate !== undefined) updateFields.push("entryDate = ?"), updateValues.push(entryDate ? new Date(entryDate).toISOString() : null);
+      if (newImagePath !== undefined) updateFields.push("imagePath = ?"), updateValues.push(newImagePath);
 
       updateFields.push("updatedBy = ?"), updateValues.push(updatedBy || null);
       updateFields.push("updatedAt = ?"), updateValues.push(new Date().toISOString());
@@ -760,6 +803,7 @@ export const updateTransfer = (req, res, next) => {
           t.currencyCode,
           t.description,
           t.transactionFee,
+          t.imagePath,
           t.createdBy,
           t.createdAt,
           t.updatedBy,

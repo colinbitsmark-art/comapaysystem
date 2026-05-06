@@ -241,9 +241,9 @@ router.delete("/accounts/transactions/clear-all", clearAllTransactionLogs);
 
 router.get("/transfers", listTransfers);
 router.get("/transfers/export", exportTransfers);
-router.post("/transfers", createTransfer);
+router.post("/transfers", upload.single("file"), createTransfer);
 router.get("/transfers/:id/changes", getTransferChanges);
-router.put("/transfers/:id", updateTransfer);
+router.put("/transfers/:id", upload.single("file"), updateTransfer);
 router.delete("/transfers/:id", deleteTransfer);
 
 router.get("/expenses", listExpenses);

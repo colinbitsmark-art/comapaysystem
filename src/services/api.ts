@@ -1072,12 +1072,22 @@ export const api = createApi({
             ]
           : [{ type: "Transfer", id: "LIST" }],
     }),
-    createTransfer: builder.mutation<Transfer, TransferInput>({
-      query: (body) => ({
-        url: "transfers",
-        method: "POST",
-        body,
-      }),
+    createTransfer: builder.mutation<Transfer, TransferInput & { file?: File }>({
+      query: ({ file, ...body }) => {
+        if (file) {
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("fromAccountId", String(body.fromAccountId));
+          formData.append("toAccountId", String(body.toAccountId));
+          formData.append("amount", String(body.amount));
+          formData.append("description", body.description || "");
+          if (body.transactionFee !== undefined) formData.append("transactionFee", String(body.transactionFee));
+          if (body.createdBy !== undefined) formData.append("createdBy", String(body.createdBy));
+          if (body.entryDate) formData.append("entryDate", body.entryDate);
+          return { url: "transfers", method: "POST", body: formData };
+        }
+        return { url: "transfers", method: "POST", body };
+      },
       invalidatesTags: (result) => {
         const tags: Array<{ type: "Transfer" | "Account"; id: number | "LIST" }> = [
           { type: "Transfer", id: "LIST" },
@@ -1095,13 +1105,25 @@ export const api = createApi({
     }),
     updateTransfer: builder.mutation<
       Transfer,
-      { id: number; data: Partial<TransferInput> & { updatedBy?: number } }
+      { id: number; data: Partial<TransferInput> & { updatedBy?: number; file?: File } }
     >({
-      query: ({ id, data }) => ({
-        url: `transfers/${id}`,
-        method: "PUT",
-        body: data,
-      }),
+      query: ({ id, data }) => {
+        const { file, ...body } = data;
+        if (file) {
+          const formData = new FormData();
+          formData.append("file", file);
+          if (body.fromAccountId !== undefined) formData.append("fromAccountId", String(body.fromAccountId));
+          if (body.toAccountId !== undefined) formData.append("toAccountId", String(body.toAccountId));
+          if (body.amount !== undefined) formData.append("amount", String(body.amount));
+          if (body.description !== undefined) formData.append("description", body.description || "");
+          if (body.transactionFee !== undefined) formData.append("transactionFee", String(body.transactionFee));
+          if (body.updatedBy !== undefined) formData.append("updatedBy", String(body.updatedBy));
+          if (body.entryDate) formData.append("entryDate", body.entryDate);
+          if (body.imagePath !== undefined) formData.append("imagePath", body.imagePath || "");
+          return { url: `transfers/${id}`, method: "PUT", body: formData };
+        }
+        return { url: `transfers/${id}`, method: "PUT", body };
+      },
       invalidatesTags: (result, _err, { id, data }) => {
         const tags: Array<{ type: "Transfer" | "Account"; id: number | "LIST" }> = [
           { type: "Transfer", id },

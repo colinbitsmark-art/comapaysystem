@@ -724,6 +724,7 @@ const seedData = () => {
             createCurrency: true,
             updateCurrency: true,
             cancelOrder: true,
+            editAnyOrder: true,
             deleteOrder: true,
             deleteManyOrders: true,
           },
@@ -958,6 +959,9 @@ const migrateDatabase = () => {
     }
     if (!transferColumnNames.includes("entryDate")) {
       db.prepare("ALTER TABLE internal_transfers ADD COLUMN entryDate TEXT").run();
+    }
+    if (!transferColumnNames.includes("imagePath")) {
+      db.prepare("ALTER TABLE internal_transfers ADD COLUMN imagePath TEXT").run();
     }
 
     // Check profit_calculations table for groups column

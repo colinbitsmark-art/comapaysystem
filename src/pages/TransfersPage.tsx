@@ -125,6 +125,9 @@ export default function TransfersPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransferId, setEditingTransferId] = useState<number | null>(null);
+  const [viewImageTransferId, setViewImageTransferId] = useState<number | null>(null);
+  const [imageDragOver, setImageDragOver] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [isBatchTagMode, setIsBatchTagMode] = useState(false);
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
@@ -187,7 +190,17 @@ export default function TransfersPage() {
     return { datePart: `${y}-${mo}-${d}`, timePart: `${h}:${mi}` };
   };
 
-  const [form, setForm] = useState(() => {
+  const [form, setForm] = useState<{
+    fromAccountId: string;
+    toAccountId: string;
+    amount: string;
+    description: string;
+    transactionFee: string;
+    entryDatePart: string;
+    entryTimePart: string;
+    imagePath: string;
+    file?: File;
+  }>(() => {
     const { datePart, timePart } = toDatetimeLocalParts(new Date());
     return {
       fromAccountId: "",
@@ -197,6 +210,8 @@ export default function TransfersPage() {
       transactionFee: "",
       entryDatePart: datePart,
       entryTimePart: timePart,
+      imagePath: "",
+      file: undefined,
     };
   });
 
@@ -210,8 +225,53 @@ export default function TransfersPage() {
       transactionFee: "",
       entryDatePart: datePart,
       entryTimePart: timePart,
+      imagePath: "",
+      file: undefined,
     });
     setEditingTransferId(null);
+    if (imageInputRef.current) imageInputRef.current.value = "";
+  };
+
+  const handleImageUpload = (file: File) => {
+    const isImage = file.type.startsWith("image/");
+    const isPDF = file.type === "application/pdf";
+    if (!isImage && !isPDF) {
+      setAlertModal({ isOpen: true, message: t("expenses.invalidImageFile"), type: "error" });
+      return;
+    }
+    setForm((p) => ({ ...p, file }));
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setForm((p) => ({ ...p, imagePath: reader.result as string }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setImageDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    const valid = files.filter((f) => f.type.startsWith("image/") || f.type === "application/pdf");
+    if (valid.length > 0) handleImageUpload(valid[0]);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setImageDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setImageDragOver(false);
+  };
+
+  const isPdfFile = (path: string): boolean => {
+    if (!path) return false;
+    if (path.startsWith("data:application/pdf")) return true;
+    if (path.toLowerCase().endsWith(".pdf")) return true;
+    return false;
   };
 
   const closeModal = () => {
@@ -236,13 +296,15 @@ export default function TransfersPage() {
       transactionFee: transfer.transactionFee ? String(transfer.transactionFee) : "",
       entryDatePart: datePart,
       entryTimePart: timePart,
+      imagePath: transfer.imagePath ? `/api/uploads/${transfer.imagePath}` : "",
+      file: undefined,
     });
     setIsModalOpen(true);
   };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.fromAccountId || !form.toAccountId || !form.amount || !form.description) return;
+    if (!form.fromAccountId || !form.toAccountId || !form.amount) return;
 
     const entryDateIso = new Date(`${form.entryDatePart}T${form.entryTimePart}`).toISOString();
 
@@ -254,10 +316,11 @@ export default function TransfersPage() {
             fromAccountId: Number(form.fromAccountId),
             toAccountId: Number(form.toAccountId),
             amount: Number(form.amount),
-            description: form.description,
+            description: form.description || undefined,
             transactionFee: form.transactionFee ? Number(form.transactionFee) : undefined,
             updatedBy: authUser?.id,
             entryDate: entryDateIso,
+            ...(form.file ? { file: form.file } : { imagePath: form.imagePath || "" }),
           },
         }).unwrap();
       } else {
@@ -265,10 +328,11 @@ export default function TransfersPage() {
           fromAccountId: Number(form.fromAccountId),
           toAccountId: Number(form.toAccountId),
           amount: Number(form.amount),
-          description: form.description,
+          description: form.description || undefined,
           transactionFee: form.transactionFee ? Number(form.transactionFee) : undefined,
           createdBy: authUser?.id,
           entryDate: entryDateIso,
+          ...(form.file ? { file: form.file } : {}),
         }).unwrap();
       }
       closeModal();
@@ -293,11 +357,25 @@ export default function TransfersPage() {
         closeModal();
       }
     };
+    const handlePaste = (event: ClipboardEvent) => {
+      if (!isModalOpen) return;
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) handleImageUpload(file);
+          break;
+        }
+      }
+    };
 
     if (isModalOpen) {
       document.addEventListener("keydown", handleEscKey);
+      document.addEventListener("paste", handlePaste);
       return () => {
         document.removeEventListener("keydown", handleEscKey);
+        document.removeEventListener("paste", handlePaste);
       };
     }
   }, [isModalOpen]);
@@ -317,6 +395,42 @@ export default function TransfersPage() {
       };
     }
   }, [viewAuditTrailTransferId]);
+
+  // Handle Esc key to close image view modal
+  useEffect(() => {
+    const handleEscKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && viewImageTransferId) {
+        setViewImageTransferId(null);
+      }
+    };
+
+    if (viewImageTransferId) {
+      document.addEventListener("keydown", handleEscKey);
+      return () => {
+        document.removeEventListener("keydown", handleEscKey);
+      };
+    }
+  }, [viewImageTransferId]);
+
+  const openPdfInNewTab = (pdfPath: string) => {
+    try {
+      if (pdfPath.startsWith("data:")) {
+        const byteString = atob(pdfPath.split(",")[1]);
+        const mimeString = pdfPath.split(",")[0].split(":")[1].split(";")[0];
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+        const blob = new Blob([ab], { type: mimeString });
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+      } else {
+        window.open(pdfPath, "_blank");
+      }
+    } catch {
+      window.open(pdfPath, "_blank");
+    }
+  };
 
   // Tag selection handlers
   const handleTagSelectionChange = useCallback((tagId: number, checked: boolean) => {
@@ -573,6 +687,21 @@ export default function TransfersPage() {
         );
       case "currency":
         return <td key={columnKey} className="py-2">{transfer.currencyCode}</td>;
+      case "attachment":
+        return (
+          <td key={columnKey} className="py-2">
+            {transfer.imagePath ? (
+              <button
+                onClick={() => setViewImageTransferId(transfer.id)}
+                className="text-blue-600 hover:text-blue-700 underline text-sm"
+              >
+                {t("transfers.viewAttachment")}
+              </button>
+            ) : (
+              "-"
+            )}
+          </td>
+        );
       case "tags":
         return (
           <td key={columnKey} className="py-2">
@@ -974,7 +1103,7 @@ export default function TransfersPage() {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  {t("transfers.description")} *
+                  {t("transfers.description")} ({t("common.optional")})
                 </label>
                 <textarea
                   className="w-full rounded-lg border border-slate-200 px-3 py-2"
@@ -982,8 +1111,81 @@ export default function TransfersPage() {
                   value={form.description}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm((p) => ({ ...p, description: e.target.value }))}
                   placeholder={t("transfers.descriptionPlaceholder")}
-                  required
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  {t("transfers.attachment")} ({t("common.optional")})
+                </label>
+                <div
+                  className={`p-3 border-2 border-dashed rounded-lg transition-colors relative ${
+                    imageDragOver ? "border-blue-500 bg-blue-50" : "border-slate-200"
+                  }`}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                >
+                  {!form.imagePath && (
+                    <div className="text-center py-4 text-slate-500 text-sm mb-2">
+                      <p className="mb-2">{t("transfers.dragDropOrPaste")}</p>
+                    </div>
+                  )}
+                  <div className="relative mb-2">
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      accept="image/*,application/pdf"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImageUpload(file);
+                      }}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      id="transfer-file-input"
+                    />
+                    <label
+                      htmlFor="transfer-file-input"
+                      className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-blue-50 hover:bg-blue-100 border-2 border-blue-300 border-dashed rounded-lg text-blue-700 font-medium cursor-pointer transition-colors"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                      </svg>
+                      <span>{t("transfers.chooseFile")}</span>
+                    </label>
+                  </div>
+                  {form.imagePath && (
+                    <div className="relative mt-2">
+                      {form.imagePath.startsWith("data:image/") || (!form.imagePath.startsWith("data:") && !isPdfFile(form.imagePath)) ? (
+                        <img
+                          src={form.imagePath}
+                          alt="Attachment"
+                          className="max-w-full max-h-64 w-auto h-auto object-contain rounded"
+                        />
+                      ) : isPdfFile(form.imagePath) ? (
+                        <div className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-slate-200 rounded-lg">
+                          <svg className="w-12 h-12 text-red-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                          </svg>
+                          <p className="text-sm font-medium text-slate-700">PDF Document</p>
+                          <p className="text-xs text-slate-500 mt-1">{t("transfers.readyToUpload")}</p>
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForm((p) => ({ ...p, imagePath: "", file: undefined }));
+                          if (imageInputRef.current) imageInputRef.current.value = "";
+                        }}
+                        className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1.5 shadow-lg transition-colors"
+                        title={t("common.cancel")}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div>
@@ -1016,7 +1218,7 @@ export default function TransfersPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isCreating || isUpdating || !form.fromAccountId || !form.toAccountId || !form.amount || !form.description}
+                  disabled={isCreating || isUpdating || !form.fromAccountId || !form.toAccountId || !form.amount}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60 transition-colors"
                 >
                   {isCreating || isUpdating
@@ -1030,6 +1232,57 @@ export default function TransfersPage() {
           </div>
         </div>
       )}
+
+      {/* View Attachment Modal */}
+      {viewImageTransferId && (() => {
+        const transfer = transfers.find((t: any) => t.id === viewImageTransferId);
+        const rawPath = transfer?.imagePath || "";
+        const imagePath = rawPath && !rawPath.startsWith("data:") && !rawPath.startsWith("http") && !rawPath.startsWith("/")
+          ? `/api/uploads/${rawPath}`
+          : rawPath;
+        const isPDF = isPdfFile(imagePath);
+
+        return (
+          <div
+            className="fixed top-0 left-0 right-0 bottom-0 w-full h-full z-[9999] flex items-center justify-center bg-black bg-opacity-75"
+            style={{ margin: 0, padding: 0 }}
+            onClick={() => setViewImageTransferId(null)}
+          >
+            <div className="relative max-w-4xl max-h-[90vh] p-4" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setViewImageTransferId(null)}
+                className="absolute top-2 right-2 z-10 text-white bg-black bg-opacity-50 rounded-full p-2 hover:bg-opacity-75"
+                aria-label={t("common.close")}
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              {isPDF ? (
+                <div className="flex flex-col items-center justify-center p-8 bg-white rounded-lg">
+                  <svg className="w-24 h-24 text-red-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                  <p className="text-lg font-medium text-slate-700 mb-2">PDF Document</p>
+                  <p className="text-sm text-slate-500 mb-4">Click the button below to view the PDF</p>
+                  <button
+                    onClick={() => openPdfInNewTab(imagePath)}
+                    className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+                  >
+                    Open PDF in New Tab
+                  </button>
+                </div>
+              ) : (
+                <img
+                  src={imagePath}
+                  alt={t("transfers.attachment")}
+                  className="max-w-full max-h-[90vh] rounded-lg"
+                />
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Audit Trail Modal */}
       {viewAuditTrailTransferId && (

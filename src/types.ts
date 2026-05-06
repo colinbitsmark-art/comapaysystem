@@ -253,6 +253,7 @@ export interface Transfer {
   currencyCode: string;
   description?: string;
   transactionFee?: number;
+  imagePath?: string | null;
   createdBy?: number;
   createdByName?: string;
   createdAt: string;
@@ -284,6 +285,7 @@ export interface TransferInput {
   amount: number;
   description?: string;
   transactionFee?: number;
+  imagePath?: string | null;
   createdBy?: number;
   tagIds?: number[];
   currencyCode?: string;

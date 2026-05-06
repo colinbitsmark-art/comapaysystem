@@ -256,6 +256,7 @@
     "updateCurrency": "更新货币",
     "processOrder": "处理订单",
     "cancelOrder": "取消订单",
+    "editAnyOrder": "编辑任意状态的订单",
     "deleteOrder": "删除订单",
     "deleteManyOrders": "删除多个订单",
     "deleteExpense": "删除开支",
@@ -790,7 +791,12 @@
     "remove": "移除",
     "applying": "应用中...",
     "confirmDelete": "您确定要删除此转账吗？",
-    "confirmDeleteSelected": "您确定要删除所选转账吗？"
+    "confirmDeleteSelected": "您确定要删除所选转账吗？",
+    "attachment": "附件",
+    "viewAttachment": "查看",
+    "dragDropOrPaste": "拖放文件（图片或PDF）、粘贴（Ctrl+V），或",
+    "chooseFile": "选择文件（图片或PDF）",
+    "readyToUpload": "准备上传"
   },
   "expenses": {
     "title": "开支 & 收入",
