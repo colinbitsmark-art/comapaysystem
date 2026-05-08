@@ -2,6 +2,10 @@ import { db } from "../db.js";
 import { getUserIdFromHeader } from "../utils/auth.js";
 import { createNotification } from "../services/notification/notificationService.js";
 import { generateTransferFilename, saveFile, deleteFile, normalizeStoredImagePath } from "../utils/fileStorage.js";
+import {
+  appendAccountAccessFilter,
+  requireAccountAccess,
+} from "../utils/accountAccess.js";
 
 export const listTransfers = (req, res) => {
   const {
@@ -20,6 +24,24 @@ export const listTransfers = (req, res) => {
   // Build WHERE conditions
   const conditions = [];
   const params = {};
+  const userId = getUserIdFromHeader(req);
+
+  appendAccountAccessFilter({
+    userId,
+    scope: "transfer.account",
+    accountColumn: "t.fromAccountId",
+    conditions,
+    params,
+    paramPrefix: "transferFromAccess",
+  });
+  appendAccountAccessFilter({
+    userId,
+    scope: "transfer.account",
+    accountColumn: "t.toAccountId",
+    conditions,
+    params,
+    paramPrefix: "transferToAccess",
+  });
   
   if (dateFrom) {
     conditions.push('DATE(COALESCE(t.entryDate, t.createdAt)) >= DATE(@dateFrom)');
@@ -165,6 +187,24 @@ export const exportTransfers = (req, res) => {
   // Build WHERE conditions (same logic as listTransfers)
   const conditions = [];
   const params = {};
+  const userId = getUserIdFromHeader(req);
+
+  appendAccountAccessFilter({
+    userId,
+    scope: "transfer.account",
+    accountColumn: "t.fromAccountId",
+    conditions,
+    params,
+    paramPrefix: "transferFromAccess",
+  });
+  appendAccountAccessFilter({
+    userId,
+    scope: "transfer.account",
+    accountColumn: "t.toAccountId",
+    conditions,
+    params,
+    paramPrefix: "transferToAccess",
+  });
   
   if (dateFrom) {
     conditions.push('DATE(COALESCE(t.entryDate, t.createdAt)) >= DATE(@dateFrom)');
@@ -285,6 +325,12 @@ export const createTransfer = async (req, res, next) => {
     }
     if (!toAccount) {
       return res.status(404).json({ message: "To account not found" });
+    }
+    if (!requireAccountAccess(req, res, "transfer.account", fromAccountId, "You do not have access to use this transfer account")) {
+      return;
+    }
+    if (!requireAccountAccess(req, res, "transfer.account", toAccountId, "You do not have access to use this transfer account")) {
+      return;
     }
 
     // Verify same currency
@@ -585,6 +631,12 @@ export const updateTransfer = async (req, res, next) => {
 
     if (!fromAccount || !toAccount) {
       return res.status(404).json({ message: "Account not found" });
+    }
+    if (!requireAccountAccess(req, res, "transfer.account", finalFromAccountId, "You do not have access to use this transfer account")) {
+      return;
+    }
+    if (!requireAccountAccess(req, res, "transfer.account", finalToAccountId, "You do not have access to use this transfer account")) {
+      return;
     }
 
     if (fromAccount.currencyCode !== toAccount.currencyCode) {

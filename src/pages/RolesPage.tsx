@@ -11,10 +11,11 @@ import {
   useGetRolesQuery,
   useUpdateRoleMutation,
   useForceLogoutUsersByRoleMutation,
+  useGetAccountsQuery,
 } from "../services/api";
 import { useAppSelector, useAppDispatch } from "../app/hooks";
 import { setUser } from "../app/authSlice";
-import type { RolePermissions } from "../types";
+import type { Account, RoleAccountAccess, RolePermissions } from "../types";
 
 const SECTION_OPTIONS = ["dashboard", "currencies", "customers", "users", "roles", "orders", "transfers", "accounts", "expenses", "profit", "wallets", "tags"];
 
@@ -112,12 +113,148 @@ const ACTION_GROUPS = [
 // Flatten all actions for backward compatibility
 const ACTION_OPTIONS = ACTION_GROUPS.flatMap((group) => group.actions);
 
+const ACCOUNT_SCOPE_GROUPS = [
+  {
+    title: "Accounts Page",
+    scopes: [{ key: "account.view", label: "Visible accounts" }],
+  },
+  {
+    title: "Expenses",
+    scopes: [{ key: "expense.account", label: "Expense account" }],
+  },
+  {
+    title: "Internal Transfers",
+    scopes: [{ key: "transfer.account", label: "Transfer accounts" }],
+  },
+  {
+    title: "Orders",
+    scopes: [{ key: "order.account", label: "Order accounts" }],
+  },
+  {
+    title: "Profit / Service Charges",
+    scopes: [
+      { key: "profit.account", label: "Profit accounts" },
+      { key: "serviceCharge.account", label: "Service charge accounts" },
+    ],
+  },
+];
+
+const getDefaultAccountAccess = (): RoleAccountAccess =>
+  ACCOUNT_SCOPE_GROUPS.flatMap((group) => group.scopes).reduce<RoleAccountAccess>((acc, scope) => {
+    acc[scope.key] = { mode: "all", accountIds: [] };
+    return acc;
+  }, {});
+
+const normalizeAccountAccess = (access?: RoleAccountAccess): RoleAccountAccess => ({
+  ...getDefaultAccountAccess(),
+  ...(access || {}),
+});
+
+function AccountAccessEditor({
+  accountAccess,
+  onChange,
+  accounts,
+}: {
+  accountAccess: RoleAccountAccess;
+  onChange: (accountAccess: RoleAccountAccess) => void;
+  accounts: Account[];
+}) {
+  const normalizedAccess = normalizeAccountAccess(accountAccess);
+
+  const updateScope = (scope: string, nextValue: RoleAccountAccess[string]) => {
+    onChange({
+      ...normalizedAccess,
+      [scope]: nextValue,
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="mb-3">
+        <div className="text-sm font-semibold text-slate-700">Account Access</div>
+        <p className="text-xs text-slate-500">
+          Choose whether this role can use all accounts or only selected accounts in each area.
+        </p>
+      </div>
+
+      <div className="space-y-5">
+        {ACCOUNT_SCOPE_GROUPS.map((group) => (
+          <div key={group.title}>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {group.title}
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {group.scopes.map((scope) => {
+                const rule = normalizedAccess[scope.key] || { mode: "all", accountIds: [] };
+                const selectedIds = new Set(rule.accountIds || []);
+
+                return (
+                  <div key={scope.key} className="rounded-lg border border-slate-200 p-3">
+                    <div className="mb-2 text-sm font-medium text-slate-700">{scope.label}</div>
+                    <div className="mb-3 flex gap-3 text-xs text-slate-600">
+                      <label className="flex items-center gap-1">
+                        <input
+                          type="radio"
+                          checked={rule.mode !== "selected"}
+                          onChange={() => updateScope(scope.key, { mode: "all", accountIds: [] })}
+                          className="border-slate-300 text-amber-600 focus:ring-amber-500"
+                        />
+                        All accounts
+                      </label>
+                      <label className="flex items-center gap-1">
+                        <input
+                          type="radio"
+                          checked={rule.mode === "selected"}
+                          onChange={() => updateScope(scope.key, { mode: "selected", accountIds: rule.accountIds || [] })}
+                          className="border-slate-300 text-amber-600 focus:ring-amber-500"
+                        />
+                        Selected only
+                      </label>
+                    </div>
+
+                    {rule.mode === "selected" && (
+                      <div className="max-h-44 space-y-1 overflow-y-auto rounded-md bg-slate-50 p-2">
+                        {accounts.map((account) => (
+                          <label key={account.id} className="flex items-center gap-2 text-xs text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(account.id)}
+                              onChange={(event) => {
+                                const nextIds = event.target.checked
+                                  ? [...selectedIds, account.id]
+                                  : [...selectedIds].filter((id) => id !== account.id);
+                                updateScope(scope.key, { mode: "selected", accountIds: nextIds });
+                              }}
+                              className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                            />
+                            <span>
+                              {account.name} ({account.currencyCode})
+                            </span>
+                          </label>
+                        ))}
+                        {!accounts.length && (
+                          <div className="text-xs text-slate-500">No accounts available.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function RolesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const currentUser = useAppSelector((s) => s.auth.user);
   const { data: roles = [], isLoading } = useGetRolesQuery();
+  const { data: accounts = [] } = useGetAccountsQuery();
   const [addRole, { isLoading: isSaving }] = useAddRoleMutation();
   const [updateRole] = useUpdateRoleMutation();
   const [deleteRole, { isLoading: isDeleting }] = useDeleteRoleMutation();
@@ -151,6 +288,7 @@ export default function RolesPage() {
     name: string;
     displayName: string;
     permissions: RolePermissions;
+    accountAccess: RoleAccountAccess;
   }>({
     name: "",
     displayName: "",
@@ -158,6 +296,7 @@ export default function RolesPage() {
       sections: ["dashboard", "orders"],
       actions: { createOrder: true, processOrder: true },
     },
+    accountAccess: getDefaultAccountAccess(),
   });
 
   const actionEnabled = useMemo(
@@ -173,6 +312,7 @@ export default function RolesPage() {
       name: "",
       displayName: "",
       permissions: { sections: ["dashboard"], actions: {} },
+      accountAccess: getDefaultAccountAccess(),
     });
     setAddActiveTab("dashboard");
     setShowForm(false);
@@ -192,6 +332,7 @@ export default function RolesPage() {
       name: current.name,
       displayName: current.displayName,
       permissions: current.permissions,
+      accountAccess: normalizeAccountAccess(current.accountAccess),
     });
     // Initialize the active tab for editing to the first visible section
     const visibleGroups = ACTION_GROUPS.filter((group) =>
@@ -704,6 +845,18 @@ export default function RolesPage() {
             }}
             activeTab={editingId ? editActiveTab : addActiveTab}
             setActiveTab={editingId ? setEditActiveTab : setAddActiveTab}
+          />
+
+          <AccountAccessEditor
+            accountAccess={editingId ? editForm!.accountAccess : form.accountAccess}
+            accounts={accounts}
+            onChange={(newAccountAccess) => {
+              if (editingId) {
+                setEditForm((prev) => (prev ? { ...prev, accountAccess: newAccountAccess } : prev));
+              } else {
+                setForm((prev) => ({ ...prev, accountAccess: newAccountAccess }));
+              }
+            }}
           />
 
           <button

@@ -11,6 +11,10 @@ import {
 import { getUserIdFromHeader } from "../utils/auth.js";
 import { createNotification } from "../services/notification/notificationService.js";
 import { getUserPermissions, isAdmin, canModifyOrder, canEditAnyOrder } from "../utils/orderPermissions.js";
+import {
+  getAllowedAccountIdsForUser,
+  requireAccountAccess,
+} from "../utils/accountAccess.js";
 
 const ORDER_AUDIT_FIELDS = [
   "customerId",
@@ -160,6 +164,32 @@ export const listOrders = (req, res) => {
   // Build WHERE clause conditions
   const conditions = [];
   const params = {};
+  const userId = getUserIdFromHeader(req);
+
+  const allowedOrderAccountIds = getAllowedAccountIdsForUser(userId, "order.account");
+  if (Array.isArray(allowedOrderAccountIds)) {
+    if (allowedOrderAccountIds.length === 0) {
+      conditions.push("1 = 0");
+    } else {
+      const placeholders = allowedOrderAccountIds.map((accountId, index) => {
+        const key = `orderAccountAccess${index}`;
+        params[key] = accountId;
+        return `@${key}`;
+      }).join(",");
+      conditions.push(`(
+        o.buyAccountId IN (${placeholders})
+        OR o.sellAccountId IN (${placeholders})
+        OR EXISTS (
+          SELECT 1 FROM order_receipts r
+          WHERE r.orderId = o.id AND r.accountId IN (${placeholders})
+        )
+        OR EXISTS (
+          SELECT 1 FROM order_payments p
+          WHERE p.orderId = o.id AND p.accountId IN (${placeholders})
+        )
+      )`);
+    }
+  }
 
   if (dateFrom) {
     conditions.push('DATE(COALESCE(o.orderDate, o.createdAt)) >= DATE(@dateFrom)');
@@ -479,6 +509,32 @@ export const exportOrders = (req, res) => {
   // Build WHERE clause conditions (same logic as listOrders)
   const conditions = [];
   const params = {};
+  const userId = getUserIdFromHeader(req);
+
+  const allowedOrderAccountIds = getAllowedAccountIdsForUser(userId, "order.account");
+  if (Array.isArray(allowedOrderAccountIds)) {
+    if (allowedOrderAccountIds.length === 0) {
+      conditions.push("1 = 0");
+    } else {
+      const placeholders = allowedOrderAccountIds.map((accountId, index) => {
+        const key = `orderAccountAccess${index}`;
+        params[key] = accountId;
+        return `@${key}`;
+      }).join(",");
+      conditions.push(`(
+        o.buyAccountId IN (${placeholders})
+        OR o.sellAccountId IN (${placeholders})
+        OR EXISTS (
+          SELECT 1 FROM order_receipts r
+          WHERE r.orderId = o.id AND r.accountId IN (${placeholders})
+        )
+        OR EXISTS (
+          SELECT 1 FROM order_payments p
+          WHERE p.orderId = o.id AND p.accountId IN (${placeholders})
+        )
+      )`);
+    }
+  }
 
   if (dateFrom) {
     conditions.push('DATE(COALESCE(o.orderDate, o.createdAt)) >= DATE(@dateFrom)');
@@ -699,6 +755,9 @@ export const createOrder = async (req, res, next) => {
       if ((buyAccount.currencyCode || "").toUpperCase() !== (orderData.fromCurrency || "").toUpperCase()) {
         return res.status(400).json({ message: "Buy account currency does not match fromCurrency" });
       }
+      if (!requireAccountAccess(req, res, "order.account", orderData.buyAccountId, "You do not have access to use this order account")) {
+        return;
+      }
     }
     if (orderData.sellAccountId !== undefined && orderData.sellAccountId !== null) {
       sellAccount = db.prepare("SELECT id, name, currencyCode FROM accounts WHERE id = ?").get(orderData.sellAccountId);
@@ -707,6 +766,9 @@ export const createOrder = async (req, res, next) => {
       }
       if ((sellAccount.currencyCode || "").toUpperCase() !== (orderData.toCurrency || "").toUpperCase()) {
         return res.status(400).json({ message: "Sell account currency does not match toCurrency" });
+      }
+      if (!requireAccountAccess(req, res, "order.account", orderData.sellAccountId, "You do not have access to use this order account")) {
+        return;
       }
     }
     // Validate profit account/currency if provided
@@ -721,6 +783,9 @@ export const createOrder = async (req, res, next) => {
       if ((profitAccount.currencyCode || "").toUpperCase() !== String(orderData.profitCurrency || "").toUpperCase()) {
         return res.status(400).json({ message: "Profit account currency does not match profit currency" });
       }
+      if (!requireAccountAccess(req, res, "profit.account", orderData.profitAccountId, "You do not have access to use this profit account")) {
+        return;
+      }
     }
 
     // Validate service charge account/currency if provided
@@ -734,6 +799,9 @@ export const createOrder = async (req, res, next) => {
       }
       if ((scAccount.currencyCode || "").toUpperCase() !== String(orderData.serviceChargeCurrency || "").toUpperCase()) {
         return res.status(400).json({ message: "Service charge account currency does not match service charge currency" });
+      }
+      if (!requireAccountAccess(req, res, "serviceCharge.account", orderData.serviceChargeAccountId, "You do not have access to use this service charge account")) {
+        return;
       }
     }
 
@@ -1150,6 +1218,9 @@ export const updateOrder = (req, res, next) => {
       if ((buyAcc.currencyCode || "").toUpperCase() !== (effectiveFromCurrency || "").toUpperCase()) {
         return res.status(400).json({ message: "Buy account currency does not match fromCurrency" });
       }
+      if (!requireAccountAccess(req, res, "order.account", alwaysUpdatableUpdates.buyAccountId, "You do not have access to use this order account")) {
+        return;
+      }
     }
     if (alwaysUpdatableUpdates.sellAccountId !== undefined && alwaysUpdatableUpdates.sellAccountId !== null) {
       const sellAcc = db.prepare("SELECT id, currencyCode FROM accounts WHERE id = ?;").get(alwaysUpdatableUpdates.sellAccountId);
@@ -1158,6 +1229,20 @@ export const updateOrder = (req, res, next) => {
       }
       if ((sellAcc.currencyCode || "").toUpperCase() !== (effectiveToCurrency || "").toUpperCase()) {
         return res.status(400).json({ message: "Sell account currency does not match toCurrency" });
+      }
+      if (!requireAccountAccess(req, res, "order.account", alwaysUpdatableUpdates.sellAccountId, "You do not have access to use this order account")) {
+        return;
+      }
+    }
+
+    if (alwaysUpdatableUpdates.profitAccountId !== undefined && alwaysUpdatableUpdates.profitAccountId !== null) {
+      if (!requireAccountAccess(req, res, "profit.account", alwaysUpdatableUpdates.profitAccountId, "You do not have access to use this profit account")) {
+        return;
+      }
+    }
+    if (alwaysUpdatableUpdates.serviceChargeAccountId !== undefined && alwaysUpdatableUpdates.serviceChargeAccountId !== null) {
+      if (!requireAccountAccess(req, res, "serviceCharge.account", alwaysUpdatableUpdates.serviceChargeAccountId, "You do not have access to use this service charge account")) {
+        return;
       }
     }
 
@@ -2130,6 +2215,9 @@ export const addReceipt = (req, res, next) => {
         message: `Receipt account currency (${receiptAccount.currencyCode}) does not match order fromCurrency (${order.fromCurrency})` 
       });
     }
+    if (!requireAccountAccess(req, res, "order.account", receiptAccountId, "You do not have access to use this order account")) {
+      return;
+    }
 
     const receiptAmount = parseFloat(amount);
 
@@ -2428,6 +2516,9 @@ export const addPayment = (req, res, next) => {
         message: `Payment account currency (${paymentAccount.currencyCode}) does not match order toCurrency (${order.toCurrency})` 
       });
     }
+    if (!requireAccountAccess(req, res, "order.account", paymentAccountId, "You do not have access to use this order account")) {
+      return;
+    }
 
     const paymentAmount = parseFloat(amount);
 
@@ -2521,6 +2612,9 @@ export const updateReceipt = (req, res, next) => {
         return res.status(400).json({ 
           message: `Receipt account currency (${receiptAccount.currencyCode}) does not match order fromCurrency (${order.fromCurrency})` 
         });
+      }
+      if (!requireAccountAccess(req, res, "order.account", Number(accountId), "You do not have access to use this order account")) {
+        return;
       }
       accountIdToUse = Number(accountId);
     }
@@ -2642,6 +2736,9 @@ export const confirmReceipt = (req, res, next) => {
     if (!receipt.accountId) {
       return res.status(400).json({ message: "Receipt must have an account before confirmation" });
     }
+    if (!requireAccountAccess(req, res, "order.account", receipt.accountId, "You do not have access to confirm this order account")) {
+      return;
+    }
 
     // Update receipt status to confirmed
     db.prepare("UPDATE order_receipts SET status = 'confirmed' WHERE id = ?;").run(receiptId);
@@ -2755,6 +2852,9 @@ export const updatePayment = (req, res, next) => {
         return res.status(400).json({ 
           message: `Payment account currency (${paymentAccount.currencyCode}) does not match order toCurrency (${order.toCurrency})` 
         });
+      }
+      if (!requireAccountAccess(req, res, "order.account", Number(accountId), "You do not have access to use this order account")) {
+        return;
       }
       accountIdToUse = Number(accountId);
     }
@@ -2876,6 +2976,9 @@ export const confirmPayment = (req, res, next) => {
 
     if (!payment.accountId) {
       return res.status(400).json({ message: "Payment must have an account before confirmation" });
+    }
+    if (!requireAccountAccess(req, res, "order.account", payment.accountId, "You do not have access to confirm this order account")) {
+      return;
     }
 
     // Update payment status to confirmed

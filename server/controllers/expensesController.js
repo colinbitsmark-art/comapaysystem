@@ -8,6 +8,10 @@ import {
 } from "../utils/fileStorage.js";
 import { getUserIdFromHeader } from "../utils/auth.js";
 import { createNotification } from "../services/notification/notificationService.js";
+import {
+  appendAccountAccessFilter,
+  requireAccountAccess,
+} from "../utils/accountAccess.js";
 
 export const listExpenses = (req, res) => {
   const {
@@ -26,6 +30,16 @@ export const listExpenses = (req, res) => {
   // Build WHERE conditions
   const conditions = ['e.deletedAt IS NULL'];
   const params = {};
+  const userId = getUserIdFromHeader(req);
+
+  appendAccountAccessFilter({
+    userId,
+    scope: "expense.account",
+    accountColumn: "e.accountId",
+    conditions,
+    params,
+    paramPrefix: "expenseAccountAccess",
+  });
   
   if (dateFrom) {
     conditions.push('DATE(COALESCE(e.entryDate, e.createdAt)) >= DATE(@dateFrom)');
@@ -160,6 +174,16 @@ export const exportExpenses = (req, res) => {
   // Build WHERE conditions (same logic as listExpenses)
   const conditions = ['e.deletedAt IS NULL'];
   const params = {};
+  const userId = getUserIdFromHeader(req);
+
+  appendAccountAccessFilter({
+    userId,
+    scope: "expense.account",
+    accountColumn: "e.accountId",
+    conditions,
+    params,
+    paramPrefix: "expenseAccountAccess",
+  });
   
   if (dateFrom) {
     conditions.push('DATE(COALESCE(e.entryDate, e.createdAt)) >= DATE(@dateFrom)');
@@ -289,6 +313,9 @@ export const createExpense = async (req, res, next) => {
     const account = db.prepare("SELECT id, name, balance, currencyCode FROM accounts WHERE id = ?;").get(accountIdNum);
     if (!account) {
       return res.status(404).json({ message: "Account not found" });
+    }
+    if (!requireAccountAccess(req, res, "expense.account", accountIdNum)) {
+      return;
     }
 
     // Handle currencyCode for imports (optional, but validate if provided)
@@ -557,6 +584,9 @@ export const updateExpense = (req, res, next) => {
     const newAccount = db.prepare("SELECT id, name, balance, currencyCode FROM accounts WHERE id = ?;").get(finalAccountId);
     if (!newAccount) {
       return res.status(404).json({ message: "Account not found" });
+    }
+    if (!requireAccountAccess(req, res, "expense.account", finalAccountId)) {
+      return;
     }
 
     // If account changed, verify currency matches

@@ -105,7 +105,18 @@ export default function OrdersPage() {
   const customers = customersData?.customers ?? [];
   const { data: currencies = [] } = useGetCurrenciesQuery();
   const { data: users = [] } = useGetUsersQuery();
-  const { data: accounts = [] } = useGetAccountsQuery();
+  const { data: orderAccounts = [] } = useGetAccountsQuery({ scope: "order.account" });
+  const { data: profitAccounts = [] } = useGetAccountsQuery({ scope: "profit.account" });
+  const { data: serviceChargeAccounts = [] } = useGetAccountsQuery({ scope: "serviceCharge.account" });
+  const accounts = useMemo(() => {
+    const byId = new Map<number, (typeof orderAccounts)[number]>();
+    [
+      ...orderAccounts,
+      ...profitAccounts,
+      ...serviceChargeAccounts,
+    ].forEach((account) => byId.set(account.id, account));
+    return [...byId.values()];
+  }, [orderAccounts, profitAccounts, serviceChargeAccounts]);
   const { data: tags = [] } = useGetTagsQuery();
   const [addOrder] = useAddOrderMutation();
 
@@ -1432,6 +1443,7 @@ export default function OrdersPage() {
         showRemarks={unifiedOrder.showRemarks}
         setShowRemarks={unifiedOrder.setShowRemarks}
         tags={tags}
+        customers={customers}
         selectedTagIds={unifiedOrder.selectedTagIds}
         setSelectedTagIds={unifiedOrder.setSelectedTagIds}
         showTagPicker={unifiedOrder.showTagPicker}
@@ -1440,10 +1452,17 @@ export default function OrdersPage() {
         setOrderDate={unifiedOrder.setOrderDate}
         currencies={currencies}
         accounts={accounts}
+        accountOptionsByKind={{
+          receipt: orderAccounts,
+          payment: orderAccounts,
+          profit: profitAccounts,
+          service_charge: serviceChargeAccounts,
+        }}
         handleNumberInputWheel={handleNumberInputWheel}
         onSave={unifiedOrder.handleSave}
         onComplete={unifiedOrder.handleComplete}
         onClose={unifiedOrder.closeModal}
+        onOpenCreateCustomer={() => setIsCreateCustomerModalOpen(true)}
         onAutoFill={unifiedOrder.fillReceiptPaymentFromTotals}
         addLineRow={unifiedOrder.addLineRow}
         viewerModal={newOrderViewerModal}

@@ -1,4 +1,8 @@
 import { db } from "../db.js";
+import {
+  getAccountAccessForRole,
+  saveAccountAccessForRole,
+} from "../utils/accountAccess.js";
 
 // Store active SSE connections by role name: Map<roleName, Set<res>>
 const sseConnections = new Map();
@@ -90,6 +94,7 @@ export const listRoles = (_req, res) => {
   const parsed = rows.map((row) => ({
     ...row,
     permissions: JSON.parse(row.permissions),
+    accountAccess: getAccountAccessForRole(row.id),
   }));
   res.json(parsed);
 };
@@ -102,13 +107,19 @@ export const createRole = (req, res, next) => {
        VALUES (@name, @displayName, @permissions);`,
     );
     const result = stmt.run({
-      ...payload,
+      name: payload.name,
+      displayName: payload.displayName,
       permissions: JSON.stringify(payload.permissions || { sections: [], actions: {} }),
     });
+    saveAccountAccessForRole(result.lastInsertRowid, payload.accountAccess || {});
     const row = db.prepare("SELECT * FROM roles WHERE id = ?;").get(result.lastInsertRowid);
     res
       .status(201)
-      .json({ ...row, permissions: JSON.parse(row.permissions || "{}") });
+      .json({
+        ...row,
+        permissions: JSON.parse(row.permissions || "{}"),
+        accountAccess: getAccountAccessForRole(row.id),
+      });
   } catch (error) {
     next(error);
   }
@@ -118,23 +129,35 @@ export const updateRole = (req, res, next) => {
   try {
     const { id } = req.params;
     const updates = req.body || {};
-    const fields = Object.keys(updates);
-    if (!fields.length) {
+    const fields = Object.keys(updates).filter((field) => field !== "accountAccess");
+    const hasAccountAccessUpdate = Object.prototype.hasOwnProperty.call(updates, "accountAccess");
+    if (!fields.length && !hasAccountAccessUpdate) {
       return res.status(400).json({ message: "No updates provided" });
     }
-    const assignments = fields.map((field) => `${field} = @${field}`).join(", ");
     // Always update the updatedAt timestamp when role is modified
     const updatedAt = new Date().toISOString();
-    db.prepare(`UPDATE roles SET ${assignments}, updatedAt = @updatedAt WHERE id = @id;`).run({
-      ...updates,
-      permissions: updates.permissions
-        ? JSON.stringify(updates.permissions)
-        : undefined,
-      updatedAt,
-      id,
-    });
+    if (fields.length > 0) {
+      const assignments = fields.map((field) => `${field} = @${field}`).join(", ");
+      db.prepare(`UPDATE roles SET ${assignments}, updatedAt = @updatedAt WHERE id = @id;`).run({
+        ...updates,
+        permissions: updates.permissions
+          ? JSON.stringify(updates.permissions)
+          : undefined,
+        updatedAt,
+        id,
+      });
+    } else {
+      db.prepare("UPDATE roles SET updatedAt = @updatedAt WHERE id = @id;").run({ updatedAt, id });
+    }
+    if (hasAccountAccessUpdate) {
+      saveAccountAccessForRole(id, updates.accountAccess || {});
+    }
     const row = db.prepare("SELECT * FROM roles WHERE id = ?;").get(id);
-    res.json({ ...row, permissions: JSON.parse(row.permissions || "{}") });
+    res.json({
+      ...row,
+      permissions: JSON.parse(row.permissions || "{}"),
+      accountAccess: getAccountAccessForRole(row.id),
+    });
   } catch (error) {
     next(error);
   }

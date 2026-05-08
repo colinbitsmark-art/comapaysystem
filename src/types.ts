@@ -46,11 +46,21 @@ export interface RolePermissions {
   actions: Record<string, boolean>;
 }
 
+export type AccountAccessMode = "all" | "selected";
+
+export interface AccountAccessRule {
+  mode: AccountAccessMode;
+  accountIds: number[];
+}
+
+export type RoleAccountAccess = Record<string, AccountAccessRule>;
+
 export interface Role {
   id: number;
   name: string;
   displayName: string;
   permissions: RolePermissions;
+  accountAccess?: RoleAccountAccess;
   updatedAt?: string;
 }
 

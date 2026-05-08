@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { appendAccountAccessFilter } from "../utils/accountAccess.js";
 
 export const getAccountReferences = (req, res, next) => {
   try {
@@ -186,18 +187,48 @@ export const getAllReferences = (_req, res, next) => {
   }
 };
 
-export const listAccounts = (_req, res) => {
+export const listAccounts = (req, res) => {
+  const conditions = [];
+  const params = {};
+  const userId = Number(req.get?.("X-User-Id"));
+  const scope = req.query?.scope ? String(req.query.scope) : "account.view";
+
+  appendAccountAccessFilter({
+    userId,
+    scope,
+    accountColumn: "a.id",
+    conditions,
+    params,
+    paramPrefix: "accountAccess",
+  });
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const rows = db
     .prepare(
       `SELECT a.*, c.name as currencyName FROM accounts a
        LEFT JOIN currencies c ON c.code = a.currencyCode
+       ${whereClause}
        ORDER BY a.currencyCode ASC, a.name ASC;`,
     )
-    .all();
+    .all(params);
   res.json(rows);
 };
 
-export const getAccountsSummary = (_req, res) => {
+export const getAccountsSummary = (req, res) => {
+  const conditions = [];
+  const params = {};
+  const userId = Number(req.get?.("X-User-Id"));
+
+  appendAccountAccessFilter({
+    userId,
+    scope: "account.view",
+    accountColumn: "a.id",
+    conditions,
+    params,
+    paramPrefix: "accountAccess",
+  });
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const rows = db
     .prepare(
       `SELECT 
@@ -207,24 +238,39 @@ export const getAccountsSummary = (_req, res) => {
         COUNT(a.id) as accountCount
        FROM accounts a
        LEFT JOIN currencies c ON c.code = a.currencyCode
+       ${whereClause}
        GROUP BY currencyCode
        ORDER BY currencyCode ASC;`,
     )
-    .all();
+    .all(params);
   res.json(rows);
 };
 
 export const getAccountsByCurrency = (req, res, next) => {
   try {
     const { currencyCode } = req.params;
+    const conditions = ["a.currencyCode = @currencyCode"];
+    const params = { currencyCode };
+    const userId = Number(req.get?.("X-User-Id"));
+    const scope = req.query?.scope ? String(req.query.scope) : "account.view";
+
+    appendAccountAccessFilter({
+      userId,
+      scope,
+      accountColumn: "a.id",
+      conditions,
+      params,
+      paramPrefix: "accountAccess",
+    });
+
     const rows = db
       .prepare(
         `SELECT a.*, c.name as currencyName FROM accounts a
          LEFT JOIN currencies c ON c.code = a.currencyCode
-         WHERE a.currencyCode = ?
+         WHERE ${conditions.join(" AND ")}
          ORDER BY a.name ASC;`,
       )
-      .all(currencyCode);
+      .all(params);
     res.json(rows);
   } catch (error) {
     next(error);

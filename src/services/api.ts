@@ -945,8 +945,13 @@ export const api = createApi({
         return [{ type: "Order", id: "LIST" }, { type: "Account", id: "LIST" }];
       },
     }),
-    getAccounts: builder.query<Account[], void>({
-      query: () => "accounts",
+    getAccounts: builder.query<Account[], { scope?: string } | void>({
+      query: (arg) => {
+        const params = new URLSearchParams();
+        if (arg?.scope) params.set("scope", arg.scope);
+        const qs = params.toString();
+        return qs ? `accounts?${qs}` : "accounts";
+      },
       providesTags: (result) =>
         result
           ? [
@@ -959,8 +964,14 @@ export const api = createApi({
       query: () => "accounts/summary",
       providesTags: [{ type: "Account", id: "LIST" }],
     }),
-    getAccountsByCurrency: builder.query<Account[], string>({
-      query: (currencyCode) => `accounts/currency/${currencyCode}`,
+    getAccountsByCurrency: builder.query<Account[], string | { currencyCode: string; scope?: string }>({
+      query: (arg) => {
+        const currencyCode = typeof arg === "string" ? arg : arg.currencyCode;
+        const params = new URLSearchParams();
+        if (typeof arg !== "string" && arg.scope) params.set("scope", arg.scope);
+        const qs = params.toString();
+        return qs ? `accounts/currency/${currencyCode}?${qs}` : `accounts/currency/${currencyCode}`;
+      },
       providesTags: (result) =>
         result
           ? [

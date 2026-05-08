@@ -68,7 +68,7 @@ export default function ExpensesPage() {
   const expenses = Array.isArray(expensesData) ? expensesData : (expensesData as any)?.expenses || [];
   const totalExpenses = Array.isArray(expensesData) ? expenses.length : (expensesData as any)?.total || expenses.length;
   const totalPages = Math.ceil(totalExpenses / 20);
-  const { data: accounts = [] } = useGetAccountsQuery();
+  const { data: accounts = [] } = useGetAccountsQuery({ scope: "expense.account" });
   const { data: tags = [] } = useGetTagsQuery();
   const { data: users = [] } = useGetUsersQuery();
   const { data: currencies = [] } = useGetCurrenciesQuery();

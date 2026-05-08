@@ -68,7 +68,7 @@ export default function TransfersPage() {
   const transfers = Array.isArray(transfersData) ? transfersData : (transfersData as any)?.transfers || [];
   const totalTransfers = Array.isArray(transfersData) ? transfers.length : (transfersData as any)?.total || transfers.length;
   const totalPages = Math.ceil(totalTransfers / 20);
-  const { data: accounts = [] } = useGetAccountsQuery();
+  const { data: accounts = [] } = useGetAccountsQuery({ scope: "transfer.account" });
   const { data: tags = [] } = useGetTagsQuery();
   const { data: users = [] } = useGetUsersQuery();
   const { data: currencies = [] } = useGetCurrenciesQuery();

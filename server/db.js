@@ -102,6 +102,27 @@ const ensureSchema = () => {
       updatedAt TEXT
     );`,
   ).run();
+
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS role_account_scope_settings (
+      roleId INTEGER NOT NULL,
+      scope TEXT NOT NULL,
+      accessMode TEXT NOT NULL DEFAULT 'all',
+      PRIMARY KEY (roleId, scope),
+      FOREIGN KEY(roleId) REFERENCES roles(id) ON DELETE CASCADE
+    );`,
+  ).run();
+
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS role_account_access (
+      roleId INTEGER NOT NULL,
+      scope TEXT NOT NULL,
+      accountId INTEGER NOT NULL,
+      PRIMARY KEY (roleId, scope, accountId),
+      FOREIGN KEY(roleId) REFERENCES roles(id) ON DELETE CASCADE,
+      FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE CASCADE
+    );`,
+  ).run();
   
   // Add updatedAt column if it doesn't exist (migration)
   const roleColumns = db.prepare("PRAGMA table_info(roles);").all();

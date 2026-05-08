@@ -5,6 +5,7 @@ import Badge from "../common/Badge";
 import type { UnifiedLine, UnifiedLineKind } from "../../hooks/orders/useUnifiedOrderModal";
 import { CurrencyPairSwapButton } from "./CurrencyPairSwapButton";
 import { AccountSelect } from "../common/AccountSelect";
+import { CustomerSelect } from "../common/CustomerSelect";
 
 export type NewOrderViewerState = {
   isOpen: boolean;
@@ -40,6 +41,7 @@ type Props = {
   showRemarks: boolean;
   setShowRemarks: (v: boolean) => void;
   tags: Tag[];
+  customers: { id: number; name: string }[];
   selectedTagIds: number[];
   setSelectedTagIds: React.Dispatch<React.SetStateAction<number[]>>;
   showTagPicker: boolean;
@@ -48,10 +50,12 @@ type Props = {
   setOrderDate: (v: string) => void;
   currencies: Currency[];
   accounts: Account[];
+  accountOptionsByKind?: Partial<Record<UnifiedLineKind, Account[]>>;
   handleNumberInputWheel: (e: React.WheelEvent<HTMLInputElement>) => void;
   onSave: (e: FormEvent) => void;
   onComplete: (e: FormEvent) => void;
   onClose: () => void;
+  onOpenCreateCustomer: () => void;
   onAutoFill: () => void;
   addLineRow: (kind: UnifiedLineKind) => void;
   viewerModal: NewOrderViewerState;
@@ -326,6 +330,7 @@ export default function NewOrderModal({
   showRemarks,
   setShowRemarks,
   tags,
+  customers,
   selectedTagIds,
   setSelectedTagIds,
   showTagPicker,
@@ -334,10 +339,12 @@ export default function NewOrderModal({
   setOrderDate,
   currencies,
   accounts,
+  accountOptionsByKind,
   handleNumberInputWheel,
   onSave,
   onComplete,
   onClose,
+  onOpenCreateCustomer,
   onAutoFill,
   addLineRow,
   viewerModal,
@@ -345,17 +352,14 @@ export default function NewOrderModal({
 }: Props) {
   const { t } = useTranslation();
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  const customerNameInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (isOpen && !editingOrderId) {
-      customerNameInputRef.current?.focus();
-    }
-  }, [isOpen, editingOrderId]);
 
   if (!isOpen) return null;
 
   const activeCurrencies = currencies.filter((c) => c.active);
+  const selectedCustomerId = (() => {
+    const match = customers.find((c) => c.name.toLowerCase() === customerName.trim().toLowerCase());
+    return match ? String(match.id) : "";
+  })();
 
   const updateLine = (localId: string, patch: Partial<UnifiedLine>) => {
     setLines((prev) => prev.map((l) => (l.localId === localId ? { ...l, ...patch } : l)));
@@ -379,16 +383,17 @@ export default function NewOrderModal({
   };
 // 我 filter dropdown list for currencies
   const accountOptionsForLine = (line: UnifiedLine) => {
+    const sourceAccounts = accountOptionsByKind?.[line.kind] || accounts;
     if (line.kind === "receipt" || line.kind === "profit") {
-      return accounts.filter((a) => a.currencyCode === fromCurrency);
+      return sourceAccounts.filter((a) => a.currencyCode === fromCurrency);
     }
     if (line.kind === "payment") {
-      return accounts.filter((a) => a.currencyCode === toCurrency);
+      return sourceAccounts.filter((a) => a.currencyCode === toCurrency);
     }
     if (line.kind === "service_charge") {
-      return accounts.filter((a) => a.currencyCode === fromCurrency || a.currencyCode === toCurrency);
+      return sourceAccounts.filter((a) => a.currencyCode === fromCurrency || a.currencyCode === toCurrency);
     }
-    return accounts;
+    return sourceAccounts;
   };
 
   return (
@@ -417,15 +422,29 @@ export default function NewOrderModal({
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-end">
             <div className="min-w-0">
               <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.customerName")}</label>
-              <input
-                ref={customerNameInputRef}
-                type="text"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder={t("orders.customerNamePlaceholder")}
-                disabled={!!editingOrderId}
-              />
+              <div className="flex items-end gap-2">
+                <CustomerSelect
+                  value={selectedCustomerId}
+                  onChange={(value) => {
+                    const selected = customers.find((c) => c.id === Number(value));
+                    setCustomerName(selected?.name || "");
+                  }}
+                  customers={customers}
+                  placeholder={t("orders.selectCustomer") || "Select customer"}
+                  required
+                  disabled={!!editingOrderId}
+                  t={t}
+                />
+                {!editingOrderId ? (
+                  <button
+                    type="button"
+                    onClick={onOpenCreateCustomer}
+                    className="rounded-lg border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50 whitespace-nowrap"
+                  >
+                    {t("orders.createNewCustomer")}
+                  </button>
+                ) : null}
+              </div>
               {editingOrderId ? (
                 <p className="mt-1 text-xs text-slate-500">{t("orders.customerNameLockedWhenEditing")}</p>
               ) : null}
