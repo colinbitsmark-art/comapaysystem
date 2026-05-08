@@ -44,6 +44,7 @@ const ACTION_GROUPS = [
     section: "orders",
     actions: [
       { key: "createOrder", labelKey: "roles.createOrder" },
+      { key: "editAnyOrder", labelKey: "roles.editAnyOrder" },
       { key: "cancelOrder", labelKey: "roles.cancelOrder" },
       { key: "deleteOrder", labelKey: "roles.deleteOrder" },
       { key: "deleteManyOrders", labelKey: "roles.deleteManyOrders" },

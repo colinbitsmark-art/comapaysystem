@@ -10,7 +10,7 @@ import {
 } from "../utils/fileStorage.js";
 import { getUserIdFromHeader } from "../utils/auth.js";
 import { createNotification } from "../services/notification/notificationService.js";
-import { getUserPermissions, isAdmin, canModifyOrder } from "../utils/orderPermissions.js";
+import { getUserPermissions, isAdmin, canModifyOrder, canEditAnyOrder } from "../utils/orderPermissions.js";
 
 const ORDER_AUDIT_FIELDS = [
   "customerId",
@@ -1072,7 +1072,19 @@ export const updateOrder = (req, res, next) => {
       });
     }
 
-    // Fields that can only be updated when order is pending
+    // Completed and cancelled orders require the editAnyOrder permission
+    const userPermissions = getUserPermissions(userId);
+    const userCanEditAnyOrder = canEditAnyOrder(userPermissions);
+    if (existingOrder.status === "completed" || existingOrder.status === "cancelled") {
+      if (!userCanEditAnyOrder) {
+        return res.status(403).json({
+          message: "You do not have permission to edit completed or cancelled orders",
+        });
+      }
+    }
+
+    // Fields that can only be updated when order is pending (saved)
+    // Users with editAnyOrder permission can update these fields regardless of status
     const pendingOnlyFields = ["customerId", "fromCurrency", "toCurrency", "amountBuy", "amountSell", "rate"];
     // Fields that can be updated at any time (service charges and profit)
     const alwaysUpdatableFields = [
@@ -1101,21 +1113,30 @@ export const updateOrder = (req, res, next) => {
       }
     });
 
-    // Core amounts/currencies/customer only while order is still Saved
-    if (Object.keys(pendingOnlyUpdates).length > 0 && existingOrder.status !== "saved") {
+    // Core fields are restricted to saved orders unless the user has editAnyOrder permission
+    if (Object.keys(pendingOnlyUpdates).length > 0 && existingOrder.status !== "saved" && !userCanEditAnyOrder) {
       return res.status(400).json({ message: "Core fields can only be edited when order status is Saved" });
     }
+
+    // When editAnyOrder is granted, core fields are treated as always-updatable
+    if (userCanEditAnyOrder && existingOrder.status !== "saved") {
+      Object.assign(alwaysUpdatableUpdates, pendingOnlyUpdates);
+    }
+
+    // Use effective currencies (new values if being changed, otherwise existing)
+    const effectiveFromCurrency = pendingOnlyUpdates.fromCurrency ?? existingOrder.fromCurrency;
+    const effectiveToCurrency = pendingOnlyUpdates.toCurrency ?? existingOrder.toCurrency;
 
     // Validate service charge and profit currency fields
     if (alwaysUpdatableUpdates.serviceChargeCurrency !== undefined) {
       const currency = alwaysUpdatableUpdates.serviceChargeCurrency;
-      if (currency !== null && currency !== "" && currency !== existingOrder.fromCurrency && currency !== existingOrder.toCurrency) {
+      if (currency !== null && currency !== "" && currency !== effectiveFromCurrency && currency !== effectiveToCurrency) {
         return res.status(400).json({ message: "Service charge currency must be either fromCurrency or toCurrency" });
       }
     }
     if (alwaysUpdatableUpdates.profitCurrency !== undefined) {
       const currency = alwaysUpdatableUpdates.profitCurrency;
-      if (currency !== null && currency !== "" && currency !== existingOrder.fromCurrency && currency !== existingOrder.toCurrency) {
+      if (currency !== null && currency !== "" && currency !== effectiveFromCurrency && currency !== effectiveToCurrency) {
         return res.status(400).json({ message: "Profit currency must be either fromCurrency or toCurrency" });
       }
     }
@@ -1126,7 +1147,7 @@ export const updateOrder = (req, res, next) => {
       if (!buyAcc) {
         return res.status(400).json({ message: "Buy account not found" });
       }
-      if ((buyAcc.currencyCode || "").toUpperCase() !== (existingOrder.fromCurrency || "").toUpperCase()) {
+      if ((buyAcc.currencyCode || "").toUpperCase() !== (effectiveFromCurrency || "").toUpperCase()) {
         return res.status(400).json({ message: "Buy account currency does not match fromCurrency" });
       }
     }
@@ -1135,7 +1156,7 @@ export const updateOrder = (req, res, next) => {
       if (!sellAcc) {
         return res.status(400).json({ message: "Sell account not found" });
       }
-      if ((sellAcc.currencyCode || "").toUpperCase() !== (existingOrder.toCurrency || "").toUpperCase()) {
+      if ((sellAcc.currencyCode || "").toUpperCase() !== (effectiveToCurrency || "").toUpperCase()) {
         return res.status(400).json({ message: "Sell account currency does not match toCurrency" });
       }
     }
@@ -1152,7 +1173,7 @@ export const updateOrder = (req, res, next) => {
     let createdServiceChargeId = null;
     
     const allowProfitScDrafts =
-      existingOrder.status !== "completed" && existingOrder.status !== "cancelled";
+      existingOrder.status !== "completed" && existingOrder.status !== "cancelled" || userCanEditAnyOrder;
 
     // If profit fields are provided, handle profit draft (saved / in-progress orders only)
     if (
@@ -2539,18 +2560,38 @@ export const updateReceipt = (req, res, next) => {
   }
 };
 
-// Delete a draft receipt (can only delete drafts)
+// Delete a receipt — drafts always; confirmed only for users with editAnyOrder permission (reverses account balance)
 export const deleteReceipt = (req, res, next) => {
   try {
     const { receiptId } = req.params;
+    const userId = getUserIdFromHeader(req);
 
-    // Check if receipt exists and is a draft
     const receipt = db.prepare("SELECT * FROM order_receipts WHERE id = ?;").get(receiptId);
     if (!receipt) {
       return res.status(404).json({ message: "Receipt not found" });
     }
-    if (receipt.status !== 'draft') {
-      return res.status(400).json({ message: "Only draft receipts can be deleted" });
+
+    if (receipt.status === 'confirmed') {
+      const userPermissions = getUserPermissions(userId);
+      if (!canEditAnyOrder(userPermissions)) {
+        return res.status(400).json({ message: "Only draft receipts can be deleted" });
+      }
+      // Reverse the balance increase that was applied when this receipt was confirmed
+      if (receipt.accountId) {
+        db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(
+          receipt.amount,
+          receipt.accountId,
+        );
+        db.prepare(
+          `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
+           VALUES (?, 'subtract', ?, ?, ?);`
+        ).run(
+          receipt.accountId,
+          receipt.amount,
+          `Order #${receipt.orderId} - Receipt reversed (order edited)`,
+          new Date().toISOString(),
+        );
+      }
     }
 
     // Delete file
@@ -2558,10 +2599,7 @@ export const deleteReceipt = (req, res, next) => {
       deleteFile(receipt.imagePath);
     }
 
-    // Store orderId before deletion
     const orderId = receipt.orderId;
-
-    // Delete receipt
     db.prepare("DELETE FROM order_receipts WHERE id = ?;").run(receiptId);
 
     res.json({ success: true, orderId });
@@ -2757,17 +2795,38 @@ export const updatePayment = (req, res, next) => {
 };
 
 // Delete a draft payment (can only delete drafts)
+// Delete a payment — drafts always; confirmed only for users with editAnyOrder permission (reverses account balance)
 export const deletePayment = (req, res, next) => {
   try {
     const { paymentId } = req.params;
+    const userId = getUserIdFromHeader(req);
 
-    // Check if payment exists and is a draft
     const payment = db.prepare("SELECT * FROM order_payments WHERE id = ?;").get(paymentId);
     if (!payment) {
       return res.status(404).json({ message: "Payment not found" });
     }
-    if (payment.status !== 'draft') {
-      return res.status(400).json({ message: "Only draft payments can be deleted" });
+
+    if (payment.status === 'confirmed') {
+      const userPermissions = getUserPermissions(userId);
+      if (!canEditAnyOrder(userPermissions)) {
+        return res.status(400).json({ message: "Only draft payments can be deleted" });
+      }
+      // Reverse the balance decrease that was applied when this payment was confirmed
+      if (payment.accountId) {
+        db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(
+          payment.amount,
+          payment.accountId,
+        );
+        db.prepare(
+          `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
+           VALUES (?, 'add', ?, ?, ?);`
+        ).run(
+          payment.accountId,
+          payment.amount,
+          `Order #${payment.orderId} - Payment reversed (order edited)`,
+          new Date().toISOString(),
+        );
+      }
     }
 
     // Delete file
@@ -2775,10 +2834,7 @@ export const deletePayment = (req, res, next) => {
       deleteFile(payment.imagePath);
     }
 
-    // Store orderId before deletion
     const orderId = payment.orderId;
-
-    // Delete payment
     db.prepare("DELETE FROM order_payments WHERE id = ?;").run(paymentId);
 
     res.json({ success: true, orderId });

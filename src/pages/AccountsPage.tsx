@@ -194,9 +194,9 @@ export default function AccountsPage() {
     event.preventDefault();
     if (!form.currencyCode || !form.name) return;
 
-    // Check if account with same name already exists
+    // Check if account with same name already exists within the same currency
     const duplicateAccount = accounts.find(
-      (a) => a.name.toLowerCase().trim() === form.name.toLowerCase().trim()
+      (a) => a.name.toLowerCase().trim() === form.name.toLowerCase().trim() && a.currencyCode === form.currencyCode
     );
     if (duplicateAccount) {
       setAlertModal({
@@ -250,9 +250,10 @@ export default function AccountsPage() {
     event.preventDefault();
     if (!editingId) return;
     
-    // Check if another account with same name already exists (excluding current account)
+    // Check if another account with same name already exists within the same currency (excluding current account)
+    const editingAccount = accounts.find((a) => a.id === editingId);
     const duplicateAccount = accounts.find(
-      (a) => a.id !== editingId && a.name.toLowerCase().trim() === editForm.name.toLowerCase().trim()
+      (a) => a.id !== editingId && a.name.toLowerCase().trim() === editForm.name.toLowerCase().trim() && a.currencyCode === editingAccount?.currencyCode
     );
     if (duplicateAccount) {
       setAlertModal({

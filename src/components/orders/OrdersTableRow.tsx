@@ -29,6 +29,7 @@ interface OrdersTableRowProps {
   onDelete: (orderId: number) => void;
   canCancelOrder: boolean;
   canDeleteOrder: boolean;
+  canEditAnyOrder: boolean;
   isDeleting: boolean;
   t: (key: string) => string;
 }
@@ -58,6 +59,7 @@ export function OrdersTableRow({
   onDelete,
   canCancelOrder,
   canDeleteOrder,
+  canEditAnyOrder,
   isDeleting,
   t,
 }: OrdersTableRowProps) {
@@ -119,6 +121,7 @@ export function OrdersTableRow({
                 onDelete={onDelete}
                 canCancelOrder={canCancelOrder}
                 canDeleteOrder={canDeleteOrder}
+                canEditAnyOrder={canEditAnyOrder}
                 isDeleting={isDeleting}
                 t={t}
               />

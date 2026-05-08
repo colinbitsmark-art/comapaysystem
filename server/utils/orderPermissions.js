@@ -52,3 +52,15 @@ export function canModifyOrder(order, userId) {
   }
   return true;
 }
+
+/**
+ * Check if user has the editAnyOrder permission (allows editing completed/cancelled orders)
+ * @param {Object} userPermissions - User's permissions object
+ * @returns {boolean}
+ */
+export function canEditAnyOrder(userPermissions) {
+  if (!userPermissions || !userPermissions.actions) {
+    return false;
+  }
+  return userPermissions.actions.editAnyOrder === true;
+}

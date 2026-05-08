@@ -245,10 +245,10 @@ export const createAccount = (req, res, next) => {
       return res.status(400).json({ message: "Currency not found" });
     }
 
-    // Check if account with same name already exists (case-insensitive)
-    const existingAccount = db.prepare("SELECT id FROM accounts WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(name);
+    // Check if account with same name already exists within the same currency (case-insensitive)
+    const existingAccount = db.prepare("SELECT id FROM accounts WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND currencyCode = ?").get(name, currencyCode);
     if (existingAccount) {
-      return res.status(400).json({ message: "An account with this name already exists" });
+      return res.status(400).json({ message: "An account with this name already exists for this currency" });
     }
 
     const balance = parseFloat(initialFunds || 0);
@@ -304,15 +304,15 @@ export const updateAccount = (req, res, next) => {
     }
 
     // Check if account exists and get current balance
-    const existing = db.prepare("SELECT id, balance FROM accounts WHERE id = ?").get(id);
+    const existing = db.prepare("SELECT id, balance, currencyCode FROM accounts WHERE id = ?").get(id);
     if (!existing) {
       return res.status(404).json({ message: "Account not found" });
     }
 
-    // Check if another account with the same name already exists (excluding current account, case-insensitive)
-    const duplicateAccount = db.prepare("SELECT id FROM accounts WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND id != ?").get(name, id);
+    // Check if another account with the same name already exists within the same currency (excluding current account, case-insensitive)
+    const duplicateAccount = db.prepare("SELECT id FROM accounts WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND currencyCode = ? AND id != ?").get(name, existing.currencyCode, id);
     if (duplicateAccount) {
-      return res.status(400).json({ message: "An account with this name already exists" });
+      return res.status(400).json({ message: "An account with this name already exists for this currency" });
     }
 
     // Check if account is used in any orders

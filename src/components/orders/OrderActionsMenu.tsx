@@ -14,6 +14,7 @@ interface OrderActionsMenuProps {
   onDelete: (orderId: number) => void;
   canCancelOrder: boolean;
   canDeleteOrder: boolean;
+  canEditAnyOrder: boolean;
   isDeleting: boolean;
   t: (key: string) => string;
 }
@@ -34,6 +35,7 @@ export function OrderActionsMenu({
   onDelete,
   canCancelOrder,
   canDeleteOrder,
+  canEditAnyOrder,
   isDeleting,
   t,
 }: OrderActionsMenuProps) {
@@ -42,8 +44,8 @@ export function OrderActionsMenu({
   const buttons: React.ReactElement[] = [];
   const st = order.status;
   const showViewAction = st === "completed" || st === "cancelled";
-  /** Only draft (saved) orders are editable; completed/cancelled are view-only. */
-  const canEdit = st === "saved";
+  /** Saved orders are always editable; completed/cancelled require editAnyOrder permission. */
+  const canEdit = st === "saved" || ((st === "completed" || st === "cancelled") && canEditAnyOrder);
 
   if (authUser && EDIT_VIEW_STATUSES.includes(st)) {
     if (canEdit) {
@@ -57,11 +59,11 @@ export function OrderActionsMenu({
         </button>,
       );
     }
-    if (showViewAction) {
+    if (showViewAction && !canEdit) {
       buttons.push(
         <button
           key="view"
-          className={`w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-slate-50 ${canEdit ? "" : "first:rounded-t-lg"}`}
+          className="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-slate-50 first:rounded-t-lg"
           onClick={() => onView(order.id)}
         >
           {t("orders.view")}

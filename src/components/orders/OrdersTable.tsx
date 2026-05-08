@@ -31,6 +31,7 @@ interface OrdersTableProps {
   onDelete: (orderId: number) => void;
   canCancelOrder: boolean;
   canDeleteOrder: boolean;
+  canEditAnyOrder: boolean;
   isDeleting: boolean;
   // Pagination
   currentPage: number;
@@ -65,6 +66,7 @@ export function OrdersTable({
   onDelete,
   canCancelOrder,
   canDeleteOrder,
+  canEditAnyOrder,
   isDeleting,
   currentPage,
   totalPages,
@@ -130,6 +132,7 @@ export function OrdersTable({
                 onDelete={onDelete}
                 canCancelOrder={canCancelOrder}
                 canDeleteOrder={canDeleteOrder}
+                canEditAnyOrder={canEditAnyOrder}
                 isDeleting={isDeleting}
                 t={t}
               />

@@ -1009,6 +1009,7 @@ export default function OrdersPage() {
   const canCancelOrder = canActOnOrders;
   const canDeleteOrder = hasActionPermission(authUser, "deleteOrder");
   const canDeleteManyOrders = hasActionPermission(authUser, "deleteManyOrders");
+  const canEditAnyOrder = hasActionPermission(authUser, "editAnyOrder");
 
   // Action buttons and status tone are now handled by OrderActionsMenu component
 
@@ -1386,6 +1387,7 @@ export default function OrdersPage() {
               onDelete={handleDeleteClick}
               canCancelOrder={canCancelOrder}
               canDeleteOrder={canDeleteOrder}
+              canEditAnyOrder={canEditAnyOrder}
               isDeleting={isDeleting}
               currentPage={currentPage}
               totalPages={totalPages}
