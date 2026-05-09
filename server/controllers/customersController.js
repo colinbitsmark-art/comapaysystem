@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { normalizeKycCustomerType, resetCustomerKycForTypeChange } from "./customerKycController.js";
 
 const trimValue = (value) => (typeof value === "string" ? value.trim() : value);
 const sanitizePayload = (payload = {}) =>
@@ -71,10 +72,11 @@ export const createCustomer = (req, res, next) => {
       return res.status(409).json({ message: "Customer with this name already exists" });
     }
 
+    const customerType = normalizeKycCustomerType(payload.customerType);
     const stmt = db.prepare(
-      `INSERT INTO customers (name, email, phone, remarks) VALUES (@name, @email, @phone, @remarks);`,
+      `INSERT INTO customers (name, email, phone, remarks, customerType) VALUES (@name, @email, @phone, @remarks, @customerType);`,
     );
-    const result = stmt.run(payload);
+    const result = stmt.run({ ...payload, customerType });
     const row = db.prepare("SELECT * FROM customers WHERE id = ?;").get(result.lastInsertRowid);
     res.status(201).json(row);
   } catch (error) {
@@ -85,10 +87,17 @@ export const createCustomer = (req, res, next) => {
 export const updateCustomer = (req, res, next) => {
   try {
     const { id } = req.params;
+    const before = db.prepare("SELECT * FROM customers WHERE id = ?;").get(id);
+    if (!before) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
     const updates = sanitizePayload(req.body);
     const fields = Object.keys(updates);
     if (!fields.length) {
       return res.status(400).json({ message: "No updates provided" });
+    }
+    if (updates.customerType !== undefined) {
+      updates.customerType = normalizeKycCustomerType(updates.customerType);
     }
     const assignments = fields.map((field) => `${field} = @${field}`).join(", ");
     db.prepare(`UPDATE customers SET ${assignments} WHERE id = @id;`).run({
@@ -96,6 +105,13 @@ export const updateCustomer = (req, res, next) => {
       id,
     });
     const row = db.prepare("SELECT * FROM customers WHERE id = ?;").get(id);
+    if (updates.customerType !== undefined) {
+      const oldType = normalizeKycCustomerType(before.customerType);
+      const newType = updates.customerType;
+      if (oldType !== newType) {
+        resetCustomerKycForTypeChange(Number(id), newType);
+      }
+    }
     res.json(row);
   } catch (error) {
     next(error);

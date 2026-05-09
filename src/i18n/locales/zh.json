@@ -41,6 +41,8 @@
     "transfers": "内部转账",
     "expenses": "开支 & 收入",
     "customers": "客户",
+    "customerList": "客户列表",
+    "customerSettings": "客户设置",
     "users": "用户",
     "roles": "角色",
     "orders": "订单",
@@ -166,8 +168,15 @@
     "addFavorite": "添加到收藏",
     "removeFavorite": "从收藏中移除",
     "ledger": "账簿",
+    "profile": "资料",
     "createNew": "新建",
-    "searchPlaceholder": "按姓名或邮箱搜索…"
+    "searchPlaceholder": "按姓名或邮箱搜索…",
+    "customerType": "类型",
+    "customerTypeLabel": {
+      "individual": "个人",
+      "corporate": "企业"
+    },
+    "kycResetOnTypeChange": "更改客户类型将清除该客户的 KYC 填写内容、已上传文件及审核状态，需按新政策重新完成 KYC。"
   },
   "customerLedger": {
     "title": "客户账簿",
@@ -202,6 +211,69 @@
     "changedAt": "修改时间",
     "originalValues": "原始值",
     "allCurrencies": "所有货币"
+  },
+  "customerKyc": {
+    "title": "资料与 KYC",
+    "documentsTitle": "所需文件",
+    "documentsHint": "按公司 KYC 政策上传图片或 PDF。允许：JPEG、PNG、GIF、WebP、PDF（最大 10 MB）。",
+    "saveDraft": "保存草稿",
+    "submitForReview": "提交审核",
+    "saveDraftSuccess": "草稿已保存。",
+    "saveFailed": "保存失败，请重试。",
+    "submitSuccess": "已提交审核。",
+    "submitFailed": "无法提交，请检查必填项与文件。",
+    "approve": "通过 KYC",
+    "reject": "驳回",
+    "approveSuccess": "已通过 KYC。",
+    "rejectSuccess": "已驳回 KYC。",
+    "actionFailed": "操作失败，请重试。",
+    "rejectReasonRequired": "请填写驳回原因。",
+    "rejectTitle": "驳回 KYC",
+    "rejectPlaceholder": "原因（将来客户门户可展示）。",
+    "rejectConfirm": "确认驳回",
+    "rejectionReason": "原因",
+    "reviewTitle": "审核",
+    "upload": "上传",
+    "replaceFile": "替换文件",
+    "viewFile": "查看文件",
+    "uploadFailed": "上传失败。",
+    "deleteDocFailed": "无法删除文件。",
+    "invalidCustomer": "客户无效。",
+    "loadFailed": "无法加载资料。",
+    "editPolicyLink": "客户 KYC 政策",
+    "noDocumentsInPolicy": "未配置所需文件。请在「客户 → 客户设置 → KYC」中配置。",
+    "status": {
+      "draft": "草稿",
+      "submitted": "待审核",
+      "approved": "已通过",
+      "rejected": "已驳回"
+    }
+  },
+  "customerSettings": {
+    "pageTitle": "客户设置",
+    "tabs": {
+      "kyc": "KYC",
+      "limits": "限额"
+    },
+    "kyc": {
+      "title": "KYC 模式",
+      "description": "分别为个人客户与企业客户配置 KYC 表单（字段与必填文件）。",
+      "hint": "JSON：含 version、title、fields（类型：text、textarea、number、date、select、checkbox）、requiredDocuments（code、label）。支持可选双语键：titleZh/titleEn、labelZh/labelEn、placeholderZh/placeholderEn、optionsZh/optionsEn。须为合法 JSON。",
+      "schemaTab": {
+        "individual": "个人",
+        "corporate": "企业"
+      },
+      "save": "保存 KYC 模式",
+      "saveSuccess": "KYC 模式已保存。",
+      "saveError": "无法保存 KYC 模式。",
+      "invalidJson": "JSON 无效，请修正后重试。",
+      "adminOnlyHint": "仅管理员可编辑模式。您可在下方查看当前定义。"
+    },
+    "limits": {
+      "title": "存取款限额",
+      "description": "按 KYC 等级配置限额（即将推出）。",
+      "placeholder": "此区域将用于根据客户认证等级设置单笔或累计存取款上限。"
+    }
   },
   "users": {
     "title": "用户",

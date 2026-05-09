@@ -1,5 +1,6 @@
 import React, { type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import type { CustomerType } from "../../types";
 
 interface CreateCustomerModalProps {
   isOpen: boolean;
@@ -8,12 +9,14 @@ interface CreateCustomerModalProps {
     email: string;
     phone: string;
     remarks: string;
+    customerType: CustomerType;
   };
   setCustomerForm: React.Dispatch<React.SetStateAction<{
     name: string;
     email: string;
     phone: string;
     remarks: string;
+    customerType: CustomerType;
   }>>;
   isCreatingCustomer: boolean;
   onClose: () => void;
@@ -63,33 +66,49 @@ export function CreateCustomerModal({
           </button>
         </div>
         <form className="grid gap-3" onSubmit={onSubmit}>
-          <input
-            className="rounded-lg border border-slate-200 px-3 py-2"
-            placeholder={t("customers.name")}
-            value={customerForm.name}
-            onChange={(e) =>
-              setCustomerForm((p) => ({ ...p, name: e.target.value }))
-            }
-            required
-          />
-          <input
-            className="rounded-lg border border-slate-200 px-3 py-2"
-            placeholder={t("customers.email")}
-            type="email"
-            value={customerForm.email}
-            onChange={(e) =>
-              setCustomerForm((p) => ({ ...p, email: e.target.value }))
-            }
-          />
-          <input
-            className="rounded-lg border border-slate-200 px-3 py-2"
-            placeholder={t("customers.phone")}
-            type="tel"
-            value={customerForm.phone}
-            onChange={(e) =>
-              setCustomerForm((p) => ({ ...p, phone: e.target.value }))
-            }
-          />
+          {/* Row 1: Name + Type */}
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              className="rounded-lg border border-slate-200 px-3 py-2 col-span-1"
+              placeholder={t("customers.name")}
+              value={customerForm.name}
+              onChange={(e) =>
+                setCustomerForm((p) => ({ ...p, name: e.target.value }))
+              }
+              required
+            />
+            <select
+              className="rounded-lg border border-slate-200 px-3 py-2 bg-white text-slate-800"
+              value={customerForm.customerType}
+              onChange={(e) =>
+                setCustomerForm((p) => ({ ...p, customerType: e.target.value as CustomerType }))
+              }
+            >
+              <option value="individual">{t("customers.customerTypeLabel.individual")}</option>
+              <option value="corporate">{t("customers.customerTypeLabel.corporate")}</option>
+            </select>
+          </div>
+          {/* Row 2: Email + Phone */}
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              className="rounded-lg border border-slate-200 px-3 py-2"
+              placeholder={t("customers.email")}
+              type="email"
+              value={customerForm.email}
+              onChange={(e) =>
+                setCustomerForm((p) => ({ ...p, email: e.target.value }))
+              }
+            />
+            <input
+              className="rounded-lg border border-slate-200 px-3 py-2"
+              placeholder={t("customers.phone")}
+              type="tel"
+              value={customerForm.phone}
+              onChange={(e) =>
+                setCustomerForm((p) => ({ ...p, phone: e.target.value }))
+              }
+            />
+          </div>
           <textarea
             className="rounded-lg border border-slate-200 px-3 py-2"
             placeholder={t("customers.remarksPlaceholder") || "Remarks (optional)"}

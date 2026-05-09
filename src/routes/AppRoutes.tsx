@@ -8,6 +8,8 @@ import TransfersPage from "../pages/TransfersPage";
 import ExpensesPage from "../pages/ExpensesPage";
 import CustomersPage from "../pages/CustomersPage";
 import CustomerLedgerPage from "../pages/CustomerLedgerPage";
+import CustomerProfilePage from "../pages/CustomerProfilePage";
+import CustomerSettingsPage from "../pages/CustomerSettingsPage";
 import UsersPage from "../pages/UsersPage";
 import RolesPage from "../pages/RolesPage";
 import TagsPage from "../pages/TagsPage";
@@ -53,8 +55,10 @@ export default function AppRoutes() {
           <Route path="accounts" element={<RequireAuth section="accounts"><AccountsPage /></RequireAuth>} />
           <Route path="transfers" element={<RequireAuth section="transfers"><TransfersPage /></RequireAuth>} />
           <Route path="expenses" element={<RequireAuth section="expenses"><ExpensesPage /></RequireAuth>} />
+          <Route path="customers/settings" element={<RequireAuth section="customers"><CustomerSettingsPage /></RequireAuth>} />
           <Route path="customers" element={<RequireAuth section="customers"><CustomersPage /></RequireAuth>} />
           <Route path="customers/:id/ledger" element={<RequireAuth section="customers"><CustomerLedgerPage /></RequireAuth>} />
+          <Route path="customers/:id/profile" element={<RequireAuth section="customers"><CustomerProfilePage /></RequireAuth>} />
           <Route path="users" element={<RequireAuth section="users"><UsersPage /></RequireAuth>} />
           <Route path="roles" element={<RequireAuth section="roles"><RolesPage /></RequireAuth>} />
           <Route path="tags" element={<RequireAuth section="tags"><TagsPage /></RequireAuth>} />

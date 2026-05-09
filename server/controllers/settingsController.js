@@ -439,6 +439,8 @@ export const clearDatabase = (req, res, next) => {
       "tron_wallet_transactions",
       "tron_wallets",
       "orders",
+      "customer_kyc_documents",
+      "customer_kyc_profiles",
       "customer_beneficiaries",
       "customers",
       "accounts",

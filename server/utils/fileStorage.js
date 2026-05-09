@@ -17,6 +17,8 @@ const ensureUploadsDir = () => {
     path.join(uploadsDir, "orders"),
     path.join(uploadsDir, "expenses"),
     path.join(uploadsDir, "transfers"),
+    path.join(uploadsDir, "customers"),
+    path.join(uploadsDir, "customers", "kyc"),
   ];
   
   dirs.forEach((dir) => {
@@ -95,6 +97,17 @@ export const generateExpenseFilename = (expenseId, mimetype, originalname) => {
 };
 
 /**
+ * KYC document filename: customer_{id}_kyc_{code}_{timestamp}_{hash}.{ext}
+ */
+export const generateKycDocumentFilename = (customerId, documentCode, mimetype, originalname) => {
+  const timestamp = Date.now();
+  const hash = crypto.randomBytes(4).toString("hex");
+  const safeCode = String(documentCode || "doc").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+  const ext = getFileExtension(mimetype, originalname);
+  return `customer_${customerId}_kyc_${safeCode}_${timestamp}_${hash}${ext}`;
+};
+
+/**
  * Save file to disk and return relative path
  * @param {Buffer} buffer - File buffer
  * @param {string} filename - Generated filename
@@ -103,8 +116,15 @@ export const generateExpenseFilename = (expenseId, mimetype, originalname) => {
  */
 export const saveFile = (buffer, filename, type = "order") => {
   ensureUploadsDir();
-  
-  const subDir = type === "expense" ? "expenses" : type === "transfer" ? "transfers" : "orders";
+
+  const subDir =
+    type === "expense"
+      ? "expenses"
+      : type === "transfer"
+        ? "transfers"
+        : type === "kyc"
+          ? path.join("customers", "kyc")
+          : "orders";
   const filePath = path.join(uploadsDir, subDir, filename);
   
   fs.writeFileSync(filePath, buffer);

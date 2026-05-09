@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import Badge from "../components/common/Badge";
 import { useAppDispatch, useAppSelector } from "../app/hooks";
 import { setUser } from "../app/authSlice";
@@ -15,6 +15,86 @@ import {
   api
 } from "../services/api";
 import { APP_DISPLAY_NAME_EN_KEY, APP_DISPLAY_NAME_ZH_KEY } from "../constants/appBrandSettings";
+
+type SidebarEntry =
+  | { kind: "link"; to: string; labelKey: string; end?: boolean; section?: string; adminOnly?: boolean }
+  | { kind: "customersSubmenu" };
+
+const sidebarEntries: SidebarEntry[] = [
+  { kind: "link", to: "/", labelKey: "nav.dashboard", end: true, section: "dashboard" },
+  { kind: "link", to: "/orders", labelKey: "nav.orders", section: "orders" },
+  { kind: "link", to: "/expenses", labelKey: "nav.expenses", section: "expenses" },
+  { kind: "link", to: "/transfers", labelKey: "nav.transfers", section: "transfers" },
+  { kind: "customersSubmenu" },
+  { kind: "link", to: "/accounts", labelKey: "nav.accounts", section: "accounts" },
+  { kind: "link", to: "/currencies", labelKey: "nav.currencies", section: "currencies" },
+  { kind: "link", to: "/users", labelKey: "nav.users", section: "users" },
+  { kind: "link", to: "/roles", labelKey: "nav.roles", section: "roles" },
+  { kind: "link", to: "/tags", labelKey: "nav.tags", section: "tags" },
+  { kind: "link", to: "/profit", labelKey: "nav.profit", section: "profit" },
+  { kind: "link", to: "/wallets", labelKey: "nav.wallets", section: "wallets" },
+  { kind: "link", to: "/settings", labelKey: "nav.settings", adminOnly: true },
+];
+
+function CustomersNavGroup({ onNavigate }: { onNavigate: () => void }) {
+  const { t } = useTranslation();
+  const { pathname } = useLocation();
+  const parentActive = pathname.startsWith("/customers");
+  const [open, setOpen] = useState(() => pathname.startsWith("/customers"));
+
+  useEffect(() => {
+    if (!pathname.startsWith("/customers")) {
+      setOpen(false);
+    }
+  }, [pathname]);
+
+  const subNavCls = ({ isActive }: { isActive: boolean }) =>
+    `block w-full rounded-lg px-3 py-2 text-left text-xs font-semibold transition ${
+      isActive ? "bg-slate-700 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+    }`;
+
+  const handleParentClick = (e: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (open) {
+      e.preventDefault();
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (pathname.startsWith("/customers")) {
+      e.preventDefault();
+    }
+  };
+
+  return (
+    <div className="w-full">
+      <NavLink
+        to="/customers"
+        end={false}
+        onClick={(e) => {
+          handleParentClick(e);
+          onNavigate();
+        }}
+        className={() =>
+          `block w-full rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
+            parentActive ? "bg-white text-slate-900 shadow-sm" : "bg-slate-800 text-slate-100 hover:bg-slate-700"
+          }`
+        }
+      >
+        {t("nav.customers")}
+      </NavLink>
+      {open && (
+        <div className="mt-2 ml-2 flex flex-col gap-1 border-l border-slate-600 pl-3">
+          <NavLink to="/customers" end onClick={onNavigate} className={subNavCls}>
+            {t("nav.customerList")}
+          </NavLink>
+          <NavLink to="/customers/settings" onClick={onNavigate} className={subNavCls}>
+            {t("nav.customerSettings")}
+          </NavLink>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AppLayout() {
   const { t, i18n } = useTranslation();
@@ -280,27 +360,41 @@ export default function AppLayout() {
     setRealtimeUnreadCount(0);
   };
 
-  const navItems: Array<{ to: string; labelKey: string; end?: boolean; section?: string; adminOnly?: boolean }> = [
-    { to: "/", labelKey: "nav.dashboard", end: true, section: "dashboard" },
-    { to: "/orders", labelKey: "nav.orders", section: "orders" },
-    { to: "/expenses", labelKey: "nav.expenses", section: "expenses" },
-    { to: "/transfers", labelKey: "nav.transfers", section: "transfers" },
-    { to: "/customers", labelKey: "nav.customers", section: "customers" },
-    { to: "/accounts", labelKey: "nav.accounts", section: "accounts" },
-    { to: "/currencies", labelKey: "nav.currencies", section: "currencies" },
-    { to: "/users", labelKey: "nav.users", section: "users" },
-    { to: "/roles", labelKey: "nav.roles", section: "roles" },
-    { to: "/tags", labelKey: "nav.tags", section: "tags" },
-    { to: "/profit", labelKey: "nav.profit", section: "profit" },
-    { to: "/wallets", labelKey: "nav.wallets", section: "wallets" },
-    { to: "/settings", labelKey: "nav.settings", adminOnly: true },
-  ];
+  const visibleSidebarEntries = sidebarEntries.filter((entry) => {
+    if (entry.kind === "customersSubmenu") {
+      return hasSectionAccess(user, "customers");
+    }
+    if (entry.kind === "link") {
+      if (entry.adminOnly) return user?.role === "admin";
+      if (entry.section) return hasSectionAccess(user, entry.section);
+      return true;
+    }
+    return false;
+  });
 
-  const matched = navItems.find(item =>
-    item.end
-      ? pathname === item.to
-      : pathname.startsWith(item.to) && item.to !== "/"
-  );
+  const headerTitle = useMemo(() => {
+    if (pathname === "/" || pathname === "") return t("nav.dashboard");
+    if (pathname.startsWith("/customers/settings")) return t("customerSettings.pageTitle");
+    if (pathname === "/customers") return t("nav.customerList");
+    if (pathname.startsWith("/customers/")) return t("customers.title");
+
+    for (const entry of sidebarEntries) {
+      if (entry.kind !== "link") continue;
+      if (entry.adminOnly && user?.role !== "admin") continue;
+      if (entry.section && !hasSectionAccess(user, entry.section)) continue;
+
+      const active = entry.end
+        ? pathname === entry.to
+        : entry.to !== "/" && pathname.startsWith(entry.to);
+      if (active) return t(entry.labelKey);
+    }
+    return t("common.operationsConsole");
+  }, [pathname, t, user]);
+
+  const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+    `w-full rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
+      isActive ? "bg-white text-slate-900 shadow-sm" : "bg-slate-800 text-slate-100 hover:bg-slate-700"
+    }`;
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
@@ -464,35 +558,21 @@ export default function AppLayout() {
             <div className="text-lg font-semibold text-slate-50 leading-snug">{sidebarAppName}</div>
           ) : null}
           <nav className={`flex flex-wrap gap-2 lg:flex-col ${sidebarAppName ? "mt-6" : ""}`}>
-            {navItems
-              .filter((item) => {
-                // Admin-only items
-                if (item.adminOnly) {
-                  return user?.role === "admin";
-                }
-                // Section-based items
-                if (item.section) {
-                  return hasSectionAccess(user, item.section);
-                }
-                return true;
-              })
-              .map((item) => (
+            {visibleSidebarEntries.map((entry) =>
+              entry.kind === "customersSubmenu" ? (
+                <CustomersNavGroup key="customers-submenu" onNavigate={() => setIsMobileMenuOpen(false)} />
+              ) : (
                 <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
+                  key={entry.to}
+                  to={entry.to}
+                  end={entry.end}
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className={({ isActive }) =>
-                    `w-full rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
-                      isActive
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "bg-slate-800 text-slate-100 hover:bg-slate-700"
-                    }`
-                  }
+                  className={navLinkClass}
                 >
-                  {t(item.labelKey)}
+                  {t(entry.labelKey)}
                 </NavLink>
-              ))}
+              ),
+            )}
           </nav>
         </div>
  {/*        <div className="rounded-xl bg-slate-800/60 p-4 text-xs text-slate-200">
@@ -500,15 +580,13 @@ export default function AppLayout() {
           <code className="rounded bg-slate-900 px-1 py-0.5">npm run dev</code>.
         </div> */}
       </aside>
-      <div>
+      <div className="min-w-0 overflow-x-hidden">
         <div className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4 lg:px-10 pt-16 lg:pt-4">
           <div>
    {/*          <p className="text-xs uppercase tracking-wide text-slate-500">
               FX Control Center
             </p> */}
-            <h1 className="text-2xl font-semibold text-slate-900">
-              {matched ? t(matched.labelKey) : t("common.operationsConsole")}
-            </h1>
+            <h1 className="text-2xl font-semibold text-slate-900">{headerTitle}</h1>
           </div>
           <div className="flex items-center gap-3">
             <button

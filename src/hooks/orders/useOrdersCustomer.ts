@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import type { Customer } from "../../types";
+import type { Customer, CustomerType } from "../../types";
 
 interface UseOrdersCustomerParams {
   addCustomer: any;
@@ -20,11 +20,18 @@ export function useOrdersCustomer({
   setAlertModal,
   t,
 }: UseOrdersCustomerParams) {
-  const [customerForm, setCustomerForm] = useState({
+  const [customerForm, setCustomerForm] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+    remarks: string;
+    customerType: CustomerType;
+  }>({
     name: "",
     email: "",
     phone: "",
     remarks: "",
+    customerType: "individual",
   });
 
   const resetCustomerForm = () => {
@@ -33,6 +40,7 @@ export function useOrdersCustomer({
       email: "",
       phone: "",
       remarks: "",
+      customerType: "individual",
     });
   };
 
@@ -44,6 +52,7 @@ export function useOrdersCustomer({
       email: customerForm.email.trim(),
       phone: customerForm.phone.trim(),
       remarks: customerForm.remarks.trim(),
+      customerType: customerForm.customerType,
     };
 
     if (!trimmedForm.name) {

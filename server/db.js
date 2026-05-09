@@ -55,7 +55,8 @@ const ensureSchema = () => {
       name TEXT NOT NULL,
       email TEXT,
       phone TEXT,
-      remarks TEXT
+      remarks TEXT,
+      customerType TEXT NOT NULL DEFAULT 'individual'
     );`,
   ).run();
 
@@ -92,6 +93,45 @@ const ensureSchema = () => {
   if (!hasPasswordColumn) {
     db.prepare("ALTER TABLE users ADD COLUMN password TEXT;").run();
   }
+
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS customer_kyc_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customerId INTEGER NOT NULL UNIQUE,
+      schemaVersion INTEGER NOT NULL DEFAULT 1,
+      answersJson TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'submitted', 'approved', 'rejected')),
+      submittedAt TEXT,
+      submittedBy INTEGER,
+      reviewedAt TEXT,
+      reviewedBy INTEGER,
+      rejectionReason TEXT,
+      kycCustomerType TEXT,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TEXT,
+      FOREIGN KEY(customerId) REFERENCES customers(id) ON DELETE CASCADE,
+      FOREIGN KEY(submittedBy) REFERENCES users(id),
+      FOREIGN KEY(reviewedBy) REFERENCES users(id)
+    );`,
+  ).run();
+
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS customer_kyc_documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customerId INTEGER NOT NULL,
+      profileId INTEGER NOT NULL,
+      documentCode TEXT NOT NULL,
+      filePath TEXT NOT NULL,
+      originalName TEXT,
+      mimeType TEXT,
+      uploadedBy INTEGER,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(customerId) REFERENCES customers(id) ON DELETE CASCADE,
+      FOREIGN KEY(profileId) REFERENCES customer_kyc_profiles(id) ON DELETE CASCADE,
+      FOREIGN KEY(uploadedBy) REFERENCES users(id),
+      UNIQUE(profileId, documentCode)
+    );`,
+  ).run();
 
   db.prepare(
     `CREATE TABLE IF NOT EXISTS roles (
@@ -914,6 +954,14 @@ const migrateDatabase = () => {
     if (!customerColumnNames.includes("remarks")) {
       db.prepare("ALTER TABLE customers ADD COLUMN remarks TEXT").run();
     }
+    if (!customerColumnNames.includes("customerType")) {
+      db.prepare("ALTER TABLE customers ADD COLUMN customerType TEXT NOT NULL DEFAULT 'individual'").run();
+    }
+
+    const kycProfileCols = db.prepare("PRAGMA table_info(customer_kyc_profiles)").all().map((c) => c.name);
+    if (!kycProfileCols.includes("kycCustomerType")) {
+      db.prepare("ALTER TABLE customer_kyc_profiles ADD COLUMN kycCustomerType TEXT").run();
+    }
 
     // Check order_payments table for new columns
     const paymentTableInfo = db.prepare("PRAGMA table_info(order_payments)").all();
@@ -1011,7 +1059,25 @@ const migrateDatabase = () => {
       );`,
     ).run();
 
-    db.prepare(`CREATE TABLE IF NOT EXISTS _schema_migrations (key TEXT PRIMARY KEY);`).run();
+    // KYC schema versioning table (v2 builder)
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS kyc_schema_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customerType TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'published')),
+      schemaJson TEXT NOT NULL,
+      publishedAt TEXT,
+      publishedBy INTEGER,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      createdBy INTEGER,
+      FOREIGN KEY(publishedBy) REFERENCES users(id),
+      FOREIGN KEY(createdBy) REFERENCES users(id)
+    );`,
+  ).run();
+  db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_kyc_schema_draft ON kyc_schema_versions(customerType) WHERE status='draft';`).run();
+
+  db.prepare(`CREATE TABLE IF NOT EXISTS _schema_migrations (key TEXT PRIMARY KEY);`).run();
     const underProcessMigrated = db
       .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
       .get("merge_under_process_to_pending_v1");

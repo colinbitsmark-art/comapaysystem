@@ -41,6 +41,8 @@
     "transfers": "Internal Transfers",
     "expenses": "Expense & Income",
     "customers": "Customers",
+    "customerList": "Customer List",
+    "customerSettings": "Customer Settings",
     "users": "Users",
     "roles": "Roles",
     "orders": "Orders",
@@ -168,8 +170,15 @@
     "addFavorite": "Add to favorites",
     "removeFavorite": "Remove from favorites",
     "ledger": "Ledger",
+    "profile": "Profile",
     "createNew": "Create New",
-    "searchPlaceholder": "Search by name or email…"
+    "searchPlaceholder": "Search by name or email…",
+    "customerType": "Type",
+    "customerTypeLabel": {
+      "individual": "Individual",
+      "corporate": "Corporate"
+    },
+    "kycResetOnTypeChange": "Changing the customer type clears this customer’s KYC answers, uploaded documents, and review status. They will need to complete KYC again under the new policy."
   },
   "customerLedger": {
     "title": "Customer Ledger",
@@ -204,6 +213,69 @@
     "changedAt": "Changed at",
     "originalValues": "Original Values",
     "allCurrencies": "All Currencies"
+  },
+  "customerKyc": {
+    "title": "Profile & KYC",
+    "documentsTitle": "Required documents",
+    "documentsHint": "Upload images or PDFs according to your company KYC policy. Allowed: JPEG, PNG, GIF, WebP, PDF (max 10 MB).",
+    "saveDraft": "Save draft",
+    "submitForReview": "Submit for review",
+    "saveDraftSuccess": "Draft saved.",
+    "saveFailed": "Could not save. Please try again.",
+    "submitSuccess": "Submitted for review.",
+    "submitFailed": "Could not submit. Check required fields and documents.",
+    "approve": "Approve KYC",
+    "reject": "Reject",
+    "approveSuccess": "KYC approved.",
+    "rejectSuccess": "KYC rejected.",
+    "actionFailed": "Action failed. Please try again.",
+    "rejectReasonRequired": "Please enter a rejection reason.",
+    "rejectTitle": "Reject KYC",
+    "rejectPlaceholder": "Reason shown to staff (customer portal can use this later).",
+    "rejectConfirm": "Confirm reject",
+    "rejectionReason": "Reason",
+    "reviewTitle": "Review",
+    "upload": "Upload",
+    "replaceFile": "Replace file",
+    "viewFile": "View file",
+    "uploadFailed": "Upload failed.",
+    "deleteDocFailed": "Could not delete document.",
+    "invalidCustomer": "Invalid customer.",
+    "loadFailed": "Could not load profile.",
+    "editPolicyLink": "Customer KYC policy",
+    "noDocumentsInPolicy": "No required documents are configured. Add them under Customers → Customer Settings → KYC.",
+    "status": {
+      "draft": "Draft",
+      "submitted": "Submitted",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    }
+  },
+  "customerSettings": {
+    "pageTitle": "Customer Settings",
+    "tabs": {
+      "kyc": "KYC",
+      "limits": "Limits"
+    },
+    "kyc": {
+      "title": "KYC schema",
+      "description": "Define separate KYC forms for individual and corporate customers (fields and required documents).",
+      "hint": "JSON object with version, title, fields (types: text, textarea, number, date, select, checkbox), and requiredDocuments with code and label. Optional bilingual keys are supported: titleZh/titleEn, labelZh/labelEn, placeholderZh/placeholderEn, optionsZh/optionsEn. Must be valid JSON.",
+      "schemaTab": {
+        "individual": "Individual",
+        "corporate": "Corporate"
+      },
+      "save": "Save KYC schema",
+      "saveSuccess": "KYC schema saved.",
+      "saveError": "Could not save KYC schema.",
+      "invalidJson": "Invalid JSON. Fix syntax and try again.",
+      "adminOnlyHint": "Only administrators can edit the schema. You can review the current definition below."
+    },
+    "limits": {
+      "title": "Deposit & withdrawal limits",
+      "description": "Configure limits by KYC level (coming soon).",
+      "placeholder": "This section will let you set maximum deposit and withdrawal amounts based on customer verification level."
+    }
   },
   "users": {
     "title": "Users",

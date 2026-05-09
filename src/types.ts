@@ -9,12 +9,16 @@ export interface Currency {
   active: boolean | number;
 }
 
+export type CustomerType = "individual" | "corporate";
+
 export interface Customer {
   id: number;
   name: string;
   email: string;
   phone: string;
   remarks?: string;
+  /** Defaults to individual when omitted (legacy rows). */
+  customerType?: CustomerType;
 }
 
 export interface CustomerListResponse {
@@ -503,6 +507,143 @@ export interface NotificationPreferences {
   enablePushNotifications: boolean;
   enableTelegramNotifications: boolean;
   updatedAt?: string;
+}
+
+// ─── Customer KYC v1 (legacy flat schema) ────────────────────────
+export type KycFieldType = "text" | "textarea" | "number" | "date" | "select" | "checkbox";
+
+export interface KycSchemaField {
+  key: string;
+  label: string;
+  labelZh?: string;
+  labelEn?: string;
+  type: KycFieldType;
+  required?: boolean;
+  options?: string[];
+  optionsZh?: string[];
+  optionsEn?: string[];
+  placeholder?: string;
+  placeholderZh?: string;
+  placeholderEn?: string;
+}
+
+export interface KycRequiredDocument {
+  code: string;
+  label: string;
+  labelZh?: string;
+  labelEn?: string;
+}
+
+export interface CustomerKycSchema {
+  version: number;
+  title?: string;
+  titleZh?: string;
+  titleEn?: string;
+  fields: KycSchemaField[];
+  requiredDocuments?: KycRequiredDocument[];
+}
+
+// ─── Customer KYC v2 (section-based builder schema) ──────────────
+
+export type KycV2FieldType = "text" | "textarea" | "number" | "date" | "select" | "radio" | "checkbox" | "file" | "statement";
+
+export interface KycV2FieldOption {
+  value: string;
+  labelEn: string;
+  labelZh?: string;
+}
+
+export interface KycV2Field {
+  id: string;
+  key: string;
+  type: KycV2FieldType;
+  labelEn: string;
+  labelZh?: string;
+  placeholderEn?: string;
+  placeholderZh?: string;
+  required?: boolean;
+  options?: KycV2FieldOption[];
+  helpTextEn?: string;
+  helpTextZh?: string;
+  width?: "half" | "full";
+}
+
+export interface KycV2Section {
+  id: string;
+  titleEn: string;
+  titleZh?: string;
+  order: number;
+  fields: KycV2Field[];
+}
+
+export interface KycV2Document {
+  id: string;
+  code: string;
+  labelEn: string;
+  labelZh?: string;
+  required?: boolean;
+}
+
+export interface KycV2Schema {
+  schemaType: "v2";
+  titleEn: string;
+  titleZh?: string;
+  sections: KycV2Section[];
+  documents: KycV2Document[];
+}
+
+export interface KycSchemaVersion {
+  id: number;
+  customerType: CustomerType;
+  version: number;
+  status: "draft" | "published";
+  schema: KycV2Schema;
+  schemaJson?: string;
+  publishedAt?: string | null;
+  publishedBy?: number | null;
+  createdAt: string;
+}
+
+export interface KycBuilderResponse {
+  draft: KycSchemaVersion | null;
+  published: KycSchemaVersion | null;
+  versions: Omit<KycSchemaVersion, "schema">[];
+}
+
+export type KycStatus = "draft" | "submitted" | "approved" | "rejected";
+
+export interface CustomerKycProfileDto {
+  id: number;
+  customerId: number;
+  schemaVersion: number;
+  answers: Record<string, unknown>;
+  status: KycStatus;
+  submittedAt?: string | null;
+  submittedBy?: number | null;
+  reviewedAt?: string | null;
+  reviewedBy?: number | null;
+  rejectionReason?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface CustomerKycDocumentDto {
+  id: number;
+  customerId: number;
+  profileId: number;
+  documentCode: string;
+  filePath: string;
+  originalName?: string | null;
+  mimeType?: string | null;
+  uploadedBy?: number | null;
+  createdAt: string;
+  fileUrl?: string | null;
+}
+
+export interface CustomerKycResponse {
+  customer: Customer;
+  schema: CustomerKycSchema;
+  profile: CustomerKycProfileDto;
+  documents: CustomerKycDocumentDto[];
 }
 
 

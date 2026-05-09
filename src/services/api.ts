@@ -2,6 +2,7 @@ import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import type {
   Currency,
   Customer,
+  CustomerType,
   CustomerListResponse,
   User,
   Role,
@@ -37,6 +38,15 @@ import type {
   CustomerLedgerChange,
   CustomerLedgerSummary,
   AllCustomersConvertedBalances,
+  CustomerKycSchema,
+  CustomerKycResponse,
+  CustomerKycProfileDto,
+  CustomerKycDocumentDto,
+  KycStatus,
+  KycBuilderResponse,
+  KycSchemaVersion,
+  KycV2Schema,
+  CustomerType,
 } from "../types";
 
 const baseQuery = fetchBaseQuery({
@@ -72,7 +82,7 @@ const baseQuery = fetchBaseQuery({
 export const api = createApi({
   reducerPath: "api",
   baseQuery,
-  tagTypes: ["Currency", "Customer", "CustomerBeneficiary", "CustomerLedger", "User", "Role", "Order", "Auth", "Account", "Transfer", "Expense", "ProfitCalculation", "Setting", "Tag", "Notification", "Wallet"],
+  tagTypes: ["Currency", "Customer", "CustomerBeneficiary", "CustomerLedger", "CustomerKyc", "User", "Role", "Order", "Auth", "Account", "Transfer", "Expense", "ProfitCalculation", "Setting", "Tag", "Notification", "Wallet"],
   refetchOnReconnect: true,
   endpoints: (builder) => ({
     getCurrencies: builder.query<Currency[], void>({
@@ -164,6 +174,7 @@ export const api = createApi({
       invalidatesTags: (_res, _err, { id }) => [
         { type: "Customer", id },
         { type: "Customer", id: "LIST" },
+        { type: "CustomerKyc", id },
       ],
     }),
     deleteCustomer: builder.mutation<{ success: boolean }, number>({
@@ -324,6 +335,132 @@ export const api = createApi({
       query: (entryId) => `customers/ledger/${entryId}/changes`,
       providesTags: (_res, _err, entryId) => [
         { type: "CustomerLedger" as const, id: `CHANGES-${entryId}` },
+      ],
+    }),
+
+    getKycSchema: builder.query<
+      { schema: CustomerKycSchema; customerType: CustomerType },
+      CustomerType
+    >({
+      query: (customerType) =>
+        `kyc/schema?customerType=${encodeURIComponent(customerType)}`,
+      providesTags: (_res, _err, customerType) => [
+        { type: "Setting", id: `kyc_schema_${customerType}` },
+      ],
+    }),
+    putKycSchema: builder.mutation<
+      { schema: CustomerKycSchema; customerType: CustomerType; message?: string },
+      { schema: CustomerKycSchema; customerType: CustomerType }
+    >({
+      query: (body) => ({
+        url: "kyc/schema",
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: (_res, _err, { customerType }) => [
+        { type: "Setting", id: `kyc_schema_${customerType}` },
+        { type: "CustomerKyc", id: "LIST" },
+      ],
+    }),
+    getCustomerKyc: builder.query<CustomerKycResponse, number>({
+      query: (customerId) => `customers/${customerId}/kyc`,
+      providesTags: (_res, _err, customerId) => [
+        { type: "CustomerKyc" as const, id: customerId },
+        { type: "CustomerKyc" as const, id: "LIST" },
+        { type: "Customer" as const, id: customerId },
+      ],
+    }),
+    updateCustomerKyc: builder.mutation<
+      { profile: CustomerKycProfileDto; documents: CustomerKycDocumentDto[] },
+      {
+        customerId: number;
+        answers?: Record<string, unknown>;
+        status?: KycStatus;
+        rejectionReason?: string;
+      }
+    >({
+      query: ({ customerId, ...body }) => ({
+        url: `customers/${customerId}/kyc`,
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: (_res, _err, { customerId }) => [
+        { type: "CustomerKyc", id: customerId },
+        { type: "Customer", id: customerId },
+      ],
+    }),
+    uploadCustomerKycDocument: builder.mutation<
+      { document: CustomerKycDocumentDto },
+      { customerId: number; documentCode: string; file: File }
+    >({
+      query: ({ customerId, documentCode, file }) => {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("documentCode", documentCode);
+        return {
+          url: `customers/${customerId}/kyc/documents`,
+          method: "POST",
+          body: formData,
+        };
+      },
+      invalidatesTags: (_res, _err, { customerId }) => [{ type: "CustomerKyc", id: customerId }],
+    }),
+    deleteCustomerKycDocument: builder.mutation<
+      void,
+      { customerId: number; documentId: number }
+    >({
+      query: ({ customerId, documentId }) => ({
+        url: `customers/${customerId}/kyc/documents/${documentId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: (_res, _err, { customerId }) => [{ type: "CustomerKyc", id: customerId }],
+    }),
+
+    // ── KYC Schema Builder v2 ──────────────────────────────────────────────
+
+    getKycBuilderSchema: builder.query<KycBuilderResponse, CustomerType>({
+      query: (customerType) => `kyc/builder/schema?customerType=${encodeURIComponent(customerType)}`,
+      providesTags: (_res, _err, customerType) => [
+        { type: "Setting", id: `kyc_builder_${customerType}` },
+      ],
+    }),
+    putKycBuilderSchema: builder.mutation<
+      { draft: KycSchemaVersion },
+      { customerType: CustomerType; schema: KycV2Schema }
+    >({
+      query: (body) => ({ url: "kyc/builder/schema", method: "PUT", body }),
+      invalidatesTags: (_res, _err, { customerType }) => [
+        { type: "Setting", id: `kyc_builder_${customerType}` },
+      ],
+    }),
+    publishKycBuilderSchema: builder.mutation<
+      { published: KycSchemaVersion; message: string },
+      { customerType: CustomerType }
+    >({
+      query: (body) => ({ url: "kyc/builder/schema/publish", method: "POST", body }),
+      invalidatesTags: (_res, _err, { customerType }) => [
+        { type: "Setting", id: `kyc_builder_${customerType}` },
+        { type: "CustomerKyc", id: "LIST" },
+      ],
+    }),
+    getKycBuilderVersions: builder.query<
+      { versions: Omit<KycSchemaVersion, "schema">[] },
+      CustomerType
+    >({
+      query: (customerType) =>
+        `kyc/builder/schema/versions?customerType=${encodeURIComponent(customerType)}`,
+      providesTags: (_res, _err, customerType) => [
+        { type: "Setting", id: `kyc_builder_versions_${customerType}` },
+      ],
+    }),
+    getKycBuilderSchemaVersion: builder.query<KycSchemaVersion, number>({
+      query: (id) => `kyc/builder/schema/version/${id}`,
+    }),
+    deleteKycBuilderSchemaVersion: builder.mutation<{ message: string }, { id: number; customerType: CustomerType }>({
+      query: ({ id }) => ({ url: `kyc/builder/schema/version/${id}`, method: "DELETE" }),
+      invalidatesTags: (_res, _err, { customerType }) => [
+        { type: "Setting", id: `kyc_builder_${customerType}` },
+        { type: "Setting", id: `kyc_builder_versions_${customerType}` },
       ],
     }),
 
@@ -1906,6 +2043,18 @@ export const {
   useUpdateLedgerEntryMutation,
   useDeleteLedgerEntryMutation,
   useGetLedgerEntryChangesQuery,
+  useGetKycSchemaQuery,
+  usePutKycSchemaMutation,
+  useGetCustomerKycQuery,
+  useUpdateCustomerKycMutation,
+  useUploadCustomerKycDocumentMutation,
+  useDeleteCustomerKycDocumentMutation,
+  useGetKycBuilderSchemaQuery,
+  usePutKycBuilderSchemaMutation,
+  usePublishKycBuilderSchemaMutation,
+  useGetKycBuilderVersionsQuery,
+  useGetKycBuilderSchemaVersionQuery,
+  useDeleteKycBuilderSchemaVersionMutation,
 } = api;
 
 

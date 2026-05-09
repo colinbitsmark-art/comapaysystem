@@ -1,11 +1,11 @@
-import { useState, useEffect, type FormEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import SectionCard from "../components/common/SectionCard";
 import { Pagination } from "../components/common/Pagination";
 import AlertModal from "../components/common/AlertModal";
 import ConfirmModal from "../components/common/ConfirmModal";
-import type { Customer, CustomerBeneficiary } from "../types";
+import type { Customer, CustomerBeneficiary, CustomerType } from "../types";
 import {
   useAddCustomerMutation,
   useGetCustomersQuery,
@@ -56,6 +56,45 @@ export default function CustomersPage() {
   const [deleteCustomer, { isLoading: isDeleting }] = useDeleteCustomerMutation();
   const { data: convertedBalancesData } = useGetAllCustomersConvertedBalancesQuery();
 
+  // 3-dot action menu state
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [menuPositionAbove, setMenuPositionAbove] = useState<Record<number, boolean>>({});
+  const menuRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const menuElementRefs = useRef<Record<number, HTMLDivElement | null>>({});
+
+  const handleMenuRef = useCallback(
+    (id: number) => (el: HTMLDivElement | null) => { menuRefs.current[id] = el; },
+    [],
+  );
+  const handleMenuElementRef = useCallback(
+    (id: number) => (el: HTMLDivElement | null) => { menuElementRefs.current[id] = el; },
+    [],
+  );
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (openMenuId === null) return;
+      const menu = menuRefs.current[openMenuId];
+      if (menu && !menu.contains(e.target as Node)) setOpenMenuId(null);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [openMenuId]);
+
+  useEffect(() => {
+    if (openMenuId === null) return;
+    const btn = menuRefs.current[openMenuId];
+    const menuEl = menuElementRefs.current[openMenuId];
+    if (!btn) return;
+    requestAnimationFrame(() => {
+      const rect = btn.getBoundingClientRect();
+      const menuH = menuEl?.offsetHeight || 180;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const shouldPositionAbove = spaceBelow < menuH + 10 && rect.top > spaceBelow;
+      setMenuPositionAbove((prev) => ({ ...prev, [openMenuId]: shouldPositionAbove }));
+    });
+  }, [openMenuId]);
+
   const balanceByCustomer = Object.fromEntries(
     (convertedBalancesData?.result ?? []).map((b) => [b.customerId, b])
   );
@@ -81,6 +120,7 @@ export default function CustomersPage() {
     email: "",
     phone: "",
     remarks: "",
+    customerType: "individual" as CustomerType,
   });
 
   const [includeBeneficiary, setIncludeBeneficiary] = useState(false);
@@ -103,6 +143,7 @@ export default function CustomersPage() {
       email: form.email.trim(),
       phone: form.phone.trim(),
       remarks: form.remarks.trim(),
+      customerType: form.customerType,
     };
 
     if (!trimmedForm.name) {
@@ -168,7 +209,7 @@ export default function CustomersPage() {
       await addCustomerBeneficiary(payload);
     }
 
-    setForm({ name: "", email: "", phone: "", remarks: "" });
+    setForm({ name: "", email: "", phone: "", remarks: "", customerType: "individual" });
     setIncludeBeneficiary(false);
     setBeneficiaryForm({
       paymentType: "CRYPTO",
@@ -186,7 +227,7 @@ export default function CustomersPage() {
 
   const closeCreateModal = () => {
     setIsCreateModalOpen(false);
-    setForm({ name: "", email: "", phone: "", remarks: "" });
+    setForm({ name: "", email: "", phone: "", remarks: "", customerType: "individual" });
     setIncludeBeneficiary(false);
     setBeneficiaryForm({
       paymentType: "CRYPTO",
@@ -277,6 +318,7 @@ export default function CustomersPage() {
       email: current.email,
       phone: current.phone,
       remarks: current.remarks || "",
+      customerType: current.customerType === "corporate" ? "corporate" : "individual",
     });
   };
 
@@ -285,6 +327,14 @@ export default function CustomersPage() {
     setEditForm(null);
     cancelEditBeneficiary();
   };
+
+  const editingCustomerRow =
+    editingId != null ? customers.find((c: Customer) => c.id === editingId) : null;
+  const initialEditCustomerType: CustomerType =
+    editingCustomerRow?.customerType === "corporate" ? "corporate" : "individual";
+  const editCustomerTypeChanged = Boolean(
+    editingId && editForm && editForm.customerType !== initialEditCustomerType,
+  );
 
   const submitEdit = async (event: FormEvent) => {
     event.preventDefault();
@@ -295,6 +345,7 @@ export default function CustomersPage() {
       email: editForm.email.trim(),
       phone: editForm.phone.trim(),
       remarks: (editForm.remarks || "").trim(),
+      customerType: editForm.customerType,
     };
 
     if (!trimmedEditForm.name) {
@@ -437,6 +488,7 @@ export default function CustomersPage() {
             <thead>
               <tr className="border-b border-slate-200 text-slate-600">
                 <th className="py-2 w-1/6">{t("customers.name")}</th>
+                <th className="py-2 w-[7%] whitespace-nowrap">{t("customers.customerType")}</th>
                 <th className="py-2 w-1/6">{t("customers.email")}</th>
                 <th className="py-2 w-1/6">{t("customers.phone")}</th>
                 <th className="py-2 w-1/6">{t("customers.remarks") || "Remarks"}</th>
@@ -444,7 +496,7 @@ export default function CustomersPage() {
                   {t("customerLedger.balance")}
                   {targetCurrency && <span className="ml-1 text-xs font-normal text-slate-400">({targetCurrency})</span>}
                 </th>
-                <th className="py-2 pl-6 w-1/6">{t("customers.actions")}</th>
+                <th className="py-2 pl-4 w-12">{t("customers.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -452,6 +504,13 @@ export default function CustomersPage() {
                 <tr key={customer.id} className="border-b border-slate-100">
                   <td className="py-2 w-1/6 font-semibold truncate" title={customer.name}>
                     {customer.name}
+                  </td>
+                  <td className="py-2 w-[7%] text-xs text-slate-600 whitespace-nowrap">
+                    {t(
+                      `customers.customerTypeLabel.${
+                        customer.customerType === "corporate" ? "corporate" : "individual"
+                      }`,
+                    )}
                   </td>
                   <td className="py-2 w-1/6 truncate" title={customer.email || undefined}>
                     {customer.email}
@@ -484,34 +543,62 @@ export default function CustomersPage() {
                       );
                     })()}
                   </td>
-                  <td className="py-2 pl-6 w-1/6">
-                    <div className="flex gap-2 text-sm font-semibold">
+                  <td className="py-2 pl-4 w-12">
+                    <div
+                      className="relative inline-block"
+                      ref={handleMenuRef(customer.id)}
+                    >
                       <button
-                        className="text-blue-600 hover:text-blue-700"
-                        onClick={() => navigate(`/customers/${customer.id}/ledger`)}
+                        className="flex items-center justify-center p-1 hover:bg-slate-100 rounded transition-colors"
+                        onClick={() => setOpenMenuId(openMenuId === customer.id ? null : customer.id)}
+                        aria-label={t("customers.actions")}
                       >
-                        {t("customers.ledger")}
+                        <svg className="w-5 h-5 text-slate-600" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                        </svg>
                       </button>
-                      <button
-                        className="text-amber-600 hover:text-amber-700"
-                        onClick={() => startEdit(customer.id)}
-                      >
-                        {t("common.edit")}
-                      </button>
-                      <button
-                        className="text-rose-600 hover:text-rose-700"
-                        onClick={() => handleDeleteClick(customer.id)}
-                        disabled={isDeleting}
-                      >
-                        {t("common.delete")}
-                      </button>
+
+                      {openMenuId === customer.id && (
+                        <div
+                          ref={handleMenuElementRef(customer.id)}
+                          className={`absolute right-0 w-40 bg-white border border-slate-200 rounded-lg shadow-lg z-[9999] ${
+                            menuPositionAbove[customer.id] ? "bottom-full mb-1" : "top-0"
+                          }`}
+                        >
+                          <button
+                            className="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-slate-50 first:rounded-t-lg"
+                            onClick={() => { navigate(`/customers/${customer.id}/ledger`); setOpenMenuId(null); }}
+                          >
+                            {t("customers.ledger")}
+                          </button>
+                          <button
+                            className="w-full text-left px-4 py-2 text-sm text-emerald-600 hover:bg-slate-50"
+                            onClick={() => { navigate(`/customers/${customer.id}/profile`); setOpenMenuId(null); }}
+                          >
+                            {t("customers.profile")}
+                          </button>
+                          <button
+                            className="w-full text-left px-4 py-2 text-sm text-amber-600 hover:bg-slate-50"
+                            onClick={() => { startEdit(customer.id); setOpenMenuId(null); }}
+                          >
+                            {t("common.edit")}
+                          </button>
+                          <button
+                            className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 last:rounded-b-lg border-t border-slate-200"
+                            onClick={() => { handleDeleteClick(customer.id); setOpenMenuId(null); }}
+                            disabled={isDeleting}
+                          >
+                            {t("common.delete")}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </td>
                 </tr>
               ))}
               {!customers.length && (
                 <tr>
-                  <td className="py-4 text-sm text-slate-500" colSpan={6}>
+                  <td className="py-4 text-sm text-slate-500" colSpan={7}>
                     {t("customers.noCustomers")}
                   </td>
                 </tr>
@@ -544,6 +631,21 @@ export default function CustomersPage() {
               onChange={(e) => setEditForm((p) => (p ? { ...p, name: e.target.value } : p))}
               required
             />
+            <div className="grid gap-1">
+              <label className="text-xs font-medium text-slate-600">{t("customers.customerType")}</label>
+              <select
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={editForm.customerType}
+                onChange={(e) =>
+                  setEditForm((p) =>
+                    p ? { ...p, customerType: e.target.value as CustomerType } : p,
+                  )
+                }
+              >
+                <option value="individual">{t("customers.customerTypeLabel.individual")}</option>
+                <option value="corporate">{t("customers.customerTypeLabel.corporate")}</option>
+              </select>
+            </div>
             <input
               className="rounded-lg border border-slate-200 px-3 py-2"
               placeholder={t("customers.emailPlaceholder")}
@@ -564,6 +666,11 @@ export default function CustomersPage() {
               onChange={(e) => setEditForm((p) => (p ? { ...p, remarks: e.target.value } : p))}
               rows={3}
             />
+            {editCustomerTypeChanged && (
+              <p className="col-span-full text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {t("customers.kycResetOnTypeChange")}
+              </p>
+            )}
             <button
               type="submit"
               className="col-span-full rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-amber-700"
@@ -873,14 +980,29 @@ export default function CustomersPage() {
               </button>
             </div>
 
-            <form className="grid gap-3 md:grid-cols-3" onSubmit={handleSubmit}>
-              <input
-                className="rounded-lg border border-slate-200 px-3 py-2"
-                placeholder={t("customers.namePlaceholder")}
-                value={form.name}
-                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                required
-              />
+            <form className="grid gap-3 md:grid-cols-2" onSubmit={handleSubmit}>
+              <div className="self-end">
+                <input
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2"
+                  placeholder={t("customers.namePlaceholder")}
+                  value={form.name}
+                  onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="grid gap-1">
+                <label className="text-xs font-medium text-slate-600">{t("customers.customerType")}</label>
+                <select
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  value={form.customerType}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, customerType: e.target.value as CustomerType }))
+                  }
+                >
+                  <option value="individual">{t("customers.customerTypeLabel.individual")}</option>
+                  <option value="corporate">{t("customers.customerTypeLabel.corporate")}</option>
+                </select>
+              </div>
               <input
                 className="rounded-lg border border-slate-200 px-3 py-2"
                 placeholder={t("customers.emailPlaceholder")}

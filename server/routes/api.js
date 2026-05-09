@@ -17,6 +17,22 @@ import {
   deleteCustomerBeneficiary,
 } from "../controllers/customersController.js";
 import {
+  getKycSchema,
+  putKycSchema,
+  getCustomerKyc,
+  updateCustomerKyc,
+  uploadCustomerKycDocument,
+  deleteCustomerKycDocument,
+} from "../controllers/customerKycController.js";
+import {
+  getBuilderSchema,
+  putBuilderSchema,
+  publishBuilderSchema,
+  getBuilderVersions,
+  getBuilderSchemaVersion,
+  deleteBuilderSchemaVersion,
+} from "../controllers/kycSchemaBuilderController.js";
+import {
   listLedgerEntries,
   getLedgerSummary,
   createLedgerEntry,
@@ -161,6 +177,17 @@ const router = Router();
 
 router.get("/health", (_req, res) => res.json({ ok: true }));
 
+router.get("/kyc/schema", getKycSchema);
+router.put("/kyc/schema", putKycSchema);
+
+// KYC schema builder v2
+router.get("/kyc/builder/schema/versions", getBuilderVersions);
+router.get("/kyc/builder/schema/version/:id", getBuilderSchemaVersion);
+router.delete("/kyc/builder/schema/version/:id", deleteBuilderSchemaVersion);
+router.get("/kyc/builder/schema", getBuilderSchema);
+router.put("/kyc/builder/schema", putBuilderSchema);
+router.post("/kyc/builder/schema/publish", publishBuilderSchema);
+
 router.get("/currencies", listCurrencies);
 router.post("/currencies", createCurrency);
 router.put("/currencies/:id", updateCurrency);
@@ -176,6 +203,11 @@ router.get("/customers/:id/beneficiaries", listCustomerBeneficiaries);
 router.post("/customers/:id/beneficiaries", addCustomerBeneficiary);
 router.put("/customers/:id/beneficiaries/:beneficiaryId", updateCustomerBeneficiary);
 router.delete("/customers/:id/beneficiaries/:beneficiaryId", deleteCustomerBeneficiary);
+
+router.get("/customers/:id/kyc", getCustomerKyc);
+router.put("/customers/:id/kyc", updateCustomerKyc);
+router.post("/customers/:id/kyc/documents", upload.single("file"), uploadCustomerKycDocument);
+router.delete("/customers/:id/kyc/documents/:documentId", deleteCustomerKycDocument);
 
 // Customer ledger routes (static routes must come before /:id routes)
 router.get("/customers/ledger/converted-balances", getAllCustomersConvertedBalances);
