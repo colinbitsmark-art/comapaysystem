@@ -20,14 +20,14 @@ type Props = {
   editingOrderId: number | null;
   customerName: string;
   setCustomerName: (v: string) => void;
+  users: { id: number; name: string; role?: string }[];
+  handlerId: string;
+  setHandlerId: (v: string) => void;
+  userId?: number;
   fromCurrency: string;
   setFromCurrency: (v: string) => void;
   toCurrency: string;
   setToCurrency: (v: string) => void;
-  defaultFromCurrency: string;
-  defaultToCurrency: string;
-  onSetDefaultFromCurrency: (v: string) => void;
-  onSetDefaultToCurrency: (v: string) => void;
   amountBuy: string;
   amountSell: string;
   rate: string;
@@ -83,8 +83,7 @@ type CurrencySelectorProps = {
   onChange: (v: string) => void;
   currencies: Currency[];
   excludeCurrency: string;
-  defaultCurrency: string;
-  onSetDefault: (v: string) => void;
+  storageKey: string;
   t: (k: string) => string;
 };
 
@@ -94,8 +93,7 @@ function CurrencySelector({
   onChange,
   currencies,
   excludeCurrency,
-  defaultCurrency,
-  onSetDefault,
+  storageKey,
   t,
 }: CurrencySelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -104,30 +102,74 @@ function CurrencySelector({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
+  // Custom order persisted in localStorage (per user, per direction)
+  const [customOrder, setCustomOrder] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Re-load when storageKey changes (different user logs in)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      setCustomOrder(raw ? JSON.parse(raw) : []);
+    } catch {
+      setCustomOrder([]);
+    }
+  }, [storageKey]);
+
+  // Persist whenever order changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(customOrder));
+    } catch { /* ignore */ }
+  }, [storageKey, customOrder]);
+
+  // Drag-and-drop state
+  const [draggedCode, setDraggedCode] = useState<string | null>(null);
+  const [dragOverCode, setDragOverCode] = useState<string | null>(null);
+
   const availableCurrencies = useMemo(() => {
     return currencies.filter((c) => c.code !== excludeCurrency);
   }, [currencies, excludeCurrency]);
 
-  const filteredCurrencies = useMemo(() => {
-    if (!searchQuery.trim()) return availableCurrencies;
-    const q = searchQuery.toLowerCase();
-    return availableCurrencies.filter((c) => c.code.toLowerCase().includes(q));
-  }, [availableCurrencies, searchQuery]);
-
-  const sortedCurrencies = useMemo(() => {
-    const defaultMatch = filteredCurrencies.filter((c) => c.code === defaultCurrency);
-    const rest = filteredCurrencies
-      .filter((c) => c.code !== defaultCurrency)
+  // Full sorted list: custom-ordered first, then remaining alphabetically
+  const effectiveOrder = useMemo(() => {
+    const inOrder = customOrder
+      .filter((code) => availableCurrencies.some((c) => c.code === code))
+      .map((code) => availableCurrencies.find((c) => c.code === code)!);
+    const rest = availableCurrencies
+      .filter((c) => !customOrder.includes(c.code))
       .sort((a, b) => a.code.localeCompare(b.code));
-    return [...defaultMatch, ...rest];
-  }, [filteredCurrencies, defaultCurrency]);
+    return [...inOrder, ...rest];
+  }, [availableCurrencies, customOrder]);
+
+  const filteredCurrencies = useMemo(() => {
+    if (!searchQuery.trim()) return effectiveOrder;
+    const q = searchQuery.toLowerCase();
+    return effectiveOrder.filter((c) => c.code.toLowerCase().includes(q));
+  }, [effectiveOrder, searchQuery]);
+
+  const handleDrop = (targetCode: string) => {
+    if (!draggedCode || draggedCode === targetCode) return;
+    const fullOrder = effectiveOrder.map((c) => c.code);
+    const from = fullOrder.indexOf(draggedCode);
+    const to = fullOrder.indexOf(targetCode);
+    if (from === to) return;
+    const next = [...fullOrder];
+    next.splice(from, 1);
+    next.splice(to, 0, draggedCode);
+    setCustomOrder(next);
+  };
 
   const selectedCurrency = currencies.find((c) => c.code === value);
 
   useEffect(() => {
-    if (!isDropdownOpen) {
-      setHighlightedIndex(-1);
-    }
+    if (!isDropdownOpen) setHighlightedIndex(-1);
   }, [isDropdownOpen]);
 
   useEffect(() => {
@@ -194,16 +236,16 @@ function CurrencySelector({
             switch (e.key) {
               case "ArrowDown":
                 e.preventDefault();
-                setHighlightedIndex((prev) => (prev < sortedCurrencies.length - 1 ? prev + 1 : 0));
+                setHighlightedIndex((prev) => (prev < filteredCurrencies.length - 1 ? prev + 1 : 0));
                 break;
               case "ArrowUp":
                 e.preventDefault();
-                setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : sortedCurrencies.length - 1));
+                setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : filteredCurrencies.length - 1));
                 break;
               case "Enter":
                 e.preventDefault();
-                if (highlightedIndex >= 0 && highlightedIndex < sortedCurrencies.length) {
-                  handleSelect(sortedCurrencies[highlightedIndex].code);
+                if (highlightedIndex >= 0 && highlightedIndex < filteredCurrencies.length) {
+                  handleSelect(filteredCurrencies[highlightedIndex].code);
                 }
                 break;
               case "Escape":
@@ -256,41 +298,44 @@ function CurrencySelector({
         </button>
         {isDropdownOpen ? (
           <div className="absolute z-50 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-            {sortedCurrencies.length === 0 ? (
+            {filteredCurrencies.length === 0 ? (
               <div className="px-3 py-2 text-sm text-slate-500">{t("orders.selectCurrency")}</div>
             ) : (
               <div ref={listRef}>
-                {sortedCurrencies.map((currency, index) => {
+                {filteredCurrencies.map((currency, index) => {
                   const isSelected = currency.code === value;
-                  const isDefault = currency.code === defaultCurrency;
                   const isHighlighted = highlightedIndex === index;
+                  const isDragging = draggedCode === currency.code;
+                  const isDragOver = dragOverCode === currency.code;
                   return (
                     <div
                       key={currency.code}
-                      className={`flex cursor-pointer items-center justify-between px-3 py-2 ${
+                      className={`flex cursor-pointer items-center justify-between px-3 py-2 transition-colors ${
                         isHighlighted ? "bg-blue-100 text-blue-900" : isSelected ? "bg-blue-50" : "hover:bg-slate-50"
-                      }`}
+                      } ${isDragging ? "opacity-40" : ""} ${isDragOver ? "border-t-2 border-blue-500" : ""}`}
                       onClick={() => handleSelect(currency.code)}
                       onMouseEnter={() => setHighlightedIndex(index)}
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverCode(currency.code); }}
+                      onDrop={(e) => { e.preventDefault(); handleDrop(currency.code); setDraggedCode(null); setDragOverCode(null); }}
+                      onDragLeave={() => setDragOverCode(null)}
                     >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="truncate font-medium text-slate-900">{currency.code}</span>
-                      </div>
-                      <button
-                        type="button"
-                        tabIndex={-1}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSetDefault(currency.code);
-                          onChange(currency.code);
+                      <span className="truncate font-medium text-slate-900">{currency.code}</span>
+                      <div
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", currency.code);
+                          setDraggedCode(currency.code);
                         }}
-                        className={`ml-3 rounded px-2 py-1 text-xs font-semibold ${
-                          isDefault ? "bg-emerald-100 text-emerald-700" : "text-blue-600 hover:bg-blue-50"
-                        }`}
-                        title={t("orders.setDefault")}
+                        onDragEnd={() => { setDraggedCode(null); setDragOverCode(null); }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="ml-3 shrink-0 cursor-move select-none text-slate-400 hover:text-slate-600"
+                        style={{ userSelect: "none" }}
                       >
-                        {isDefault ? t("common.default") : t("orders.setDefault")}
-                      </button>
+                        <svg className="h-4 w-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                        </svg>
+                      </div>
                     </div>
                   );
                 })}
@@ -309,14 +354,14 @@ export default function NewOrderModal({
   editingOrderId,
   customerName,
   setCustomerName,
+  users,
+  handlerId,
+  setHandlerId,
+  userId,
   fromCurrency,
   setFromCurrency,
   toCurrency,
   setToCurrency,
-  defaultFromCurrency,
-  defaultToCurrency,
-  onSetDefaultFromCurrency,
-  onSetDefaultToCurrency,
   amountBuy,
   amountSell,
   rate,
@@ -419,7 +464,8 @@ export default function NewOrderModal({
         </div>
 
         <form className="space-y-5 px-6 py-5" onSubmit={(e) => e.preventDefault()}>
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-end">
+          {/* Row 1: Customer + Handler */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-end">
             <div className="min-w-0">
               <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.customerName")}</label>
               <div className="flex items-end gap-2">
@@ -450,14 +496,37 @@ export default function NewOrderModal({
               ) : null}
             </div>
             <div className="min-w-0">
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {t("orders.handler")}{" "}
+                <span className="text-xs font-normal text-slate-400">({t("common.optional")})</span>
+              </label>
+              <select
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+                value={handlerId}
+                onChange={(e) => setHandlerId(e.target.value)}
+              >
+                <option value="">{t("orders.noHandler")}</option>
+                {users
+                  .filter((u) => u.role !== "admin")
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Row 2: Currency pair */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-end">
+            <div className="min-w-0">
               <CurrencySelector
                 label={t("orders.from")}
                 value={fromCurrency}
                 onChange={setFromCurrency}
                 currencies={activeCurrencies}
                 excludeCurrency={toCurrency}
-                defaultCurrency={defaultFromCurrency}
-                onSetDefault={onSetDefaultFromCurrency}
+                storageKey={userId ? `currency_order_from_user_${userId}` : "currency_order_from_guest"}
                 t={t}
               />
             </div>
@@ -480,8 +549,7 @@ export default function NewOrderModal({
                 onChange={setToCurrency}
                 currencies={activeCurrencies}
                 excludeCurrency={fromCurrency}
-                defaultCurrency={defaultToCurrency}
-                onSetDefault={onSetDefaultToCurrency}
+                storageKey={userId ? `currency_order_to_user_${userId}` : "currency_order_to_guest"}
                 t={t}
               />
             </div>

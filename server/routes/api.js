@@ -78,9 +78,11 @@ import {
   updateProfit,
   deleteProfit,
   confirmProfit,
+  addProfitToOrder,
   updateServiceCharge,
   deleteServiceCharge,
   confirmServiceCharge,
+  addServiceChargeToOrder,
 } from "../controllers/ordersController.js";
 import { upload, backupUpload } from "../middleware/upload.js";
 import {
@@ -247,9 +249,11 @@ router.post("/orders/:id/payments", upload.single("file"), addPayment);
 router.put("/orders/payments/:paymentId", upload.single("file"), updatePayment);
 router.delete("/orders/payments/:paymentId", deletePayment);
 router.post("/orders/payments/:paymentId/confirm", confirmPayment);
+router.post("/orders/:id/profits", addProfitToOrder);
 router.put("/orders/profits/:profitId", updateProfit);
 router.delete("/orders/profits/:profitId", deleteProfit);
 router.post("/orders/profits/:profitId/confirm", confirmProfit);
+router.post("/orders/:id/service-charges", addServiceChargeToOrder);
 router.put("/orders/service-charges/:serviceChargeId", updateServiceCharge);
 router.delete("/orders/service-charges/:serviceChargeId", deleteServiceCharge);
 router.post("/orders/service-charges/:serviceChargeId/confirm", confirmServiceCharge);

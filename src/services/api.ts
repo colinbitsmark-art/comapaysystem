@@ -990,6 +990,20 @@ export const api = createApi({
         return [{ type: "Order", id: "LIST" }, { type: "Account", id: "LIST" }];
       },
     }),
+    addProfitToOrder: builder.mutation<
+      OrderProfit,
+      { orderId: number; amount: number; currencyCode: string; accountId: number }
+    >({
+      query: ({ orderId, ...body }) => ({
+        url: `orders/${orderId}/profits`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: () => [
+        { type: "Order", id: "LIST" },
+        { type: "Account", id: "LIST" },
+      ],
+    }),
     updateProfit: builder.mutation<
       OrderProfit,
       { profitId: number; amount?: number; accountId?: number; currencyCode?: string }
@@ -1035,6 +1049,20 @@ export const api = createApi({
         }
         return [{ type: "Order", id: "LIST" }, { type: "Account", id: "LIST" }];
       },
+    }),
+    addServiceChargeToOrder: builder.mutation<
+      OrderServiceCharge,
+      { orderId: number; amount: number; currencyCode: string; accountId: number }
+    >({
+      query: ({ orderId, ...body }) => ({
+        url: `orders/${orderId}/service-charges`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: () => [
+        { type: "Order", id: "LIST" },
+        { type: "Account", id: "LIST" },
+      ],
     }),
     updateServiceCharge: builder.mutation<
       OrderServiceCharge,
@@ -1958,9 +1986,11 @@ export const {
   useUpdateReceiptMutation,
   useDeleteReceiptMutation,
   useConfirmReceiptMutation,
+  useAddProfitToOrderMutation,
   useUpdateProfitMutation,
   useDeleteProfitMutation,
   useConfirmProfitMutation,
+  useAddServiceChargeToOrderMutation,
   useUpdateServiceChargeMutation,
   useDeleteServiceChargeMutation,
   useConfirmServiceChargeMutation,

@@ -265,30 +265,46 @@ export function renderOrderCell({
         </td>
       );
     }
-    case "profit":
+    case "profit": {
+      const entries = order.profitEntries && order.profitEntries.length > 0
+        ? order.profitEntries
+        : (order.profitAmount !== null && order.profitAmount !== undefined ? [{ amount: order.profitAmount, currency: order.profitCurrency || "" }] : []);
       return (
         <td key={columnKey} className="py-2 text-slate-600">
-          {order.profitAmount !== null && order.profitAmount !== undefined ? (
-            <span className="text-blue-700 font-medium">
-              {order.profitAmount > 0 ? "+" : ""}{order.profitAmount.toFixed(2)} {order.profitCurrency || ""}
-            </span>
+          {entries.length > 0 ? (
+            <div className="flex flex-col gap-0.5">
+              {entries.map((e, i) => (
+                <span key={i} className="text-blue-700 font-medium whitespace-nowrap">
+                  {e.amount > 0 ? "+" : ""}{e.amount.toFixed(2)} {e.currency}
+                </span>
+              ))}
+            </div>
           ) : (
             <span className="text-slate-400">-</span>
           )}
         </td>
       );
-    case "serviceCharges":
+    }
+    case "serviceCharges": {
+      const entries = order.serviceChargeEntries && order.serviceChargeEntries.length > 0
+        ? order.serviceChargeEntries
+        : (order.serviceChargeAmount !== null && order.serviceChargeAmount !== undefined ? [{ amount: order.serviceChargeAmount, currency: order.serviceChargeCurrency || "" }] : []);
       return (
         <td key={columnKey} className="py-2 text-slate-600">
-          {order.serviceChargeAmount !== null && order.serviceChargeAmount !== undefined ? (
-            <span className={`font-medium ${order.serviceChargeAmount < 0 ? "text-red-600" : "text-green-700"}`}>
-              {order.serviceChargeAmount > 0 ? "+" : ""}{order.serviceChargeAmount.toFixed(2)} {order.serviceChargeCurrency || ""}
-            </span>
+          {entries.length > 0 ? (
+            <div className="flex flex-col gap-0.5">
+              {entries.map((e, i) => (
+                <span key={i} className={`font-medium whitespace-nowrap ${e.amount < 0 ? "text-red-600" : "text-green-700"}`}>
+                  {e.amount > 0 ? "+" : ""}{e.amount.toFixed(2)} {e.currency}
+                </span>
+              ))}
+            </div>
           ) : (
             <span className="text-slate-400">-</span>
           )}
         </td>
       );
+    }
     case "tags":
       return (
         <td key={columnKey} className="py-2">

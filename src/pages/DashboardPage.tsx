@@ -25,7 +25,10 @@ import {
   useGetCustomersQuery,
   useGetOrdersQuery,
   useGetUsersQuery,
+  useGetProfitCalculationsQuery,
+  useGetProfitCalculationQuery,
 } from "../services/api";
+import { useProfitSummary } from "../hooks/useProfitSummary";
 import type { Account } from "../types";
 import { OrderStatus } from "../types";
 
@@ -261,6 +264,15 @@ export default function DashboardPage() {
   const { data: ordersData } = useGetOrdersQuery({ limit: 10000 });
   const { data: fetchedAccounts = [] } = useGetAccountsQuery();
 
+  // Profit calculation (same as AccountsPage)
+  const { data: calculations = [] } = useGetProfitCalculationsQuery();
+  const defaultCalculation = calculations.find((calc) => calc.isDefault === 1 || calc.isDefault === true);
+  const { data: defaultCalculationDetails } = useGetProfitCalculationQuery(
+    defaultCalculation?.id || 0,
+    { skip: !defaultCalculation }
+  );
+  const profitSummary = useProfitSummary(defaultCalculationDetails, fetchedAccounts, currencies);
+
   // localStorage keys scoped to the logged-in user
   const poolOrderKey = `dashboard_pool_order_${userId}`;
   const accountOrderKey = `dashboard_account_order_${userId}`;
@@ -367,7 +379,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
         <StatCard
           label={t("dashboard.totalOrders")}
           value={stats.orders}
@@ -404,6 +416,41 @@ export default function DashboardPage() {
             })
           }
         />
+        {profitSummary ? (
+          <div
+            className={`rounded-xl border-2 px-4 py-3 shadow-sm ${
+              profitSummary.totalProfit > 0
+                ? "border-emerald-400 bg-emerald-50"
+                : profitSummary.totalProfit < 0
+                  ? "border-red-400 bg-red-50"
+                  : "border-slate-200 bg-white"
+            }`}
+          >
+            <div className="text-sm text-slate-600">{t("dashboard.totalProfit")}</div>
+            <div
+              className={`mt-2 text-2xl font-semibold leading-tight ${
+                profitSummary.totalProfit > 0
+                  ? "text-emerald-600"
+                  : profitSummary.totalProfit < 0
+                    ? "text-red-600"
+                    : "text-slate-800"
+              }`}
+            >
+              {profitSummary.totalProfit.toLocaleString("en-US", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+              <span className="ml-1 text-sm font-medium text-slate-500">
+                {profitSummary.targetCurrency}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <div className="text-sm text-slate-600">{t("dashboard.totalProfit")}</div>
+            <div className="mt-2 text-2xl font-semibold text-slate-300">—</div>
+          </div>
+        )}
       </div>
 
       {orderedPools.length > 0 && (

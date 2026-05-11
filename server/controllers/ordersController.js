@@ -349,61 +349,60 @@ export const listOrders = (req, res) => {
         )
         .all(order.id);
 
-      // Get profit for this order (confirmed first, then draft, then fall back to order table)
-      const confirmedProfit = db
+      // Sum all confirmed profits per currency; fall back to drafts if no confirmed entries
+      const confirmedProfitRows = db
         .prepare(
-          `SELECT amount, currencyCode as profitCurrency, accountId as profitAccountId
+          `SELECT SUM(amount) as total, currencyCode
            FROM order_profits
            WHERE orderId = ? AND status = 'confirmed'
-           ORDER BY createdAt DESC
-           LIMIT 1;`
+           GROUP BY currencyCode
+           ORDER BY MIN(createdAt) ASC;`
         )
-        .get(order.id);
+        .all(order.id);
 
-      // Get draft profit if no confirmed profit exists (for pending OTC orders)
-      const draftProfit = confirmedProfit ? null : db
+      const profitRows = confirmedProfitRows.length > 0 ? confirmedProfitRows : db
         .prepare(
-          `SELECT amount, currencyCode as profitCurrency, accountId as profitAccountId
+          `SELECT SUM(amount) as total, currencyCode
            FROM order_profits
            WHERE orderId = ? AND status = 'draft'
-           ORDER BY createdAt DESC
-           LIMIT 1;`
+           GROUP BY currencyCode
+           ORDER BY MIN(createdAt) ASC;`
         )
-        .get(order.id);
+        .all(order.id);
 
-      // Get service charge for this order (confirmed first, then draft, then fall back to order table)
-      const confirmedServiceCharge = db
+      // Sum all confirmed service charges per currency; fall back to drafts if none
+      const confirmedScRows = db
         .prepare(
-          `SELECT amount, currencyCode as serviceChargeCurrency, accountId as serviceChargeAccountId
+          `SELECT SUM(amount) as total, currencyCode
            FROM order_service_charges
            WHERE orderId = ? AND status = 'confirmed'
-           ORDER BY createdAt DESC
-           LIMIT 1;`
+           GROUP BY currencyCode
+           ORDER BY MIN(createdAt) ASC;`
         )
-        .get(order.id);
+        .all(order.id);
 
-      // Get draft service charge if no confirmed service charge exists (for pending OTC orders)
-      const draftServiceCharge = confirmedServiceCharge ? null : db
+      const scRows = confirmedScRows.length > 0 ? confirmedScRows : db
         .prepare(
-          `SELECT amount, currencyCode as serviceChargeCurrency, accountId as serviceChargeAccountId
+          `SELECT SUM(amount) as total, currencyCode
            FROM order_service_charges
            WHERE orderId = ? AND status = 'draft'
-           ORDER BY createdAt DESC
-           LIMIT 1;`
+           GROUP BY currencyCode
+           ORDER BY MIN(createdAt) ASC;`
         )
-        .get(order.id);
+        .all(order.id);
 
-      // Use confirmed profit/service charge if available, then draft, then fall back to order table fields
-      // Ensure amounts are numbers
-      const profitEntry = confirmedProfit || draftProfit;
-      const profitAmount = profitEntry ? Number(profitEntry.amount) : (order.profitAmount !== null && order.profitAmount !== undefined ? Number(order.profitAmount) : null);
-      const profitCurrency = profitEntry ? profitEntry.profitCurrency : (order.profitCurrency ?? null);
-      const profitAccountId = profitEntry ? profitEntry.profitAccountId : (order.profitAccountId ?? null);
-      
-      const serviceChargeEntry = confirmedServiceCharge || draftServiceCharge;
-      const serviceChargeAmount = serviceChargeEntry ? Number(serviceChargeEntry.amount) : (order.serviceChargeAmount !== null && order.serviceChargeAmount !== undefined ? Number(order.serviceChargeAmount) : null);
-      const serviceChargeCurrency = serviceChargeEntry ? serviceChargeEntry.serviceChargeCurrency : (order.serviceChargeCurrency ?? null);
-      const serviceChargeAccountId = serviceChargeEntry ? serviceChargeEntry.serviceChargeAccountId : (order.serviceChargeAccountId ?? null);
+      // Build entries arrays for the table display
+      const profitEntries = profitRows.map(r => ({ amount: Number(r.total), currency: r.currencyCode }));
+      const serviceChargeEntries = scRows.map(r => ({ amount: Number(r.total), currency: r.currencyCode }));
+
+      // Scalar backward-compat fields: use first entry (or legacy order table fallback)
+      const profitAmount = profitEntries.length > 0 ? profitEntries[0].amount : (order.profitAmount !== null && order.profitAmount !== undefined ? Number(order.profitAmount) : null);
+      const profitCurrency = profitEntries.length > 0 ? profitEntries[0].currency : (order.profitCurrency ?? null);
+      const profitAccountId = order.profitAccountId ?? null;
+
+      const serviceChargeAmount = serviceChargeEntries.length > 0 ? serviceChargeEntries[0].amount : (order.serviceChargeAmount !== null && order.serviceChargeAmount !== undefined ? Number(order.serviceChargeAmount) : null);
+      const serviceChargeCurrency = serviceChargeEntries.length > 0 ? serviceChargeEntries[0].currency : (order.serviceChargeCurrency ?? null);
+      const serviceChargeAccountId = order.serviceChargeAccountId ?? null;
 
       return {
         ...order,
@@ -413,6 +412,8 @@ export const listOrders = (req, res) => {
         buyAccounts: buyAccounts.length > 0 ? buyAccounts : null,
         sellAccounts: sellAccounts.length > 0 ? sellAccounts : null,
         tags: tags.length > 0 ? tags : [],
+        profitEntries,
+        serviceChargeEntries,
         profitAmount,
         profitCurrency,
         profitAccountId,
@@ -432,35 +433,37 @@ export const listOrders = (req, res) => {
         )
         .all(order.id);
 
-      // Get confirmed profit/service charge even in error case
-      const confirmedProfit = db
+      // Get confirmed profit/service charge sums per currency even in error case
+      const confirmedProfitRows = db
         .prepare(
-          `SELECT amount, currencyCode as profitCurrency, accountId as profitAccountId
+          `SELECT SUM(amount) as total, currencyCode
            FROM order_profits
            WHERE orderId = ? AND status = 'confirmed'
-           ORDER BY createdAt DESC
-           LIMIT 1;`
+           GROUP BY currencyCode
+           ORDER BY MIN(createdAt) ASC;`
         )
-        .get(order.id);
+        .all(order.id);
 
-      const confirmedServiceCharge = db
+      const confirmedScRows = db
         .prepare(
-          `SELECT amount, currencyCode as serviceChargeCurrency, accountId as serviceChargeAccountId
+          `SELECT SUM(amount) as total, currencyCode
            FROM order_service_charges
            WHERE orderId = ? AND status = 'confirmed'
-           ORDER BY createdAt DESC
-           LIMIT 1;`
+           GROUP BY currencyCode
+           ORDER BY MIN(createdAt) ASC;`
         )
-        .get(order.id);
+        .all(order.id);
 
-      // Ensure amounts are numbers
-      const profitAmount = confirmedProfit ? Number(confirmedProfit.amount) : (order.profitAmount !== null && order.profitAmount !== undefined ? Number(order.profitAmount) : null);
-      const profitCurrency = confirmedProfit ? confirmedProfit.profitCurrency : (order.profitCurrency ?? null);
-      const profitAccountId = confirmedProfit ? confirmedProfit.profitAccountId : (order.profitAccountId ?? null);
-      
-      const serviceChargeAmount = confirmedServiceCharge ? Number(confirmedServiceCharge.amount) : (order.serviceChargeAmount !== null && order.serviceChargeAmount !== undefined ? Number(order.serviceChargeAmount) : null);
-      const serviceChargeCurrency = confirmedServiceCharge ? confirmedServiceCharge.serviceChargeCurrency : (order.serviceChargeCurrency ?? null);
-      const serviceChargeAccountId = confirmedServiceCharge ? confirmedServiceCharge.serviceChargeAccountId : (order.serviceChargeAccountId ?? null);
+      const profitEntries = confirmedProfitRows.map(r => ({ amount: Number(r.total), currency: r.currencyCode }));
+      const serviceChargeEntries = confirmedScRows.map(r => ({ amount: Number(r.total), currency: r.currencyCode }));
+
+      const profitAmount = profitEntries.length > 0 ? profitEntries[0].amount : (order.profitAmount !== null && order.profitAmount !== undefined ? Number(order.profitAmount) : null);
+      const profitCurrency = profitEntries.length > 0 ? profitEntries[0].currency : (order.profitCurrency ?? null);
+      const profitAccountId = order.profitAccountId ?? null;
+
+      const serviceChargeAmount = serviceChargeEntries.length > 0 ? serviceChargeEntries[0].amount : (order.serviceChargeAmount !== null && order.serviceChargeAmount !== undefined ? Number(order.serviceChargeAmount) : null);
+      const serviceChargeCurrency = serviceChargeEntries.length > 0 ? serviceChargeEntries[0].currency : (order.serviceChargeCurrency ?? null);
+      const serviceChargeAccountId = order.serviceChargeAccountId ?? null;
 
       return {
         ...order,
@@ -470,6 +473,8 @@ export const listOrders = (req, res) => {
         buyAccounts: null,
         sellAccounts: null,
         tags: tags.length > 0 ? tags : [],
+        profitEntries,
+        serviceChargeEntries,
         profitAmount,
         profitCurrency,
         profitAccountId,
@@ -1106,6 +1111,20 @@ export const createOrder = async (req, res, next) => {
       entityId: orderId,
       actionUrl: `/orders`,
     });
+
+    // Notify the assigned handler (if different from creator)
+    const assignedHandlerId = orderData.handlerId ?? null;
+    if (assignedHandlerId && Number(assignedHandlerId) !== Number(userId)) {
+      await createNotification({
+        userId: Number(assignedHandlerId),
+        type: 'order_assigned',
+        title: 'Order Assigned to You',
+        message: `Order #${orderId} has been assigned to you by ${creatorName?.name || 'User'} - ${row.customerName || 'Customer'}`,
+        entityType: 'order',
+        entityId: orderId,
+        actionUrl: `/orders`,
+      });
+    }
     
     res.status(201).json({
       ...row,
@@ -1116,7 +1135,7 @@ export const createOrder = async (req, res, next) => {
   }
 };
 
-export const updateOrder = (req, res, next) => {
+export const updateOrder = async (req, res, next) => {
   try {
     const { id } = req.params;
     const updates = req.body || {};
@@ -3385,6 +3404,98 @@ export const confirmServiceCharge = (req, res, next) => {
     res.json(confirmedServiceCharge);
   } catch (error) {
     console.error("Error confirming service charge:", error);
+    next(error);
+  }
+};
+
+// Add a new draft profit entry directly to an order
+export const addProfitToOrder = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { amount, currencyCode, accountId } = req.body;
+    const userId = getUserIdFromHeader(req);
+
+    if (!userId) return res.status(401).json({ message: "User ID is required" });
+
+    const order = db.prepare("SELECT id, createdBy, handlerId FROM orders WHERE id = ?;").get(id);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    const userPermissions = getUserPermissions(userId);
+    if (!isAdmin(userPermissions) && !canModifyOrder(order, userId)) {
+      return res.status(403).json({ message: "You do not have permission to add profit to this order" });
+    }
+
+    if (!amount || !currencyCode || !accountId) {
+      return res.status(400).json({ message: "amount, currencyCode, and accountId are required" });
+    }
+    const parsedAmount = Number(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({ message: "amount must be a positive number" });
+    }
+
+    const account = db.prepare("SELECT id FROM accounts WHERE id = ?;").get(Number(accountId));
+    if (!account) return res.status(400).json({ message: "Account not found" });
+
+    const result = db.prepare(
+      `INSERT INTO order_profits (orderId, amount, currencyCode, accountId, status, createdAt)
+       VALUES (?, ?, ?, ?, 'draft', ?);`
+    ).run(Number(id), parsedAmount, currencyCode, Number(accountId), new Date().toISOString());
+
+    const profit = db.prepare(
+      `SELECT p.*, a.name as accountName
+       FROM order_profits p
+       LEFT JOIN accounts a ON a.id = p.accountId
+       WHERE p.id = ?;`
+    ).get(result.lastInsertRowid);
+
+    res.json(profit);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Add a new draft service charge entry directly to an order
+export const addServiceChargeToOrder = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { amount, currencyCode, accountId } = req.body;
+    const userId = getUserIdFromHeader(req);
+
+    if (!userId) return res.status(401).json({ message: "User ID is required" });
+
+    const order = db.prepare("SELECT id, createdBy, handlerId FROM orders WHERE id = ?;").get(id);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    const userPermissions = getUserPermissions(userId);
+    if (!isAdmin(userPermissions) && !canModifyOrder(order, userId)) {
+      return res.status(403).json({ message: "You do not have permission to add service charges to this order" });
+    }
+
+    if (!amount || !currencyCode || !accountId) {
+      return res.status(400).json({ message: "amount, currencyCode, and accountId are required" });
+    }
+    const parsedAmount = Number(amount);
+    if (isNaN(parsedAmount) || parsedAmount === 0) {
+      return res.status(400).json({ message: "amount must be a non-zero number" });
+    }
+
+    const account = db.prepare("SELECT id FROM accounts WHERE id = ?;").get(Number(accountId));
+    if (!account) return res.status(400).json({ message: "Account not found" });
+
+    const result = db.prepare(
+      `INSERT INTO order_service_charges (orderId, amount, currencyCode, accountId, status, createdAt)
+       VALUES (?, ?, ?, ?, 'draft', ?);`
+    ).run(Number(id), parsedAmount, currencyCode, Number(accountId), new Date().toISOString());
+
+    const sc = db.prepare(
+      `SELECT sc.*, a.name as accountName
+       FROM order_service_charges sc
+       LEFT JOIN accounts a ON a.id = sc.accountId
+       WHERE sc.id = ?;`
+    ).get(result.lastInsertRowid);
+
+    res.json(sc);
+  } catch (error) {
     next(error);
   }
 };

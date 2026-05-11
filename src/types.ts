@@ -125,6 +125,8 @@ export interface Order {
   profitAmount?: number | null;
   profitCurrency?: string | null;
   profitAccountId?: number | null;
+  profitEntries?: Array<{ amount: number; currency: string }>;
+  serviceChargeEntries?: Array<{ amount: number; currency: string }>;
   orderType?: "online" | "otc";
   tags?: Tag[];
   remarks?: string;

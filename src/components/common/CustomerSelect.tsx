@@ -202,6 +202,11 @@ export function CustomerSelect({
                 setIsDropdownOpen(false);
                 setHighlightedIndex(-1);
                 break;
+              case "Tab":
+                setIsDropdownOpen(false);
+                setHighlightedIndex(-1);
+                setSearchQuery("");
+                break;
             }
           }}
           required={required}
@@ -210,6 +215,7 @@ export function CustomerSelect({
         {value && !disabled && (
           <button
             type="button"
+            tabIndex={-1}
             onClick={(e) => {
               e.stopPropagation();
               handleClear();

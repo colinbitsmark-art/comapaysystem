@@ -10,7 +10,9 @@ import {
   useDeletePaymentMutation,
   useConfirmReceiptMutation,
   useConfirmPaymentMutation,
+  useAddProfitToOrderMutation,
   useConfirmProfitMutation,
+  useAddServiceChargeToOrderMutation,
   useConfirmServiceChargeMutation,
 } from "../../services/api";
 import type { Account, AuthResponse, Currency, Tag } from "../../types";
@@ -67,19 +69,13 @@ export function useUnifiedOrderModal(
   const [amountBuy, setAmountBuy] = useState("");
   const [amountSell, setAmountSell] = useState("");
   const [rate, setRate] = useState("");
+  const [handlerId, setHandlerId] = useState("");
   const [lines, setLines] = useState<UnifiedLine[]>([newLine("receipt"), newLine("payment")]);
   const [remarks, setRemarks] = useState("");
   const [showRemarks, setShowRemarks] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [showTagPicker, setShowTagPicker] = useState(false);
   const [orderDate, setOrderDate] = useState(() => toDatetimeLocal(new Date()));
-  const [defaultFromCurrency, setDefaultFromCurrency] = useState("");
-  const [defaultToCurrency, setDefaultToCurrency] = useState("");
-
-  const currencyDefaultsStorageKey = authUser?.id
-    ? `orders_default_currencies_user_${authUser.id}`
-    : null;
-
   const amountsRef = useRef({ amountBuy, amountSell, rate, fromCurrency, toCurrency });
   amountsRef.current = { amountBuy, amountSell, rate, fromCurrency, toCurrency };
 
@@ -88,59 +84,6 @@ export function useUnifiedOrderModal(
       setToCurrency("");
     }
   }, [fromCurrency, toCurrency]);
-
-  useEffect(() => {
-    if (!currencyDefaultsStorageKey) {
-      setDefaultFromCurrency("");
-      setDefaultToCurrency("");
-      return;
-    }
-    try {
-      const raw = localStorage.getItem(currencyDefaultsStorageKey);
-      if (!raw) {
-        setDefaultFromCurrency("");
-        setDefaultToCurrency("");
-        return;
-      }
-      const parsed = JSON.parse(raw) as { fromCurrency?: string; toCurrency?: string };
-      setDefaultFromCurrency(parsed.fromCurrency ?? "");
-      setDefaultToCurrency(parsed.toCurrency ?? "");
-    } catch {
-      setDefaultFromCurrency("");
-      setDefaultToCurrency("");
-    }
-  }, [currencyDefaultsStorageKey]);
-
-  const persistCurrencyDefaults = useCallback(
-    (nextFrom: string, nextTo: string) => {
-      if (!currencyDefaultsStorageKey) return;
-      try {
-        localStorage.setItem(
-          currencyDefaultsStorageKey,
-          JSON.stringify({ fromCurrency: nextFrom, toCurrency: nextTo }),
-        );
-      } catch {
-        /* ignore storage errors */
-      }
-    },
-    [currencyDefaultsStorageKey],
-  );
-
-  const setDefaultFromCurrencyForUser = useCallback(
-    (code: string) => {
-      setDefaultFromCurrency(code);
-      persistCurrencyDefaults(code, defaultToCurrency);
-    },
-    [defaultToCurrency, persistCurrencyDefaults],
-  );
-
-  const setDefaultToCurrencyForUser = useCallback(
-    (code: string) => {
-      setDefaultToCurrency(code);
-      persistCurrencyDefaults(defaultFromCurrency, code);
-    },
-    [defaultFromCurrency, persistCurrencyDefaults],
-  );
 
   const { data: orderDetails } = useGetOrderDetailsQuery(editingOrderId || 0, {
     skip: !editingOrderId,
@@ -155,7 +98,9 @@ export function useUnifiedOrderModal(
   const [deletePayment] = useDeletePaymentMutation();
   const [confirmReceipt] = useConfirmReceiptMutation();
   const [confirmPayment] = useConfirmPaymentMutation();
+  const [addProfitToOrder] = useAddProfitToOrderMutation();
   const [confirmProfit] = useConfirmProfitMutation();
+  const [addServiceChargeToOrder] = useAddServiceChargeToOrderMutation();
   const [confirmServiceCharge] = useConfirmServiceChargeMutation();
 
   const getBaseCurrency = useCallback(
@@ -298,6 +243,7 @@ export function useUnifiedOrderModal(
     setAmountBuy("");
     setAmountSell("");
     setRate("");
+    setHandlerId("");
     setLines([newLine("receipt"), newLine("payment")]);
     setRemarks("");
     setShowRemarks(false);
@@ -323,6 +269,7 @@ export function useUnifiedOrderModal(
     setAmountBuy(String(order.amountBuy));
     setAmountSell(String(order.amountSell));
     setRate(String(order.rate));
+    setHandlerId((order as { handlerId?: number | null }).handlerId ? String((order as { handlerId?: number | null }).handlerId) : "");
     const nextLines: UnifiedLine[] = [];
     for (const r of orderDetails.receipts || []) {
       nextLines.push({
@@ -347,19 +294,17 @@ export function useUnifiedOrderModal(
       });
     }
     const profits = orderDetails.profits || [];
-    const draftOrFirst = profits.find((x: { status?: string }) => x.status === "draft") || profits[0];
-    if (draftOrFirst) {
+    for (const p of profits) {
       nextLines.push({
-        localId: `pf-${draftOrFirst.id}`,
+        localId: `pf-${p.id}`,
         kind: "profit",
-        amount: String(draftOrFirst.amount ?? ""),
-        accountId: draftOrFirst.accountId ? String(draftOrFirst.accountId) : "",
+        amount: String(p.amount ?? ""),
+        accountId: p.accountId ? String(p.accountId) : "",
         file: null,
       });
     }
     const scs = orderDetails.serviceCharges || [];
-    const sc = scs.find((x: { status?: string }) => x.status === "draft") || scs[0];
-    if (sc) {
+    for (const sc of scs) {
       nextLines.push({
         localId: `sc-${sc.id}`,
         kind: "service_charge",
@@ -408,8 +353,8 @@ export function useUnifiedOrderModal(
   const buildPayload = useCallback(() => {
     const receiptLines = lines.filter((l) => l.kind === "receipt");
     const paymentLines = lines.filter((l) => l.kind === "payment");
-    const profitLine = lines.find((l) => l.kind === "profit");
-    const scLine = lines.find((l) => l.kind === "service_charge");
+    const profitLines = lines.filter((l) => l.kind === "profit");
+    const scLines = lines.filter((l) => l.kind === "service_charge");
     const firstReceiptAcc = receiptLines.find((l) => l.accountId)?.accountId;
     const firstPayAcc = paymentLines.find((l) => l.accountId)?.accountId;
     const payload: Record<string, unknown> = {
@@ -418,41 +363,44 @@ export function useUnifiedOrderModal(
       amountBuy: Number(amountBuy || 0),
       amountSell: Number(amountSell || 0),
       rate: Number(rate || 1),
+      handlerId: handlerId ? Number(handlerId) : null,
       buyAccountId: firstReceiptAcc ? Number(firstReceiptAcc) : undefined,
       sellAccountId: firstPayAcc ? Number(firstPayAcc) : undefined,
       remarks: showRemarks && remarks.trim() ? remarks.trim() : null,
       orderDate: orderDate ? new Date(orderDate).toISOString() : new Date().toISOString(),
       tagIds: selectedTagIds,
+      // Signal updateOrder to delete any existing draft profits/SCs so we can recreate them
+      profitAmount: null,
+      serviceChargeAmount: null,
     };
-    if (profitLine?.amount && profitLine.accountId) {
-      const acc = accounts.find((a) => a.id === Number(profitLine.accountId));
-      if (acc) {
-        payload.profitAmount = Number(profitLine.amount);
-        payload.profitAccountId = Number(profitLine.accountId);
-        payload.profitCurrency = acc.currencyCode;
-      }
-    }
-    if (scLine?.accountId) {
+
+    // Resolve service charge amounts (percentage → fixed)
+    const resolvedScLines = scLines.map((scLine) => {
+      if (!scLine.accountId) return null;
       const acc = accounts.find((a) => a.id === Number(scLine.accountId));
-      if (acc) {
-        let resolvedAmount: number;
-        if (scLine.serviceChargeMode === "percentage" && scLine.serviceChargePercent) {
-          const pct = Number(scLine.serviceChargePercent);
-          const base = acc.currencyCode === fromCurrency
-            ? Number(amountBuy || 0)
-            : Number(amountSell || 0);
-          resolvedAmount = (pct / 100) * base;
-        } else {
-          resolvedAmount = Number(scLine.amount || 0);
-        }
-        if (resolvedAmount !== 0) {
-          payload.serviceChargeAmount = resolvedAmount;
-          payload.serviceChargeAccountId = Number(scLine.accountId);
-          payload.serviceChargeCurrency = acc.currencyCode;
-        }
+      if (!acc) return null;
+      let resolvedAmount: number;
+      if (scLine.serviceChargeMode === "percentage" && scLine.serviceChargePercent) {
+        const pct = Number(scLine.serviceChargePercent);
+        const base = acc.currencyCode === fromCurrency
+          ? Number(amountBuy || 0)
+          : Number(amountSell || 0);
+        resolvedAmount = (pct / 100) * base;
+      } else {
+        resolvedAmount = Number(scLine.amount || 0);
       }
-    }
-    return { payload, receiptLines, paymentLines };
+      if (resolvedAmount === 0) return null;
+      return { amount: resolvedAmount, currencyCode: acc.currencyCode, accountId: Number(scLine.accountId) };
+    }).filter((x): x is { amount: number; currencyCode: string; accountId: number } => x !== null);
+
+    const resolvedProfitLines = profitLines.map((profitLine) => {
+      if (!profitLine.amount || !profitLine.accountId) return null;
+      const acc = accounts.find((a) => a.id === Number(profitLine.accountId));
+      if (!acc) return null;
+      return { amount: Number(profitLine.amount), currencyCode: acc.currencyCode, accountId: Number(profitLine.accountId) };
+    }).filter((x): x is { amount: number; currencyCode: string; accountId: number } => x !== null);
+
+    return { payload, receiptLines, paymentLines, resolvedProfitLines, resolvedScLines };
   }, [
     lines,
     fromCurrency,
@@ -460,6 +408,7 @@ export function useUnifiedOrderModal(
     amountBuy,
     amountSell,
     rate,
+    handlerId,
     remarks,
     showRemarks,
     accounts,
@@ -515,18 +464,28 @@ export function useUnifiedOrderModal(
     }
   };
 
-  const confirmDraftProfits = async (upd: unknown) => {
-    const u = upd as { createdProfitId?: number; createdServiceChargeId?: number };
-    if (u.createdProfitId) {
+  const createAndConfirmProfitsAndSCs = async (
+    orderId: number,
+    resolvedProfitLines: { amount: number; currencyCode: string; accountId: number }[],
+    resolvedScLines: { amount: number; currencyCode: string; accountId: number }[],
+    confirm: boolean,
+  ) => {
+    for (const p of resolvedProfitLines) {
       try {
-        await confirmProfit(u.createdProfitId).unwrap();
+        const created = await addProfitToOrder({ orderId, ...p }).unwrap() as { id: number };
+        if (confirm) {
+          await confirmProfit(created.id).unwrap();
+        }
       } catch {
-        /* ignore */
+        /* ignore individual failures so order save still completes */
       }
     }
-    if (u.createdServiceChargeId) {
+    for (const sc of resolvedScLines) {
       try {
-        await confirmServiceCharge(u.createdServiceChargeId).unwrap();
+        const created = await addServiceChargeToOrder({ orderId, ...sc }).unwrap() as { id: number };
+        if (confirm) {
+          await confirmServiceCharge(created.id).unwrap();
+        }
       } catch {
         /* ignore */
       }
@@ -543,7 +502,7 @@ export function useUnifiedOrderModal(
     isSubmittingRef.current = true;
     setIsSaving(true);
     try {
-      const { payload, receiptLines, paymentLines } = buildPayload();
+      const { payload, receiptLines, paymentLines, resolvedProfitLines, resolvedScLines } = buildPayload();
       if (editingOrderId && orderDetails?.order) {
         await updateOrder({
           id: editingOrderId,
@@ -552,6 +511,8 @@ export function useUnifiedOrderModal(
             customerId: orderDetails.order.customerId,
           } as any,
         }).unwrap();
+        // Recreate all profits and SCs as drafts (updateOrder already cleared old drafts via profitAmount: null)
+        await createAndConfirmProfitsAndSCs(editingOrderId, resolvedProfitLines, resolvedScLines, false);
         await replaceReceiptsPayments(editingOrderId, false);
       } else {
         const created = await addOrder({
@@ -560,8 +521,9 @@ export function useUnifiedOrderModal(
           status: "saved",
         } as any).unwrap();
         const orderId = created.id as number;
-        const upd = await updateOrder({ id: orderId, data: payload as any }).unwrap();
-        await confirmDraftProfits(upd);
+        await updateOrder({ id: orderId, data: payload as any }).unwrap();
+        // Create all profit and SC draft entries (leave as drafts for saved orders)
+        await createAndConfirmProfitsAndSCs(orderId, resolvedProfitLines, resolvedScLines, false);
         for (const line of receiptLines) {
           const amt = Number(line.amount) || 0;
           if (amt === 0 || !line.accountId) continue;
@@ -659,15 +621,16 @@ export function useUnifiedOrderModal(
     isSubmittingRef.current = true;
     setIsSaving(true);
     try {
-      const { payload } = buildPayload();
+      const { payload, resolvedProfitLines, resolvedScLines } = buildPayload();
       let orderId: number;
       if (editingOrderId && orderDetails?.order) {
         orderId = editingOrderId;
-        const upd = await updateOrder({
+        await updateOrder({
           id: orderId,
           data: { ...payload, customerId: orderDetails.order.customerId } as any,
         }).unwrap();
-        await confirmDraftProfits(upd);
+        // Recreate profits/SCs (updateOrder cleared old drafts); confirm immediately for completing
+        await createAndConfirmProfitsAndSCs(orderId, resolvedProfitLines, resolvedScLines, true);
         await replaceReceiptsPayments(orderId, true);
       } else {
         const created = await addOrder({
@@ -676,8 +639,9 @@ export function useUnifiedOrderModal(
           status: "saved",
         } as any).unwrap();
         orderId = created.id as number;
-        const upd = await updateOrder({ id: orderId, data: payload as any }).unwrap();
-        await confirmDraftProfits(upd);
+        await updateOrder({ id: orderId, data: payload as any }).unwrap();
+        // Create and immediately confirm all profits and SCs
+        await createAndConfirmProfitsAndSCs(orderId, resolvedProfitLines, resolvedScLines, true);
         const { receiptLines: rl, paymentLines: pl } = buildPayload();
         for (const line of rl) {
           const amt = Number(line.amount) || 0;
@@ -717,15 +681,9 @@ export function useUnifiedOrderModal(
 
   const openNew = useCallback(() => {
     resetForm();
-    const activeCodes = new Set(currencies.filter((c) => c.active).map((c) => c.code));
-    const nextFrom = activeCodes.has(defaultFromCurrency) ? defaultFromCurrency : "";
-    const nextTo =
-      activeCodes.has(defaultToCurrency) && defaultToCurrency !== nextFrom ? defaultToCurrency : "";
-    setFromCurrency(nextFrom);
-    setToCurrency(nextTo);
     setEditingOrderId(null);
     setIsOpen(true);
-  }, [resetForm, currencies, defaultFromCurrency, defaultToCurrency]);
+  }, [resetForm]);
 
   const openEdit = useCallback((orderId: number) => {
     resetForm();
@@ -745,16 +703,14 @@ export function useUnifiedOrderModal(
     setFromCurrency,
     toCurrency,
     setToCurrency,
-    defaultFromCurrency,
-    defaultToCurrency,
-    setDefaultFromCurrencyForUser,
-    setDefaultToCurrencyForUser,
     amountBuy,
     setAmountBuy,
     amountSell,
     setAmountSell,
     rate,
     setRate,
+    handlerId,
+    setHandlerId,
     lines,
     setLines,
     remarks,

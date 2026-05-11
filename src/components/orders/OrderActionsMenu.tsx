@@ -59,7 +59,7 @@ export function OrderActionsMenu({
         </button>,
       );
     }
-    if (showViewAction && !canEdit) {
+    if (showViewAction) {
       buttons.push(
         <button
           key="view"
