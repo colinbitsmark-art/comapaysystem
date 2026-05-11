@@ -395,14 +395,23 @@ export const listOrders = (req, res) => {
       const profitEntries = profitRows.map(r => ({ amount: Number(r.total), currency: r.currencyCode }));
       const serviceChargeEntries = scRows.map(r => ({ amount: Number(r.total), currency: r.currencyCode }));
 
+      // Resolve accountId from order_profits/order_service_charges as a fallback for unified-modal orders
+      // (legacy orders.profitAccountId is null for those; the table entry is the source of truth)
+      const firstProfitEntry = profitRows.length > 0
+        ? db.prepare(`SELECT accountId FROM order_profits WHERE orderId = ? AND status IN ('confirmed','draft') ORDER BY CASE status WHEN 'confirmed' THEN 0 ELSE 1 END, createdAt ASC LIMIT 1;`).get(order.id)
+        : null;
+      const firstScEntry = scRows.length > 0
+        ? db.prepare(`SELECT accountId FROM order_service_charges WHERE orderId = ? AND status IN ('confirmed','draft') ORDER BY CASE status WHEN 'confirmed' THEN 0 ELSE 1 END, createdAt ASC LIMIT 1;`).get(order.id)
+        : null;
+
       // Scalar backward-compat fields: use first entry (or legacy order table fallback)
       const profitAmount = profitEntries.length > 0 ? profitEntries[0].amount : (order.profitAmount !== null && order.profitAmount !== undefined ? Number(order.profitAmount) : null);
       const profitCurrency = profitEntries.length > 0 ? profitEntries[0].currency : (order.profitCurrency ?? null);
-      const profitAccountId = order.profitAccountId ?? null;
+      const profitAccountId = order.profitAccountId ?? firstProfitEntry?.accountId ?? null;
 
       const serviceChargeAmount = serviceChargeEntries.length > 0 ? serviceChargeEntries[0].amount : (order.serviceChargeAmount !== null && order.serviceChargeAmount !== undefined ? Number(order.serviceChargeAmount) : null);
       const serviceChargeCurrency = serviceChargeEntries.length > 0 ? serviceChargeEntries[0].currency : (order.serviceChargeCurrency ?? null);
-      const serviceChargeAccountId = order.serviceChargeAccountId ?? null;
+      const serviceChargeAccountId = order.serviceChargeAccountId ?? firstScEntry?.accountId ?? null;
 
       return {
         ...order,
@@ -457,13 +466,20 @@ export const listOrders = (req, res) => {
       const profitEntries = confirmedProfitRows.map(r => ({ amount: Number(r.total), currency: r.currencyCode }));
       const serviceChargeEntries = confirmedScRows.map(r => ({ amount: Number(r.total), currency: r.currencyCode }));
 
+      const firstProfitEntry = confirmedProfitRows.length > 0
+        ? db.prepare(`SELECT accountId FROM order_profits WHERE orderId = ? AND status = 'confirmed' ORDER BY createdAt ASC LIMIT 1;`).get(order.id)
+        : null;
+      const firstScEntry = confirmedScRows.length > 0
+        ? db.prepare(`SELECT accountId FROM order_service_charges WHERE orderId = ? AND status = 'confirmed' ORDER BY createdAt ASC LIMIT 1;`).get(order.id)
+        : null;
+
       const profitAmount = profitEntries.length > 0 ? profitEntries[0].amount : (order.profitAmount !== null && order.profitAmount !== undefined ? Number(order.profitAmount) : null);
       const profitCurrency = profitEntries.length > 0 ? profitEntries[0].currency : (order.profitCurrency ?? null);
-      const profitAccountId = order.profitAccountId ?? null;
+      const profitAccountId = order.profitAccountId ?? firstProfitEntry?.accountId ?? null;
 
       const serviceChargeAmount = serviceChargeEntries.length > 0 ? serviceChargeEntries[0].amount : (order.serviceChargeAmount !== null && order.serviceChargeAmount !== undefined ? Number(order.serviceChargeAmount) : null);
       const serviceChargeCurrency = serviceChargeEntries.length > 0 ? serviceChargeEntries[0].currency : (order.serviceChargeCurrency ?? null);
-      const serviceChargeAccountId = order.serviceChargeAccountId ?? null;
+      const serviceChargeAccountId = order.serviceChargeAccountId ?? firstScEntry?.accountId ?? null;
 
       return {
         ...order,
@@ -3127,18 +3143,38 @@ export const updateProfit = (req, res, next) => {
   }
 };
 
-// Delete a draft profit (can only delete drafts)
+// Delete a profit entry — drafts always; confirmed only for users with editAnyOrder permission (reverses account balance)
 export const deleteProfit = (req, res, next) => {
   try {
     const { profitId } = req.params;
+    const userId = getUserIdFromHeader(req);
 
-    // Check if profit exists and is a draft
     const profit = db.prepare("SELECT * FROM order_profits WHERE id = ?;").get(profitId);
     if (!profit) {
       return res.status(404).json({ message: "Profit not found" });
     }
-    if (profit.status !== 'draft') {
-      return res.status(400).json({ message: "Only draft profits can be deleted" });
+
+    if (profit.status === 'confirmed') {
+      const userPermissions = getUserPermissions(userId);
+      if (!canEditAnyOrder(userPermissions)) {
+        return res.status(400).json({ message: "Only draft profits can be deleted" });
+      }
+      // Reverse the balance increase that was applied when this profit was confirmed
+      if (profit.accountId) {
+        db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(
+          profit.amount,
+          profit.accountId,
+        );
+        db.prepare(
+          `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
+           VALUES (?, 'subtract', ?, ?, ?);`
+        ).run(
+          profit.accountId,
+          profit.amount,
+          `Order #${profit.orderId} - Profit reversal (edit)`,
+          new Date().toISOString()
+        );
+      }
     }
 
     db.prepare("DELETE FROM order_profits WHERE id = ?;").run(profitId);
@@ -3297,18 +3333,52 @@ export const updateServiceCharge = (req, res, next) => {
   }
 };
 
-// Delete a draft service charge (can only delete drafts)
+// Delete a service charge entry — drafts always; confirmed only for users with editAnyOrder permission (reverses account balance)
 export const deleteServiceCharge = (req, res, next) => {
   try {
     const { serviceChargeId } = req.params;
+    const userId = getUserIdFromHeader(req);
 
-    // Check if service charge exists and is a draft
     const serviceCharge = db.prepare("SELECT * FROM order_service_charges WHERE id = ?;").get(serviceChargeId);
     if (!serviceCharge) {
       return res.status(404).json({ message: "Service charge not found" });
     }
-    if (serviceCharge.status !== 'draft') {
-      return res.status(400).json({ message: "Only draft service charges can be deleted" });
+
+    if (serviceCharge.status === 'confirmed') {
+      const userPermissions = getUserPermissions(userId);
+      if (!canEditAnyOrder(userPermissions)) {
+        return res.status(400).json({ message: "Only draft service charges can be deleted" });
+      }
+      // Reverse the balance change that was applied when this service charge was confirmed
+      if (serviceCharge.accountId) {
+        const amount = Number(serviceCharge.amount);
+        if (amount > 0) {
+          // Was added to account (positive SC), so subtract it back
+          db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(amount, serviceCharge.accountId);
+          db.prepare(
+            `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
+             VALUES (?, 'subtract', ?, ?, ?);`
+          ).run(
+            serviceCharge.accountId,
+            amount,
+            `Order #${serviceCharge.orderId} - Service charge reversal (edit)`,
+            new Date().toISOString()
+          );
+        } else if (amount < 0) {
+          // Was subtracted from account (negative SC), so add it back
+          const absAmount = Math.abs(amount);
+          db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(absAmount, serviceCharge.accountId);
+          db.prepare(
+            `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
+             VALUES (?, 'add', ?, ?, ?);`
+          ).run(
+            serviceCharge.accountId,
+            absAmount,
+            `Order #${serviceCharge.orderId} - Service charge reversal (edit)`,
+            new Date().toISOString()
+          );
+        }
+      }
     }
 
     db.prepare("DELETE FROM order_service_charges WHERE id = ?;").run(serviceChargeId);

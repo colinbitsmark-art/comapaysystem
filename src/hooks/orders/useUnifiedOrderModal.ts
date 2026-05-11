@@ -12,8 +12,10 @@ import {
   useConfirmPaymentMutation,
   useAddProfitToOrderMutation,
   useConfirmProfitMutation,
+  useDeleteProfitMutation,
   useAddServiceChargeToOrderMutation,
   useConfirmServiceChargeMutation,
+  useDeleteServiceChargeMutation,
 } from "../../services/api";
 import type { Account, AuthResponse, Currency, Tag } from "../../types";
 import { ORDER_RECEIPT_PAYMENT_TOLERANCE } from "../../utils/orders/orderAmountTolerance";
@@ -100,8 +102,10 @@ export function useUnifiedOrderModal(
   const [confirmPayment] = useConfirmPaymentMutation();
   const [addProfitToOrder] = useAddProfitToOrderMutation();
   const [confirmProfit] = useConfirmProfitMutation();
+  const [deleteProfit] = useDeleteProfitMutation();
   const [addServiceChargeToOrder] = useAddServiceChargeToOrderMutation();
   const [confirmServiceCharge] = useConfirmServiceChargeMutation();
+  const [deleteServiceCharge] = useDeleteServiceChargeMutation();
 
   const getBaseCurrency = useCallback(
     (from: string, to: string): boolean | null => {
@@ -464,6 +468,32 @@ export function useUnifiedOrderModal(
     }
   };
 
+  /** Delete all existing profit and service charge entries for this order (both draft and confirmed), then create new ones. */
+  const replaceProfitsAndSCs = async (
+    orderId: number,
+    resolvedProfitLines: { amount: number; currencyCode: string; accountId: number }[],
+    resolvedScLines: { amount: number; currencyCode: string; accountId: number }[],
+    confirm: boolean,
+  ) => {
+    if (orderDetails) {
+      for (const p of orderDetails.profits || []) {
+        try {
+          await deleteProfit(p.id).unwrap();
+        } catch {
+          /* ignore */
+        }
+      }
+      for (const sc of orderDetails.serviceCharges || []) {
+        try {
+          await deleteServiceCharge(sc.id).unwrap();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    await createAndConfirmProfitsAndSCs(orderId, resolvedProfitLines, resolvedScLines, confirm);
+  };
+
   const createAndConfirmProfitsAndSCs = async (
     orderId: number,
     resolvedProfitLines: { amount: number; currencyCode: string; accountId: number }[],
@@ -511,8 +541,8 @@ export function useUnifiedOrderModal(
             customerId: orderDetails.order.customerId,
           } as any,
         }).unwrap();
-        // Recreate all profits and SCs as drafts (updateOrder already cleared old drafts via profitAmount: null)
-        await createAndConfirmProfitsAndSCs(editingOrderId, resolvedProfitLines, resolvedScLines, false);
+        // Delete all existing profits/SCs (including confirmed ones) then recreate as drafts
+        await replaceProfitsAndSCs(editingOrderId, resolvedProfitLines, resolvedScLines, false);
         await replaceReceiptsPayments(editingOrderId, false);
       } else {
         const created = await addOrder({
@@ -629,8 +659,8 @@ export function useUnifiedOrderModal(
           id: orderId,
           data: { ...payload, customerId: orderDetails.order.customerId } as any,
         }).unwrap();
-        // Recreate profits/SCs (updateOrder cleared old drafts); confirm immediately for completing
-        await createAndConfirmProfitsAndSCs(orderId, resolvedProfitLines, resolvedScLines, true);
+        // Delete all existing profits/SCs (including confirmed ones) then recreate and confirm
+        await replaceProfitsAndSCs(orderId, resolvedProfitLines, resolvedScLines, true);
         await replaceReceiptsPayments(orderId, true);
       } else {
         const created = await addOrder({
