@@ -439,20 +439,15 @@ const ensureSchema = () => {
     );`,
   ).run();
 
-  // Per-user pinned orders (sort order among pins only; max enforced in app)
+  // Team-wide pinned orders (shared sort order; max enforced in app)
   db.prepare(
-    `CREATE TABLE IF NOT EXISTS user_order_pins (
-      userId INTEGER NOT NULL,
-      orderId INTEGER NOT NULL,
+    `CREATE TABLE IF NOT EXISTS order_pins (
+      orderId INTEGER NOT NULL PRIMARY KEY,
       sortOrder INTEGER NOT NULL,
-      PRIMARY KEY (userId, orderId),
-      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (orderId) REFERENCES orders(id) ON DELETE CASCADE
     );`,
   ).run();
-  db.prepare(
-    `CREATE INDEX IF NOT EXISTS idx_user_order_pins_user_sort ON user_order_pins (userId, sortOrder);`,
-  ).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_order_pins_sort ON order_pins (sortOrder);`).run();
 
   // Migration: legacy databases pointed order_tag_assignments.tagId to order_tags
   const orderTagFkInfo = db.prepare("PRAGMA foreign_key_list(order_tag_assignments);").all();
@@ -803,6 +798,7 @@ const seedData = () => {
             editAnyOrder: true,
             deleteOrder: true,
             deleteManyOrders: true,
+            pinOrders: true,
           },
         },
       },
@@ -1093,6 +1089,38 @@ const migrateDatabase = () => {
   db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_kyc_schema_draft ON kyc_schema_versions(customerType) WHERE status='draft';`).run();
 
   db.prepare(`CREATE TABLE IF NOT EXISTS _schema_migrations (key TEXT PRIMARY KEY);`).run();
+
+    const globalOrderPinsMigrated = db
+      .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
+      .get("global_order_pins_v1");
+    if (!globalOrderPinsMigrated) {
+      db.prepare(
+        `CREATE TABLE IF NOT EXISTS order_pins (
+          orderId INTEGER NOT NULL PRIMARY KEY,
+          sortOrder INTEGER NOT NULL,
+          FOREIGN KEY (orderId) REFERENCES orders(id) ON DELETE CASCADE
+        );`,
+      ).run();
+      const userPinsTable = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_order_pins'")
+        .get();
+      if (userPinsTable) {
+        const rows = db
+          .prepare(
+            `SELECT orderId, MIN(sortOrder) AS m
+             FROM user_order_pins
+             GROUP BY orderId
+             ORDER BY m ASC
+             LIMIT 10`,
+          )
+          .all();
+        const insert = db.prepare("INSERT OR REPLACE INTO order_pins (orderId, sortOrder) VALUES (?, ?);");
+        rows.forEach((r, i) => insert.run(r.orderId, i));
+        db.exec("DROP TABLE IF EXISTS user_order_pins;");
+      }
+      db.prepare("INSERT INTO _schema_migrations (key) VALUES ('global_order_pins_v1')").run();
+    }
+
     const underProcessMigrated = db
       .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
       .get("merge_under_process_to_pending_v1");
@@ -1139,6 +1167,25 @@ const migrateDatabase = () => {
         console.error(`Error migrating role ${role.id}:`, error);
       }
     });
+
+    // Grant pinOrders to admin role if missing (team-wide order pins)
+    const adminRole = db.prepare("SELECT id, permissions FROM roles WHERE name = 'admin'").get();
+    if (adminRole?.permissions) {
+      try {
+        const permissions = JSON.parse(adminRole.permissions);
+        if (!permissions.actions) permissions.actions = {};
+        if (permissions.actions.pinOrders !== true) {
+          permissions.actions.pinOrders = true;
+          db.prepare("UPDATE roles SET permissions = @permissions, updatedAt = @updatedAt WHERE id = @id").run({
+            id: adminRole.id,
+            permissions: JSON.stringify(permissions),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (e) {
+        console.error("Error migrating admin pinOrders permission:", e);
+      }
+    }
   } catch (error) {
     console.error("Migration error:", error);
   }

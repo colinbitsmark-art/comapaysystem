@@ -38,12 +38,14 @@ interface OrdersTableProps {
   totalPages: number;
   totalOrders: number;
   onPageChange: (page: number) => void;
-  /** Pinned order ids for current user (for pin limit + reorder) */
+  /** Team-wide pinned order ids (same for all users) */
   pinnedOrderIds?: number[];
   onReorderPinned?: (fromOrderId: number, toOrderId: number) => void;
   onPinOrder?: (orderId: number) => void;
   onUnpinOrder?: (orderId: number) => void;
   closeOrderMenu?: () => void;
+  /** Role action `pinOrders`: pin/unpin/reorder for everyone */
+  canPinOrders?: boolean;
 }
 
 /**
@@ -83,18 +85,19 @@ export function OrdersTable({
   onPinOrder,
   onUnpinOrder,
   closeOrderMenu,
+  canPinOrders = false,
 }: OrdersTableProps) {
   const { t } = useTranslation();
   const [dragOverPinnedId, setDragOverPinnedId] = useState<number | null>(null);
 
   const pinnedOnPage = orders.filter((o) => o.pinned).map((o) => o.id);
   const canReorderPinned =
-    Boolean(authUser && onReorderPinned) &&
+    Boolean(authUser && canPinOrders && onReorderPinned) &&
     pinnedOrderIds.length > 1 &&
     pinnedOnPage.length === pinnedOrderIds.length &&
     pinnedOrderIds.every((id) => pinnedOnPage.includes(id));
-  const showPinHandleColumn = Boolean(authUser && canReorderPinned);
-  const canPinMore = pinnedOrderIds.length < 5;
+  const showPinHandleColumn = Boolean(authUser && canPinOrders && canReorderPinned);
+  const canPinMore = !canPinOrders || pinnedOrderIds.length < 10;
 
   const handleMenuRef = useCallback((orderId: number) => (el: HTMLDivElement | null) => {
     menuRefs.current[orderId] = el;
@@ -186,6 +189,7 @@ export function OrdersTable({
                       }
                     : undefined
                 }
+                showPinActions={Boolean(canPinOrders && authUser)}
               />
             ))}
             {!orders.length && (

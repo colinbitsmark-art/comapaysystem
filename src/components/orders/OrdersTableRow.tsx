@@ -42,6 +42,7 @@ interface OrdersTableRowProps {
   canPinMore?: boolean;
   onPinOrder?: () => void;
   onUnpinOrder?: () => void;
+  showPinActions?: boolean;
 }
 
 /**
@@ -82,6 +83,7 @@ export function OrdersTableRow({
   canPinMore,
   onPinOrder,
   onUnpinOrder,
+  showPinActions = false,
 }: OrdersTableRowProps) {
   const isMenuOpen = openMenuId === order.id;
   const draggable = Boolean(order.pinned && canReorderPinned);
@@ -208,7 +210,7 @@ export function OrdersTableRow({
                 canEditAnyOrder={canEditAnyOrder}
                 isDeleting={isDeleting}
                 t={t}
-                showPinActions={Boolean(authUser)}
+                showPinActions={showPinActions}
                 isPinned={Boolean(order.pinned)}
                 canPinMore={canPinMore !== false}
                 onPin={onPinOrder}

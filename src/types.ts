@@ -132,7 +132,7 @@ export interface Order {
   remarks?: string;
   createdAt: string;
   orderDate?: string | null;
-  /** Pinned to top of the list for the current user */
+  /** Pinned to top of the list for everyone (team reminder; role action pinOrders) */
   pinned?: boolean;
   /** Order among pinned orders (0 = first); only set when pinned */
   pinOrder?: number;

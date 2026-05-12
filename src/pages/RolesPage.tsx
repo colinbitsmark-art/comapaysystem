@@ -52,6 +52,7 @@ const ACTION_GROUPS = [
       { key: "importOrder", labelKey: "roles.importOrder" },
       { key: "exportOrder", labelKey: "roles.exportOrder" },
       { key: "assignUnassignOrderTag", labelKey: "roles.assignUnassignOrderTag" },
+      { key: "pinOrders", labelKey: "roles.pinOrders" },
     ],
   },
   {

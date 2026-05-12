@@ -85,6 +85,7 @@ export default function OrdersPage() {
   const { t } = useTranslation();
   const location = useLocation();
   const authUser = useAppSelector((s) => s.auth.user);
+  const canPinOrders = hasActionPermission(authUser, "pinOrders");
   // Get initial filters from location state
   const initialFilters = useMemo(() => {
     const state = location.state as { initialFilters?: Partial<import("../types/orders").OrderFilters> } | null;
@@ -116,7 +117,7 @@ export default function OrdersPage() {
   const orders = ordersData?.orders || [];
   const totalOrders = ordersData?.total || 0;
 
-  const { data: pinsData } = useGetOrderPinsQuery(undefined, { skip: !authUser?.id });
+  const { data: pinsData } = useGetOrderPinsQuery(undefined, { skip: !authUser?.id || !canPinOrders });
   const pinnedOrderIds = pinsData?.orderIds ?? [];
   const [pinOrderMut] = usePinOrderMutation();
   const [unpinOrderMut] = useUnpinOrderMutation();
@@ -1473,10 +1474,11 @@ export default function OrdersPage() {
               totalOrders={totalOrders}
               onPageChange={setCurrentPage}
               pinnedOrderIds={pinnedOrderIds}
-              onReorderPinned={authUser ? handleReorderPinnedRows : undefined}
-              onPinOrder={authUser ? handlePinOrder : undefined}
-              onUnpinOrder={authUser ? handleUnpinOrder : undefined}
+              onReorderPinned={authUser && canPinOrders ? handleReorderPinnedRows : undefined}
+              onPinOrder={authUser && canPinOrders ? handlePinOrder : undefined}
+              onUnpinOrder={authUser && canPinOrders ? handleUnpinOrder : undefined}
               closeOrderMenu={() => setOpenMenuId(null)}
+              canPinOrders={canPinOrders}
             />
           </>
         ) : (

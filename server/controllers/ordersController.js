@@ -10,7 +10,7 @@ import {
 } from "../utils/fileStorage.js";
 import { getUserIdFromHeader } from "../utils/auth.js";
 import { createNotification } from "../services/notification/notificationService.js";
-import { getUserPermissions, isAdmin, canModifyOrder, canEditAnyOrder } from "../utils/orderPermissions.js";
+import { getUserPermissions, isAdmin, canModifyOrder, canEditAnyOrder, canPinOrders } from "../utils/orderPermissions.js";
 import {
   getAllowedAccountIdsForUser,
   requireAccountAccess,
@@ -59,7 +59,7 @@ function insertOrderChange(orderId, userId, beforeRow, afterRow) {
   }
 }
 
-const MAX_ORDER_PINS_PER_USER = 5;
+const MAX_ORDER_PINS_GLOBAL = 10;
 
 function userCanAccessOrderForListing(userId, orderId) {
   const exists = db.prepare("SELECT 1 FROM orders WHERE id = ?;").get(orderId);
@@ -82,10 +82,10 @@ function userCanAccessOrderForListing(userId, orderId) {
   return Boolean(db.prepare(sql).get(params));
 }
 
-function listPinnedOrderIdsForUser(userId) {
+function listGlobalPinnedOrderIds() {
   return db
-    .prepare("SELECT orderId FROM user_order_pins WHERE userId = ? ORDER BY sortOrder ASC;")
-    .all(userId)
+    .prepare("SELECT orderId FROM order_pins ORDER BY sortOrder ASC;")
+    .all()
     .map((r) => r.orderId);
 }
 
@@ -290,8 +290,6 @@ export const listOrders = (req, res) => {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  params.pinUserId = userId || -1;
-
   // Get total count for pagination
   const countQuery = `SELECT COUNT(*) as total FROM orders o ${whereClause}`;
   const countResult = db.prepare(countQuery).get(params);
@@ -303,22 +301,22 @@ export const listOrders = (req, res) => {
   const offset = (pageNum - 1) * limitNum;
   const totalPages = Math.ceil(total / limitNum);
 
-  // Build main query with pagination (pinned rows first for current user, then by date)
+  // Build main query with pagination (team-wide pinned rows first, then by date)
   const query = `
     SELECT o.*, c.name as customerName, u.name as handlerName,
            COALESCE(cu.name, u.name) as createdByName,
            buyAcc.name as buyAccountName, sellAcc.name as sellAccountName,
-           uop.sortOrder AS pinSortOrder
+           op.sortOrder AS pinSortOrder
     FROM orders o
     LEFT JOIN customers c ON c.id = o.customerId
     LEFT JOIN users u ON u.id = o.handlerId
     LEFT JOIN users cu ON cu.id = o.createdBy
     LEFT JOIN accounts buyAcc ON buyAcc.id = o.buyAccountId
     LEFT JOIN accounts sellAcc ON sellAcc.id = o.sellAccountId
-    LEFT JOIN user_order_pins uop ON uop.orderId = o.id AND uop.userId = @pinUserId
+    LEFT JOIN order_pins op ON op.orderId = o.id
     ${whereClause}
-    ORDER BY CASE WHEN uop.sortOrder IS NOT NULL THEN 0 ELSE 1 END ASC,
-             uop.sortOrder ASC,
+    ORDER BY CASE WHEN op.sortOrder IS NOT NULL THEN 0 ELSE 1 END ASC,
+             op.sortOrder ASC,
              COALESCE(o.orderDate, o.createdAt) DESC
     LIMIT @limit OFFSET @offset;
   `;
@@ -667,24 +665,22 @@ export const exportOrders = (req, res) => {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  params.pinUserId = userId || -1;
-
   // Build query without pagination
   const query = `
     SELECT o.*, c.name as customerName, u.name as handlerName,
            COALESCE(cu.name, u.name) as createdByName,
            buyAcc.name as buyAccountName, sellAcc.name as sellAccountName,
-           uop.sortOrder AS pinSortOrder
+           op.sortOrder AS pinSortOrder
     FROM orders o
     LEFT JOIN customers c ON c.id = o.customerId
     LEFT JOIN users u ON u.id = o.handlerId
     LEFT JOIN users cu ON cu.id = o.createdBy
     LEFT JOIN accounts buyAcc ON buyAcc.id = o.buyAccountId
     LEFT JOIN accounts sellAcc ON sellAcc.id = o.sellAccountId
-    LEFT JOIN user_order_pins uop ON uop.orderId = o.id AND uop.userId = @pinUserId
+    LEFT JOIN order_pins op ON op.orderId = o.id
     ${whereClause}
-    ORDER BY CASE WHEN uop.sortOrder IS NOT NULL THEN 0 ELSE 1 END ASC,
-             uop.sortOrder ASC,
+    ORDER BY CASE WHEN op.sortOrder IS NOT NULL THEN 0 ELSE 1 END ASC,
+             op.sortOrder ASC,
              COALESCE(o.orderDate, o.createdAt) DESC;
   `;
 
@@ -791,13 +787,17 @@ export const getPinnedOrderIds = (req, res) => {
   if (!userId) {
     return res.status(401).json({ message: "User ID is required" });
   }
-  res.json({ orderIds: listPinnedOrderIdsForUser(userId) });
+  res.json({ orderIds: listGlobalPinnedOrderIds() });
 };
 
 export const pinOrder = (req, res) => {
   const userId = getUserIdFromHeader(req);
   if (!userId) {
     return res.status(401).json({ message: "User ID is required" });
+  }
+  const userPermissions = getUserPermissions(userId);
+  if (!canPinOrders(userPermissions)) {
+    return res.status(403).json({ message: "You do not have permission to pin orders" });
   }
   const orderId = parseInt(req.params.id, 10);
   if (Number.isNaN(orderId)) {
@@ -806,25 +806,22 @@ export const pinOrder = (req, res) => {
   if (!userCanAccessOrderForListing(userId, orderId)) {
     return res.status(403).json({ message: "You do not have access to this order" });
   }
-  const already = db
-    .prepare("SELECT 1 FROM user_order_pins WHERE userId = ? AND orderId = ?;")
-    .get(userId, orderId);
+  const already = db.prepare("SELECT 1 FROM order_pins WHERE orderId = ?;").get(orderId);
   if (already) {
-    return res.json({ success: true, orderIds: listPinnedOrderIdsForUser(userId) });
+    return res.json({ success: true, orderIds: listGlobalPinnedOrderIds() });
   }
-  const countRow = db.prepare("SELECT COUNT(*) as n FROM user_order_pins WHERE userId = ?;").get(userId);
-  if ((countRow?.n || 0) >= MAX_ORDER_PINS_PER_USER) {
+  const countRow = db.prepare("SELECT COUNT(*) as n FROM order_pins;").get();
+  if ((countRow?.n || 0) >= MAX_ORDER_PINS_GLOBAL) {
     return res.status(400).json({
-      message: `You can pin at most ${MAX_ORDER_PINS_PER_USER} orders. Unpin one to add another.`,
+      message: `At most ${MAX_ORDER_PINS_GLOBAL} orders can be pinned for everyone. Unpin one to add another.`,
     });
   }
-  const maxSort = db
-    .prepare("SELECT COALESCE(MAX(sortOrder), -1) AS m FROM user_order_pins WHERE userId = ?;")
-    .get(userId);
-  db.prepare(
-    "INSERT INTO user_order_pins (userId, orderId, sortOrder) VALUES (?, ?, ?);",
-  ).run(userId, orderId, (maxSort?.m ?? -1) + 1);
-  res.json({ success: true, orderIds: listPinnedOrderIdsForUser(userId) });
+  const maxSort = db.prepare("SELECT COALESCE(MAX(sortOrder), -1) AS m FROM order_pins;").get();
+  db.prepare("INSERT INTO order_pins (orderId, sortOrder) VALUES (?, ?);").run(
+    orderId,
+    (maxSort?.m ?? -1) + 1,
+  );
+  res.json({ success: true, orderIds: listGlobalPinnedOrderIds() });
 };
 
 export const unpinOrder = (req, res) => {
@@ -832,19 +829,19 @@ export const unpinOrder = (req, res) => {
   if (!userId) {
     return res.status(401).json({ message: "User ID is required" });
   }
+  const userPermissions = getUserPermissions(userId);
+  if (!canPinOrders(userPermissions)) {
+    return res.status(403).json({ message: "You do not have permission to unpin orders" });
+  }
   const orderId = parseInt(req.params.id, 10);
   if (Number.isNaN(orderId)) {
     return res.status(400).json({ message: "Invalid order id" });
   }
-  db.prepare("DELETE FROM user_order_pins WHERE userId = ? AND orderId = ?;").run(userId, orderId);
-  const remaining = listPinnedOrderIdsForUser(userId);
+  db.prepare("DELETE FROM order_pins WHERE orderId = ?;").run(orderId);
+  const remaining = listGlobalPinnedOrderIds();
   const normalize = db.transaction((ids) => {
     ids.forEach((oid, i) => {
-      db.prepare("UPDATE user_order_pins SET sortOrder = ? WHERE userId = ? AND orderId = ?;").run(
-        i,
-        userId,
-        oid,
-      );
+      db.prepare("UPDATE order_pins SET sortOrder = ? WHERE orderId = ?;").run(i, oid);
     });
   });
   normalize(remaining);
@@ -856,6 +853,10 @@ export const reorderPinnedOrders = (req, res) => {
   if (!userId) {
     return res.status(401).json({ message: "User ID is required" });
   }
+  const userPermissions = getUserPermissions(userId);
+  if (!canPinOrders(userPermissions)) {
+    return res.status(403).json({ message: "You do not have permission to reorder pinned orders" });
+  }
   const { orderIds } = req.body || {};
   if (!Array.isArray(orderIds) || orderIds.length === 0) {
     return res.status(400).json({ message: "orderIds must be a non-empty array" });
@@ -863,25 +864,21 @@ export const reorderPinnedOrders = (req, res) => {
   if (!orderIds.every((id) => Number.isInteger(id) && id > 0)) {
     return res.status(400).json({ message: "orderIds must be positive integers" });
   }
-  const current = listPinnedOrderIdsForUser(userId);
+  const current = listGlobalPinnedOrderIds();
   if (current.length !== orderIds.length) {
-    return res.status(400).json({ message: "Pin list length does not match your pinned orders" });
+    return res.status(400).json({ message: "Pin list length does not match the current pinned orders" });
   }
   const setCurrent = new Set(current);
   if (orderIds.some((id) => !setCurrent.has(id))) {
-    return res.status(400).json({ message: "orderIds must match your pinned orders exactly" });
+    return res.status(400).json({ message: "orderIds must match the current pinned orders exactly" });
   }
   const apply = db.transaction((ids) => {
     ids.forEach((oid, i) => {
-      db.prepare("UPDATE user_order_pins SET sortOrder = ? WHERE userId = ? AND orderId = ?;").run(
-        i,
-        userId,
-        oid,
-      );
+      db.prepare("UPDATE order_pins SET sortOrder = ? WHERE orderId = ?;").run(i, oid);
     });
   });
   apply(orderIds);
-  res.json({ success: true, orderIds: listPinnedOrderIdsForUser(userId) });
+  res.json({ success: true, orderIds: listGlobalPinnedOrderIds() });
 };
 
 export const createOrder = async (req, res, next) => {

@@ -64,3 +64,11 @@ export function canEditAnyOrder(userPermissions) {
   }
   return userPermissions.actions.editAnyOrder === true;
 }
+
+/** Team-wide order pins (top of list for all users); only roles with this action may pin/unpin/reorder. */
+export function canPinOrders(userPermissions) {
+  if (!userPermissions || !userPermissions.actions) {
+    return false;
+  }
+  return userPermissions.actions.pinOrders === true;
+}
