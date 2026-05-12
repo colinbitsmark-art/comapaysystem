@@ -19,6 +19,7 @@ const ensureUploadsDir = () => {
     path.join(uploadsDir, "transfers"),
     path.join(uploadsDir, "customers"),
     path.join(uploadsDir, "customers", "kyc"),
+    path.join(uploadsDir, "branding"),
   ];
   
   dirs.forEach((dir) => {
@@ -40,6 +41,8 @@ const getFileExtension = (mimetype, originalname) => {
     if (mimetype === "image/png") return ".png";
     if (mimetype === "image/gif") return ".gif";
     if (mimetype === "image/webp") return ".webp";
+    if (mimetype === "image/svg+xml") return ".svg";
+    if (mimetype === "image/x-icon" || mimetype === "image/vnd.microsoft.icon") return ".ico";
     if (mimetype === "application/pdf") return ".pdf";
   }
   
@@ -107,6 +110,14 @@ export const generateKycDocumentFilename = (customerId, documentCode, mimetype, 
   return `customer_${customerId}_kyc_${safeCode}_${timestamp}_${hash}${ext}`;
 };
 
+/** Site favicon under uploads/branding */
+export const generateBrandingFaviconFilename = (mimetype, originalname) => {
+  const timestamp = Date.now();
+  const hash = crypto.randomBytes(4).toString("hex");
+  const ext = getFileExtension(mimetype, originalname);
+  return `favicon_${timestamp}_${hash}${ext}`;
+};
+
 /**
  * Save file to disk and return relative path
  * @param {Buffer} buffer - File buffer
@@ -124,7 +135,9 @@ export const saveFile = (buffer, filename, type = "order") => {
         ? "transfers"
         : type === "kyc"
           ? path.join("customers", "kyc")
-          : "orders";
+          : type === "branding"
+            ? "branding"
+            : "orders";
   const filePath = path.join(uploadsDir, subDir, filename);
   
   fs.writeFileSync(filePath, buffer);

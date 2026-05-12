@@ -32,6 +32,16 @@ interface OrdersTableRowProps {
   canEditAnyOrder: boolean;
   isDeleting: boolean;
   t: (key: string) => string;
+  showPinHandleColumn?: boolean;
+  canReorderPinned?: boolean;
+  dragOverPinned?: boolean;
+  onReorderPinnedDragEnd?: () => void;
+  onReorderPinnedDragOver?: (orderId: number) => void;
+  onReorderPinnedDragLeave?: () => void;
+  onReorderPinnedDrop?: (fromOrderId: number, toOrderId: number) => void;
+  canPinMore?: boolean;
+  onPinOrder?: () => void;
+  onUnpinOrder?: () => void;
 }
 
 /**
@@ -62,11 +72,85 @@ export function OrdersTableRow({
   canEditAnyOrder,
   isDeleting,
   t,
+  showPinHandleColumn,
+  canReorderPinned,
+  dragOverPinned,
+  onReorderPinnedDragEnd,
+  onReorderPinnedDragOver,
+  onReorderPinnedDragLeave,
+  onReorderPinnedDrop,
+  canPinMore,
+  onPinOrder,
+  onUnpinOrder,
 }: OrdersTableRowProps) {
   const isMenuOpen = openMenuId === order.id;
+  const draggable = Boolean(order.pinned && canReorderPinned);
 
   return (
-    <tr key={order.id} className="border-b border-slate-100">
+    <tr
+      key={order.id}
+      className={`border-b border-slate-100 ${order.pinned ? "bg-amber-50/50" : ""} ${
+        dragOverPinned ? "ring-1 ring-inset ring-amber-400" : ""
+      }`}
+      draggable={draggable}
+      onDragStart={
+        draggable
+          ? (e) => {
+              e.dataTransfer.setData("text/plain", String(order.id));
+              e.dataTransfer.effectAllowed = "move";
+              onReorderPinnedDragStart?.(order.id);
+            }
+          : undefined
+      }
+      onDragEnd={draggable ? onReorderPinnedDragEnd : undefined}
+      onDragOver={
+        draggable
+          ? (e) => {
+              e.preventDefault();
+              onReorderPinnedDragOver?.(order.id);
+            }
+          : undefined
+      }
+      onDragLeave={
+        draggable
+          ? () => {
+              onReorderPinnedDragLeave?.();
+            }
+          : undefined
+      }
+      onDrop={
+        draggable
+          ? (e) => {
+              e.preventDefault();
+              const raw = e.dataTransfer.getData("text/plain");
+              const fromId = parseInt(raw, 10);
+              if (!Number.isNaN(fromId) && fromId !== order.id) {
+                onReorderPinnedDrop?.(fromId, order.id);
+              }
+              onReorderPinnedDragEnd?.();
+            }
+          : undefined
+      }
+    >
+      {showPinHandleColumn && (
+        <td className="py-2 w-8 align-middle text-slate-400">
+          {order.pinned && canReorderPinned ? (
+            <span
+              className="inline-flex cursor-grab active:cursor-grabbing select-none touch-none px-0.5"
+              aria-label={t("orders.pinReorderColumn")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <circle cx="9" cy="5" r="1.5" />
+                <circle cx="15" cy="5" r="1.5" />
+                <circle cx="9" cy="12" r="1.5" />
+                <circle cx="15" cy="12" r="1.5" />
+                <circle cx="9" cy="19" r="1.5" />
+                <circle cx="15" cy="19" r="1.5" />
+              </svg>
+            </span>
+          ) : null}
+        </td>
+      )}
       {showCheckbox && (
         <td className="py-2">
           <input
@@ -124,6 +208,11 @@ export function OrdersTableRow({
                 canEditAnyOrder={canEditAnyOrder}
                 isDeleting={isDeleting}
                 t={t}
+                showPinActions={Boolean(authUser)}
+                isPinned={Boolean(order.pinned)}
+                canPinMore={canPinMore !== false}
+                onPin={onPinOrder}
+                onUnpin={onUnpinOrder}
               />
             </div>
           )}

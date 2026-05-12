@@ -1,6 +1,16 @@
 import { db, resetDbInstance, dbPath, initDatabase } from "../db.js";
 import fs from "fs";
 import path from "path";
+import {
+  saveFile,
+  deleteFile,
+  getFileUrl,
+  generateBrandingFaviconFilename,
+} from "../utils/fileStorage.js";
+
+const APP_DOCUMENT_TITLE_EN_KEY = "app_document_title_en";
+const APP_DOCUMENT_TITLE_ZH_KEY = "app_document_title_zh";
+const APP_FAVICON_PATH_KEY = "app_favicon_path";
 import archiver from "archiver";
 import { fileURLToPath } from "url";
 import Database from "better-sqlite3";
@@ -31,6 +41,67 @@ export const getSetting = (req, res, next) => {
     }
     
     res.json({ key: setting.key, value: setting.value });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getPublicBranding = (_req, res, next) => {
+  try {
+    const read = (key) => {
+      const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
+      return row?.value != null ? String(row.value) : "";
+    };
+    const faviconPath = read(APP_FAVICON_PATH_KEY).trim();
+    res.json({
+      documentTitleEn: read(APP_DOCUMENT_TITLE_EN_KEY),
+      documentTitleZh: read(APP_DOCUMENT_TITLE_ZH_KEY),
+      faviconUrl: faviconPath ? getFileUrl(faviconPath) : null,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const uploadSiteFavicon = (req, res, next) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+    const prev = db.prepare("SELECT value FROM settings WHERE key = ?").get(APP_FAVICON_PATH_KEY);
+    if (prev?.value) {
+      deleteFile(prev.value);
+    }
+    const filename = generateBrandingFaviconFilename(req.file.mimetype, req.file.originalname);
+    const relative = saveFile(req.file.buffer, filename, "branding");
+    const updatedAt = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO settings (key, value, updatedAt)
+       VALUES (@key, @value, @updatedAt)
+       ON CONFLICT(key) DO UPDATE SET value = @value, updatedAt = @updatedAt`,
+    ).run({
+      key: APP_FAVICON_PATH_KEY,
+      value: relative,
+      updatedAt,
+    });
+    res.json({
+      path: relative,
+      url: getFileUrl(relative),
+      message: "Favicon updated",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteSiteFavicon = (_req, res, next) => {
+  try {
+    const prev = db.prepare("SELECT value FROM settings WHERE key = ?").get(APP_FAVICON_PATH_KEY);
+    if (prev?.value) {
+      deleteFile(prev.value);
+    }
+    db.prepare("DELETE FROM settings WHERE key = ?").run(APP_FAVICON_PATH_KEY);
+    res.json({ message: "Favicon removed" });
   } catch (error) {
     next(error);
   }

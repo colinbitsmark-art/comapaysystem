@@ -56,11 +56,30 @@ import {
   useGetTagsQuery,
   useBatchAssignTagsMutation,
   useBatchUnassignTagsMutation,
+  useGetOrderPinsQuery,
+  usePinOrderMutation,
+  useUnpinOrderMutation,
+  useReorderPinnedOrdersMutation,
 } from "../services/api";
 import { useAppSelector } from "../app/hooks";
 import { hasActionPermission } from "../utils/permissions";
 import type { Order } from "../types";
 import { formatDate } from "../utils/format";
+
+/** Apply a reorder of visible pinned rows into the user's full pinned-id list. */
+function applyVisiblePinReorder(fullPinned: number[], visibleTopToBottom: number[], newVisibleOrder: number[]) {
+  const idxs: number[] = [];
+  fullPinned.forEach((id, i) => {
+    if (visibleTopToBottom.includes(id)) idxs.push(i);
+  });
+  if (idxs.length !== newVisibleOrder.length) return fullPinned;
+  const out = [...fullPinned];
+  idxs.forEach((pos, j) => {
+    const nextId = newVisibleOrder[j];
+    if (nextId !== undefined) out[pos] = nextId;
+  });
+  return out;
+}
 
 export default function OrdersPage() {
   const { t } = useTranslation();
@@ -96,6 +115,12 @@ export default function OrdersPage() {
   const { data: ordersData, isLoading, refetch: refetchOrders } = useGetOrdersQuery(queryParams);
   const orders = ordersData?.orders || [];
   const totalOrders = ordersData?.total || 0;
+
+  const { data: pinsData } = useGetOrderPinsQuery(undefined, { skip: !authUser?.id });
+  const pinnedOrderIds = pinsData?.orderIds ?? [];
+  const [pinOrderMut] = usePinOrderMutation();
+  const [unpinOrderMut] = useUnpinOrderMutation();
+  const [reorderPinnedMut] = useReorderPinnedOrdersMutation();
 
   const totalPages = useMemo(() => {
     return Math.ceil(totalOrders / 20);
@@ -217,6 +242,49 @@ export default function OrdersPage() {
     t,
     setAlertModal,
   });
+
+  const handlePinOrder = useCallback(
+    async (orderId: number) => {
+      try {
+        await pinOrderMut(orderId).unwrap();
+      } catch (e: unknown) {
+        let msg = t("orders.pinLimitReached");
+        if (e && typeof e === "object" && "data" in e) {
+          const d = (e as { data?: { message?: string } }).data;
+          if (d?.message) msg = d.message;
+        }
+        setAlertModal({ isOpen: true, message: msg, type: "error" });
+      }
+    },
+    [pinOrderMut, setAlertModal, t],
+  );
+
+  const handleUnpinOrder = useCallback(async (orderId: number) => {
+    try {
+      await unpinOrderMut(orderId).unwrap();
+    } catch {
+      /* ignore */
+    }
+  }, [unpinOrderMut]);
+
+  const handleReorderPinnedRows = useCallback(
+    (fromId: number, toId: number) => {
+      const visible = orders.filter((o) => o.pinned).map((o) => o.id);
+      const fromIdx = visible.indexOf(fromId);
+      const toIdx = visible.indexOf(toId);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const newVisible = [...visible];
+      const [removed] = newVisible.splice(fromIdx, 1);
+      newVisible.splice(toIdx, 0, removed);
+      const merged = applyVisiblePinReorder(pinnedOrderIds, visible, newVisible);
+      void reorderPinnedMut({ orderIds: merged })
+        .unwrap()
+        .catch(() => {
+          /* ignore */
+        });
+    },
+    [orders, pinnedOrderIds, reorderPinnedMut],
+  );
 
   // Adapter for confirm modal to match existing structure
   // Use batch delete modal for delete operations
@@ -1404,6 +1472,11 @@ export default function OrdersPage() {
               totalPages={totalPages}
               totalOrders={totalOrders}
               onPageChange={setCurrentPage}
+              pinnedOrderIds={pinnedOrderIds}
+              onReorderPinned={authUser ? handleReorderPinnedRows : undefined}
+              onPinOrder={authUser ? handlePinOrder : undefined}
+              onUnpinOrder={authUser ? handleUnpinOrder : undefined}
+              closeOrderMenu={() => setOpenMenuId(null)}
             />
           </>
         ) : (

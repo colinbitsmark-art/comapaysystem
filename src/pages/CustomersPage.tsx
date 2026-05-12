@@ -483,7 +483,7 @@ export default function CustomersPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto min-h-[60vh]">
           <table className="w-full table-fixed text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-slate-600">

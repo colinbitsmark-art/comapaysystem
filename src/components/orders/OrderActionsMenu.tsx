@@ -17,6 +17,12 @@ interface OrderActionsMenuProps {
   canEditAnyOrder: boolean;
   isDeleting: boolean;
   t: (key: string) => string;
+  /** Logged-in user: pin / unpin this order (max 5 pins per user, enforced server-side) */
+  showPinActions?: boolean;
+  isPinned?: boolean;
+  canPinMore?: boolean;
+  onPin?: () => void;
+  onUnpin?: () => void;
 }
 
 const EDIT_VIEW_STATUSES: Order["status"][] = ["saved", "completed", "cancelled"];
@@ -38,11 +44,49 @@ export function OrderActionsMenu({
   canEditAnyOrder,
   isDeleting,
   t,
+  showPinActions,
+  isPinned,
+  canPinMore,
+  onPin,
+  onUnpin,
 }: OrderActionsMenuProps) {
   if (!isOpen) return null;
 
   const buttons: React.ReactElement[] = [];
   const st = order.status;
+
+  if (showPinActions && authUser) {
+    if (isPinned && onUnpin) {
+      buttons.push(
+        <button
+          key="unpin"
+          type="button"
+          className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 first:rounded-t-lg"
+          onClick={onUnpin}
+        >
+          {t("orders.unpin")}
+        </button>,
+      );
+    } else if (onPin) {
+      const atLimit = !canPinMore;
+      buttons.push(
+        <button
+          key="pin"
+          type="button"
+          disabled={atLimit}
+          title={atLimit ? t("orders.pinLimitReached") : undefined}
+          className={`w-full text-left px-4 py-2 text-sm hover:bg-slate-50 first:rounded-t-lg ${
+            atLimit ? "text-slate-400 cursor-not-allowed" : "text-slate-700"
+          }`}
+          onClick={() => {
+            if (!atLimit) onPin();
+          }}
+        >
+          {t("orders.pinToTop")}
+        </button>,
+      );
+    }
+  }
   const showViewAction = st === "completed" || st === "cancelled";
   /** Saved orders are always editable; completed/cancelled require editAnyOrder permission. */
   const canEdit = st === "saved" || ((st === "completed" || st === "cancelled") && canEditAnyOrder);

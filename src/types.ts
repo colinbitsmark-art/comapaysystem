@@ -132,6 +132,10 @@ export interface Order {
   remarks?: string;
   createdAt: string;
   orderDate?: string | null;
+  /** Pinned to top of the list for the current user */
+  pinned?: boolean;
+  /** Order among pinned orders (0 = first); only set when pinned */
+  pinOrder?: number;
 }
 
 export interface OrderReceipt {

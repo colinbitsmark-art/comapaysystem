@@ -33,6 +33,33 @@ export const upload = multer({
   },
 });
 
+const brandingFaviconFilter = (_req, file, cb) => {
+  const allowedMimes = [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+    "image/x-icon",
+    "image/vnd.microsoft.icon",
+  ];
+  if (allowedMimes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error("Invalid file type. Use PNG, JPG, GIF, WebP, SVG, or ICO."), false);
+  }
+};
+
+/** Favicon upload for Settings → Branding (small images only) */
+export const uploadBrandingFavicon = multer({
+  storage,
+  fileFilter: brandingFaviconFilter,
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB
+  },
+});
+
 // --- Backup/Restore upload (allows .db/.zip, stores on disk) ---
 const backupUploadDir = path.join(process.cwd(), "server", "data", "backup-uploads");
 if (!fs.existsSync(backupUploadDir)) {

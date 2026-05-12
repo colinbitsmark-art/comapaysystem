@@ -48,6 +48,11 @@ import type {
   KycV2Schema,
   CustomerType,
 } from "../types";
+import {
+  APP_DOCUMENT_TITLE_EN_KEY,
+  APP_DOCUMENT_TITLE_ZH_KEY,
+  APP_FAVICON_PATH_KEY,
+} from "../constants/appBrandSettings";
 
 const baseQuery = fetchBaseQuery({
   baseUrl: "/api",
@@ -82,7 +87,7 @@ const baseQuery = fetchBaseQuery({
 export const api = createApi({
   reducerPath: "api",
   baseQuery,
-  tagTypes: ["Currency", "Customer", "CustomerBeneficiary", "CustomerLedger", "CustomerKyc", "User", "Role", "Order", "Auth", "Account", "Transfer", "Expense", "ProfitCalculation", "Setting", "Tag", "Notification", "Wallet"],
+  tagTypes: ["Currency", "Customer", "CustomerBeneficiary", "CustomerLedger", "CustomerKyc", "User", "Role", "Order", "Auth", "Account", "Transfer", "Expense", "ProfitCalculation", "Setting", "PublicBranding", "Tag", "Notification", "Wallet"],
   refetchOnReconnect: true,
   endpoints: (builder) => ({
     getCurrencies: builder.query<Currency[], void>({
@@ -643,6 +648,44 @@ export const api = createApi({
         return `orders/export${queryString ? `?${queryString}` : ""}`;
       },
     }),
+    getOrderPins: builder.query<{ orderIds: number[] }, void>({
+      query: () => "orders/pins",
+      providesTags: [{ type: "Order", id: "PINS" }],
+    }),
+    pinOrder: builder.mutation<{ success: boolean; orderIds: number[] }, number>({
+      query: (id) => ({
+        url: `orders/${id}/pin`,
+        method: "POST",
+      }),
+      invalidatesTags: [
+        { type: "Order", id: "LIST" },
+        { type: "Order", id: "PINS" },
+      ],
+    }),
+    unpinOrder: builder.mutation<{ success: boolean; orderIds: number[] }, number>({
+      query: (id) => ({
+        url: `orders/${id}/pin`,
+        method: "DELETE",
+      }),
+      invalidatesTags: [
+        { type: "Order", id: "LIST" },
+        { type: "Order", id: "PINS" },
+      ],
+    }),
+    reorderPinnedOrders: builder.mutation<
+      { success: boolean; orderIds: number[] },
+      { orderIds: number[] }
+    >({
+      query: (body) => ({
+        url: "orders/pins/reorder",
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: [
+        { type: "Order", id: "LIST" },
+        { type: "Order", id: "PINS" },
+      ],
+    }),
     addOrder: builder.mutation<Order, OrderInput>({
       query: (body) => ({
         url: "orders",
@@ -694,9 +737,10 @@ export const api = createApi({
         method: "DELETE",
       }),
       invalidatesTags: (res, _err, id) => {
-        const tags: Array<{ type: "Order" | "Account"; id: number | "LIST" }> = [
+        const tags: Array<{ type: "Order" | "Account"; id: number | "LIST" | "PINS" }> = [
           { type: "Order", id },
           { type: "Order", id: "LIST" },
+          { type: "Order", id: "PINS" },
           { type: "Account", id: "LIST" }, // Invalidate account list to refresh balances
         ];
         
@@ -1616,6 +1660,31 @@ export const api = createApi({
       query: (key) => `settings/${key}`,
       providesTags: (_res, _err, key) => [{ type: "Setting", id: key }],
     }),
+    getPublicBranding: builder.query<
+      { documentTitleEn: string; documentTitleZh: string; faviconUrl: string | null },
+      void
+    >({
+      query: () => "settings/branding/public",
+      providesTags: ["PublicBranding"],
+    }),
+    uploadSiteFavicon: builder.mutation<
+      { path: string; url: string; message: string },
+      FormData
+    >({
+      query: (formData) => ({
+        url: "settings/branding/favicon",
+        method: "POST",
+        body: formData,
+      }),
+      invalidatesTags: ["PublicBranding", { type: "Setting", id: APP_FAVICON_PATH_KEY }],
+    }),
+    deleteSiteFavicon: builder.mutation<{ message: string }, void>({
+      query: () => ({
+        url: "settings/branding/favicon",
+        method: "DELETE",
+      }),
+      invalidatesTags: ["PublicBranding", { type: "Setting", id: APP_FAVICON_PATH_KEY }],
+    }),
     setSetting: builder.mutation<
       { key: string; value: string; message: string },
       { key: string; value: string }
@@ -1625,9 +1694,19 @@ export const api = createApi({
         method: "PUT",
         body,
       }),
-      invalidatesTags: (_res, _err, { key }) => [
-        { type: "Setting", id: key },
-      ],
+      invalidatesTags: (_res, _err, { key }) => {
+        const tags: Array<"PublicBranding" | { type: "Setting"; id: string }> = [
+          { type: "Setting", id: key },
+        ];
+        if (
+          key === APP_DOCUMENT_TITLE_EN_KEY ||
+          key === APP_DOCUMENT_TITLE_ZH_KEY ||
+          key === APP_FAVICON_PATH_KEY
+        ) {
+          tags.push("PublicBranding");
+        }
+        return tags;
+      },
     }),
     createBackup: builder.mutation<Blob, { includeFiles: boolean }>({
       query: (body) => ({
@@ -1976,6 +2055,10 @@ export const {
   useDeleteRoleMutation,
   useForceLogoutUsersByRoleMutation,
   useGetOrdersQuery,
+  useGetOrderPinsQuery,
+  usePinOrderMutation,
+  useUnpinOrderMutation,
+  useReorderPinnedOrdersMutation,
   useAddOrderMutation,
   useUpdateOrderMutation,
   useUpdateOrderStatusMutation,
@@ -2031,6 +2114,9 @@ export const {
   useSetDefaultProfitCalculationMutation,
   useUnsetDefaultProfitCalculationMutation,
     useGetSettingQuery,
+    useGetPublicBrandingQuery,
+    useUploadSiteFaviconMutation,
+    useDeleteSiteFaviconMutation,
     useSetSettingMutation,
     useCreateBackupMutation,
     useRestoreBackupMutation,

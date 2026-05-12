@@ -14,9 +14,17 @@ import {
   useClearAllNotificationsMutation,
   useClearDatabaseMutation,
   useGetSettingQuery,
+  useGetPublicBrandingQuery,
+  useUploadSiteFaviconMutation,
+  useDeleteSiteFaviconMutation,
   useSetSettingMutation,
 } from "../services/api";
-import { APP_DISPLAY_NAME_EN_KEY, APP_DISPLAY_NAME_ZH_KEY } from "../constants/appBrandSettings";
+import {
+  APP_DISPLAY_NAME_EN_KEY,
+  APP_DISPLAY_NAME_ZH_KEY,
+  APP_DOCUMENT_TITLE_EN_KEY,
+  APP_DOCUMENT_TITLE_ZH_KEY,
+} from "../constants/appBrandSettings";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -31,6 +39,7 @@ export default function SettingsPage() {
   const [restoreSuccessMessage, setRestoreSuccessMessage] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const faviconInputRef = useRef<HTMLInputElement>(null);
 
   // Reset IDs state
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
@@ -54,9 +63,16 @@ export default function SettingsPage() {
 
   const { data: appNameEnData, isSuccess: appNameEnLoaded } = useGetSettingQuery(APP_DISPLAY_NAME_EN_KEY);
   const { data: appNameZhData, isSuccess: appNameZhLoaded } = useGetSettingQuery(APP_DISPLAY_NAME_ZH_KEY);
+  const { data: docTitleEnData, isSuccess: docTitleEnLoaded } = useGetSettingQuery(APP_DOCUMENT_TITLE_EN_KEY);
+  const { data: docTitleZhData, isSuccess: docTitleZhLoaded } = useGetSettingQuery(APP_DOCUMENT_TITLE_ZH_KEY);
+  const { data: publicBranding } = useGetPublicBrandingQuery();
   const [appNameEnDraft, setAppNameEnDraft] = useState("");
   const [appNameZhDraft, setAppNameZhDraft] = useState("");
+  const [docTitleEnDraft, setDocTitleEnDraft] = useState("");
+  const [docTitleZhDraft, setDocTitleZhDraft] = useState("");
   const [setSetting, { isLoading: isSavingAppBrand }] = useSetSettingMutation();
+  const [uploadSiteFavicon, { isLoading: isUploadingFavicon }] = useUploadSiteFaviconMutation();
+  const [deleteSiteFavicon, { isLoading: isDeletingFavicon }] = useDeleteSiteFaviconMutation();
 
   useEffect(() => {
     if (appNameEnLoaded && appNameEnData) {
@@ -70,6 +86,18 @@ export default function SettingsPage() {
     }
   }, [appNameZhLoaded, appNameZhData]);
 
+  useEffect(() => {
+    if (docTitleEnLoaded && docTitleEnData) {
+      setDocTitleEnDraft(docTitleEnData.value ?? "");
+    }
+  }, [docTitleEnLoaded, docTitleEnData]);
+
+  useEffect(() => {
+    if (docTitleZhLoaded && docTitleZhData) {
+      setDocTitleZhDraft(docTitleZhData.value ?? "");
+    }
+  }, [docTitleZhLoaded, docTitleZhData]);
+
   const handleSaveAppBrand = async () => {
     try {
       await setSetting({
@@ -80,6 +108,14 @@ export default function SettingsPage() {
         key: APP_DISPLAY_NAME_ZH_KEY,
         value: appNameZhDraft.trim(),
       }).unwrap();
+      await setSetting({
+        key: APP_DOCUMENT_TITLE_EN_KEY,
+        value: docTitleEnDraft.trim(),
+      }).unwrap();
+      await setSetting({
+        key: APP_DOCUMENT_TITLE_ZH_KEY,
+        value: docTitleZhDraft.trim(),
+      }).unwrap();
       alert(t("settings.appBranding.saveSuccess"));
     } catch (error: any) {
       console.error("Save app brand error:", error);
@@ -88,6 +124,37 @@ export default function SettingsPage() {
           error?.message ||
           t("settings.appBranding.saveError")
       );
+    }
+  };
+
+  const handleFaviconFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (event.target) {
+      event.target.value = "";
+    }
+    if (!file) return;
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      await uploadSiteFavicon(formData).unwrap();
+      alert(t("settings.appBranding.faviconUploadSuccess"));
+    } catch (error: any) {
+      console.error("Favicon upload error:", error);
+      alert(
+        error?.data?.message || error?.message || t("settings.appBranding.faviconUploadError")
+      );
+    }
+  };
+
+  const handleRemoveFavicon = async () => {
+    const ok = window.confirm(t("settings.appBranding.faviconRemoveConfirm"));
+    if (!ok) return;
+    try {
+      await deleteSiteFavicon().unwrap();
+      alert(t("settings.appBranding.faviconRemoveSuccess"));
+    } catch (error: any) {
+      console.error("Favicon remove error:", error);
+      alert(error?.data?.message || error?.message || t("settings.appBranding.faviconUploadError"));
     }
   };
 
@@ -304,34 +371,120 @@ export default function SettingsPage() {
         title={t("settings.appBranding.title")}
         description={t("settings.appBranding.description")}
       >
-        <div className="space-y-4 max-w-xl">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              {t("settings.appBranding.englishName")}
-            </label>
-            <input
-              type="text"
-              value={appNameEnDraft}
-              onChange={(e) => setAppNameEnDraft(e.target.value)}
-              placeholder={t("settings.appBranding.englishPlaceholder")}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              autoComplete="off"
-            />
+        <div className="space-y-8 max-w-xl">
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-slate-900">
+              {t("settings.appBranding.sidebarHeading")}
+            </h3>
+            <p className="text-sm text-slate-600">{t("settings.appBranding.sidebarDescription")}</p>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {t("settings.appBranding.englishName")}
+              </label>
+              <input
+                type="text"
+                value={appNameEnDraft}
+                onChange={(e) => setAppNameEnDraft(e.target.value)}
+                placeholder={t("settings.appBranding.englishPlaceholder")}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {t("settings.appBranding.chineseName")}
+              </label>
+              <input
+                type="text"
+                value={appNameZhDraft}
+                onChange={(e) => setAppNameZhDraft(e.target.value)}
+                placeholder={t("settings.appBranding.chinesePlaceholder")}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                autoComplete="off"
+              />
+            </div>
+            <p className="text-sm text-slate-600">{t("settings.appBranding.hint")}</p>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              {t("settings.appBranding.chineseName")}
-            </label>
-            <input
-              type="text"
-              value={appNameZhDraft}
-              onChange={(e) => setAppNameZhDraft(e.target.value)}
-              placeholder={t("settings.appBranding.chinesePlaceholder")}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              autoComplete="off"
-            />
+
+          <div className="border-t border-slate-200 pt-6 space-y-4">
+            <h3 className="text-sm font-semibold text-slate-900">
+              {t("settings.appBranding.documentTitleHeading")}
+            </h3>
+            <p className="text-sm text-slate-600">{t("settings.appBranding.documentTitleDescription")}</p>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {t("settings.appBranding.documentTitleEnglish")}
+              </label>
+              <input
+                type="text"
+                value={docTitleEnDraft}
+                onChange={(e) => setDocTitleEnDraft(e.target.value)}
+                placeholder={t("settings.appBranding.documentTitleEnglishPlaceholder")}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {t("settings.appBranding.documentTitleChinese")}
+              </label>
+              <input
+                type="text"
+                value={docTitleZhDraft}
+                onChange={(e) => setDocTitleZhDraft(e.target.value)}
+                placeholder={t("settings.appBranding.documentTitleChinesePlaceholder")}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                autoComplete="off"
+              />
+            </div>
+            <p className="text-sm text-slate-600">{t("settings.appBranding.documentTitleHint")}</p>
           </div>
-          <p className="text-sm text-slate-600">{t("settings.appBranding.hint")}</p>
+
+          <div className="border-t border-slate-200 pt-6 space-y-4">
+            <h3 className="text-sm font-semibold text-slate-900">
+              {t("settings.appBranding.faviconHeading")}
+            </h3>
+            <p className="text-sm text-slate-600">{t("settings.appBranding.faviconDescription")}</p>
+            <div className="flex flex-wrap items-center gap-4">
+              {publicBranding?.faviconUrl ? (
+                <img
+                  src={publicBranding.faviconUrl}
+                  alt=""
+                  className="h-10 w-10 rounded border border-slate-200 bg-white object-contain p-0.5"
+                />
+              ) : (
+                <div className="flex h-10 w-10 items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50 text-xs text-slate-500">
+                  —
+                </div>
+              )}
+              <input
+                ref={faviconInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,.ico,image/x-icon"
+                className="hidden"
+                onChange={handleFaviconFile}
+              />
+              <button
+                type="button"
+                onClick={() => faviconInputRef.current?.click()}
+                disabled={isUploadingFavicon}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {isUploadingFavicon ? t("common.saving") : t("settings.appBranding.uploadFavicon")}
+              </button>
+              {publicBranding?.faviconUrl ? (
+                <button
+                  type="button"
+                  onClick={handleRemoveFavicon}
+                  disabled={isDeletingFavicon}
+                  className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                >
+                  {isDeletingFavicon ? t("common.saving") : t("settings.appBranding.removeFavicon")}
+                </button>
+              ) : null}
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={handleSaveAppBrand}

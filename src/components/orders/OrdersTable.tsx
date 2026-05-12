@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { OrdersTableRow } from "./OrdersTableRow";
 import { Pagination } from "../common/Pagination";
@@ -38,6 +38,12 @@ interface OrdersTableProps {
   totalPages: number;
   totalOrders: number;
   onPageChange: (page: number) => void;
+  /** Pinned order ids for current user (for pin limit + reorder) */
+  pinnedOrderIds?: number[];
+  onReorderPinned?: (fromOrderId: number, toOrderId: number) => void;
+  onPinOrder?: (orderId: number) => void;
+  onUnpinOrder?: (orderId: number) => void;
+  closeOrderMenu?: () => void;
 }
 
 /**
@@ -72,8 +78,23 @@ export function OrdersTable({
   totalPages,
   totalOrders,
   onPageChange,
+  pinnedOrderIds = [],
+  onReorderPinned,
+  onPinOrder,
+  onUnpinOrder,
+  closeOrderMenu,
 }: OrdersTableProps) {
   const { t } = useTranslation();
+  const [dragOverPinnedId, setDragOverPinnedId] = useState<number | null>(null);
+
+  const pinnedOnPage = orders.filter((o) => o.pinned).map((o) => o.id);
+  const canReorderPinned =
+    Boolean(authUser && onReorderPinned) &&
+    pinnedOrderIds.length > 1 &&
+    pinnedOnPage.length === pinnedOrderIds.length &&
+    pinnedOrderIds.every((id) => pinnedOnPage.includes(id));
+  const showPinHandleColumn = Boolean(authUser && canReorderPinned);
+  const canPinMore = pinnedOrderIds.length < 5;
 
   const handleMenuRef = useCallback((orderId: number) => (el: HTMLDivElement | null) => {
     menuRefs.current[orderId] = el;
@@ -89,6 +110,9 @@ export function OrdersTable({
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-slate-600">
+              {showPinHandleColumn && (
+                <th className="py-2 w-8" aria-label={t("orders.pinReorderColumn")} />
+              )}
               {showCheckbox && (
                 <th className="py-2 w-8">
                   <input
@@ -135,11 +159,46 @@ export function OrdersTable({
                 canEditAnyOrder={canEditAnyOrder}
                 isDeleting={isDeleting}
                 t={t}
+                showPinHandleColumn={showPinHandleColumn}
+                canReorderPinned={canReorderPinned}
+                dragOverPinned={dragOverPinnedId === order.id}
+                onReorderPinnedDragOver={(id) => setDragOverPinnedId(id)}
+                onReorderPinnedDragLeave={() => setDragOverPinnedId(null)}
+                onReorderPinnedDragEnd={() => setDragOverPinnedId(null)}
+                onReorderPinnedDrop={(fromId, toId) => {
+                  setDragOverPinnedId(null);
+                  onReorderPinned?.(fromId, toId);
+                }}
+                canPinMore={canPinMore}
+                onPinOrder={
+                  onPinOrder
+                    ? () => {
+                        onPinOrder(order.id);
+                        closeOrderMenu?.();
+                      }
+                    : undefined
+                }
+                onUnpinOrder={
+                  onUnpinOrder
+                    ? () => {
+                        onUnpinOrder(order.id);
+                        closeOrderMenu?.();
+                      }
+                    : undefined
+                }
               />
             ))}
             {!orders.length && (
               <tr>
-                <td className="py-4 text-sm text-slate-500" colSpan={columnOrder.length + (showCheckbox ? 1 : 0) + 1}>
+                <td
+                  className="py-4 text-sm text-slate-500"
+                  colSpan={
+                    columnOrder.filter((k) => visibleColumns.has(k)).length +
+                    (showCheckbox ? 1 : 0) +
+                    (showPinHandleColumn ? 1 : 0) +
+                    1
+                  }
+                >
                   {t("orders.noOrders")}
                 </td>
               </tr>

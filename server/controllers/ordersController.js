@@ -59,6 +59,36 @@ function insertOrderChange(orderId, userId, beforeRow, afterRow) {
   }
 }
 
+const MAX_ORDER_PINS_PER_USER = 5;
+
+function userCanAccessOrderForListing(userId, orderId) {
+  const exists = db.prepare("SELECT 1 FROM orders WHERE id = ?;").get(orderId);
+  if (!exists) return false;
+  const allowedOrderAccountIds = getAllowedAccountIdsForUser(userId, "order.account");
+  if (!Array.isArray(allowedOrderAccountIds)) return true;
+  if (allowedOrderAccountIds.length === 0) return false;
+  const params = { orderId };
+  const placeholders = allowedOrderAccountIds.map((accountId, index) => {
+    const key = `acc${index}`;
+    params[key] = accountId;
+    return `@${key}`;
+  }).join(",");
+  const sql = `SELECT 1 FROM orders o WHERE o.id = @orderId AND (
+    o.buyAccountId IN (${placeholders})
+    OR o.sellAccountId IN (${placeholders})
+    OR EXISTS (SELECT 1 FROM order_receipts r WHERE r.orderId = o.id AND r.accountId IN (${placeholders}))
+    OR EXISTS (SELECT 1 FROM order_payments p WHERE p.orderId = o.id AND p.accountId IN (${placeholders}))
+  )`;
+  return Boolean(db.prepare(sql).get(params));
+}
+
+function listPinnedOrderIdsForUser(userId) {
+  return db
+    .prepare("SELECT orderId FROM user_order_pins WHERE userId = ? ORDER BY sortOrder ASC;")
+    .all(userId)
+    .map((r) => r.orderId);
+}
+
 // Helper function to calculate amountSell from amountBuy using the same logic as order creation (OrdersPage.tsx lines 298-365)
 const calculateAmountSell = (amountBuy, rate, fromCurrency, toCurrency) => {
   // Determine which side is the "stronger" currency so we know which way to apply the rate.
@@ -260,6 +290,8 @@ export const listOrders = (req, res) => {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+  params.pinUserId = userId || -1;
+
   // Get total count for pagination
   const countQuery = `SELECT COUNT(*) as total FROM orders o ${whereClause}`;
   const countResult = db.prepare(countQuery).get(params);
@@ -271,19 +303,23 @@ export const listOrders = (req, res) => {
   const offset = (pageNum - 1) * limitNum;
   const totalPages = Math.ceil(total / limitNum);
 
-  // Build main query with pagination
+  // Build main query with pagination (pinned rows first for current user, then by date)
   const query = `
     SELECT o.*, c.name as customerName, u.name as handlerName,
            COALESCE(cu.name, u.name) as createdByName,
-           buyAcc.name as buyAccountName, sellAcc.name as sellAccountName
+           buyAcc.name as buyAccountName, sellAcc.name as sellAccountName,
+           uop.sortOrder AS pinSortOrder
     FROM orders o
     LEFT JOIN customers c ON c.id = o.customerId
     LEFT JOIN users u ON u.id = o.handlerId
     LEFT JOIN users cu ON cu.id = o.createdBy
     LEFT JOIN accounts buyAcc ON buyAcc.id = o.buyAccountId
     LEFT JOIN accounts sellAcc ON sellAcc.id = o.sellAccountId
+    LEFT JOIN user_order_pins uop ON uop.orderId = o.id AND uop.userId = @pinUserId
     ${whereClause}
-    ORDER BY COALESCE(o.orderDate, o.createdAt) DESC
+    ORDER BY CASE WHEN uop.sortOrder IS NOT NULL THEN 0 ELSE 1 END ASC,
+             uop.sortOrder ASC,
+             COALESCE(o.orderDate, o.createdAt) DESC
     LIMIT @limit OFFSET @offset;
   `;
 
@@ -293,7 +329,10 @@ export const listOrders = (req, res) => {
   const rows = db.prepare(query).all(params);
   
   // Parse JSON fields and check for beneficiaries
-  const orders = rows.map(order => {
+  const orders = rows.map((rawRow) => {
+    const { pinSortOrder, ...order } = rawRow;
+    const pinned = pinSortOrder != null;
+    const pinOrder = pinned ? pinSortOrder : undefined;
     try {
       // Check if order has beneficiaries
       const beneficiaryCount = db
@@ -415,6 +454,8 @@ export const listOrders = (req, res) => {
 
       return {
         ...order,
+        pinned,
+        pinOrder,
         walletAddresses: order.walletAddresses ? JSON.parse(order.walletAddresses) : null,
         bankDetails: order.bankDetails ? JSON.parse(order.bankDetails) : null,
         hasBeneficiaries,
@@ -483,6 +524,8 @@ export const listOrders = (req, res) => {
 
       return {
         ...order,
+        pinned,
+        pinOrder,
         walletAddresses: null,
         bankDetails: null,
         hasBeneficiaries: false,
@@ -624,25 +667,34 @@ export const exportOrders = (req, res) => {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+  params.pinUserId = userId || -1;
+
   // Build query without pagination
   const query = `
     SELECT o.*, c.name as customerName, u.name as handlerName,
            COALESCE(cu.name, u.name) as createdByName,
-           buyAcc.name as buyAccountName, sellAcc.name as sellAccountName
+           buyAcc.name as buyAccountName, sellAcc.name as sellAccountName,
+           uop.sortOrder AS pinSortOrder
     FROM orders o
     LEFT JOIN customers c ON c.id = o.customerId
     LEFT JOIN users u ON u.id = o.handlerId
     LEFT JOIN users cu ON cu.id = o.createdBy
     LEFT JOIN accounts buyAcc ON buyAcc.id = o.buyAccountId
     LEFT JOIN accounts sellAcc ON sellAcc.id = o.sellAccountId
+    LEFT JOIN user_order_pins uop ON uop.orderId = o.id AND uop.userId = @pinUserId
     ${whereClause}
-    ORDER BY COALESCE(o.orderDate, o.createdAt) DESC;
+    ORDER BY CASE WHEN uop.sortOrder IS NOT NULL THEN 0 ELSE 1 END ASC,
+             uop.sortOrder ASC,
+             COALESCE(o.orderDate, o.createdAt) DESC;
   `;
 
   const rows = db.prepare(query).all(params);
   
   // Parse JSON fields and check for beneficiaries (same logic as listOrders)
-  const orders = rows.map(order => {
+  const orders = rows.map((rawRow) => {
+    const { pinSortOrder, ...order } = rawRow;
+    const pinned = pinSortOrder != null;
+    const pinOrder = pinned ? pinSortOrder : undefined;
     try {
       const beneficiaryCount = db
         .prepare("SELECT COUNT(*) as count FROM order_beneficiaries WHERE orderId = ?;")
@@ -696,6 +748,8 @@ export const exportOrders = (req, res) => {
 
       return {
         ...order,
+        pinned,
+        pinOrder,
         walletAddresses: order.walletAddresses ? JSON.parse(order.walletAddresses) : null,
         bankDetails: order.bankDetails ? JSON.parse(order.bankDetails) : null,
         hasBeneficiaries,
@@ -717,6 +771,8 @@ export const exportOrders = (req, res) => {
 
       return {
         ...order,
+        pinned,
+        pinOrder,
         walletAddresses: null,
         bankDetails: null,
         hasBeneficiaries: false,
@@ -728,6 +784,104 @@ export const exportOrders = (req, res) => {
   });
   
   res.json(orders);
+};
+
+export const getPinnedOrderIds = (req, res) => {
+  const userId = getUserIdFromHeader(req);
+  if (!userId) {
+    return res.status(401).json({ message: "User ID is required" });
+  }
+  res.json({ orderIds: listPinnedOrderIdsForUser(userId) });
+};
+
+export const pinOrder = (req, res) => {
+  const userId = getUserIdFromHeader(req);
+  if (!userId) {
+    return res.status(401).json({ message: "User ID is required" });
+  }
+  const orderId = parseInt(req.params.id, 10);
+  if (Number.isNaN(orderId)) {
+    return res.status(400).json({ message: "Invalid order id" });
+  }
+  if (!userCanAccessOrderForListing(userId, orderId)) {
+    return res.status(403).json({ message: "You do not have access to this order" });
+  }
+  const already = db
+    .prepare("SELECT 1 FROM user_order_pins WHERE userId = ? AND orderId = ?;")
+    .get(userId, orderId);
+  if (already) {
+    return res.json({ success: true, orderIds: listPinnedOrderIdsForUser(userId) });
+  }
+  const countRow = db.prepare("SELECT COUNT(*) as n FROM user_order_pins WHERE userId = ?;").get(userId);
+  if ((countRow?.n || 0) >= MAX_ORDER_PINS_PER_USER) {
+    return res.status(400).json({
+      message: `You can pin at most ${MAX_ORDER_PINS_PER_USER} orders. Unpin one to add another.`,
+    });
+  }
+  const maxSort = db
+    .prepare("SELECT COALESCE(MAX(sortOrder), -1) AS m FROM user_order_pins WHERE userId = ?;")
+    .get(userId);
+  db.prepare(
+    "INSERT INTO user_order_pins (userId, orderId, sortOrder) VALUES (?, ?, ?);",
+  ).run(userId, orderId, (maxSort?.m ?? -1) + 1);
+  res.json({ success: true, orderIds: listPinnedOrderIdsForUser(userId) });
+};
+
+export const unpinOrder = (req, res) => {
+  const userId = getUserIdFromHeader(req);
+  if (!userId) {
+    return res.status(401).json({ message: "User ID is required" });
+  }
+  const orderId = parseInt(req.params.id, 10);
+  if (Number.isNaN(orderId)) {
+    return res.status(400).json({ message: "Invalid order id" });
+  }
+  db.prepare("DELETE FROM user_order_pins WHERE userId = ? AND orderId = ?;").run(userId, orderId);
+  const remaining = listPinnedOrderIdsForUser(userId);
+  const normalize = db.transaction((ids) => {
+    ids.forEach((oid, i) => {
+      db.prepare("UPDATE user_order_pins SET sortOrder = ? WHERE userId = ? AND orderId = ?;").run(
+        i,
+        userId,
+        oid,
+      );
+    });
+  });
+  normalize(remaining);
+  res.json({ success: true, orderIds: remaining });
+};
+
+export const reorderPinnedOrders = (req, res) => {
+  const userId = getUserIdFromHeader(req);
+  if (!userId) {
+    return res.status(401).json({ message: "User ID is required" });
+  }
+  const { orderIds } = req.body || {};
+  if (!Array.isArray(orderIds) || orderIds.length === 0) {
+    return res.status(400).json({ message: "orderIds must be a non-empty array" });
+  }
+  if (!orderIds.every((id) => Number.isInteger(id) && id > 0)) {
+    return res.status(400).json({ message: "orderIds must be positive integers" });
+  }
+  const current = listPinnedOrderIdsForUser(userId);
+  if (current.length !== orderIds.length) {
+    return res.status(400).json({ message: "Pin list length does not match your pinned orders" });
+  }
+  const setCurrent = new Set(current);
+  if (orderIds.some((id) => !setCurrent.has(id))) {
+    return res.status(400).json({ message: "orderIds must match your pinned orders exactly" });
+  }
+  const apply = db.transaction((ids) => {
+    ids.forEach((oid, i) => {
+      db.prepare("UPDATE user_order_pins SET sortOrder = ? WHERE userId = ? AND orderId = ?;").run(
+        i,
+        userId,
+        oid,
+      );
+    });
+  });
+  apply(orderIds);
+  res.json({ success: true, orderIds: listPinnedOrderIdsForUser(userId) });
 };
 
 export const createOrder = async (req, res, next) => {
@@ -1113,12 +1267,17 @@ export const createOrder = async (req, res, next) => {
       }
     }
 
-    // Send notification to all users about new order
+    res.status(201).json({
+      ...row,
+      tags: tags.length > 0 ? tags : [],
+    });
+
+    // Send notifications in background after response is sent
     const allUsers = db.prepare("SELECT id FROM users").all();
     const allUserIds = allUsers.map(u => u.id);
     const creatorName = db.prepare("SELECT name FROM users WHERE id = ?").get(userId);
-    
-    await createNotification({
+
+    createNotification({
       userId: allUserIds,
       type: 'order_created',
       title: 'New Order Created',
@@ -1126,12 +1285,12 @@ export const createOrder = async (req, res, next) => {
       entityType: 'order',
       entityId: orderId,
       actionUrl: `/orders`,
-    });
+    }).catch(err => console.error('[createOrder] notification failed:', err));
 
     // Notify the assigned handler (if different from creator)
     const assignedHandlerId = orderData.handlerId ?? null;
     if (assignedHandlerId && Number(assignedHandlerId) !== Number(userId)) {
-      await createNotification({
+      createNotification({
         userId: Number(assignedHandlerId),
         type: 'order_assigned',
         title: 'Order Assigned to You',
@@ -1139,13 +1298,8 @@ export const createOrder = async (req, res, next) => {
         entityType: 'order',
         entityId: orderId,
         actionUrl: `/orders`,
-      });
+      }).catch(err => console.error('[createOrder] handler notification failed:', err));
     }
-    
-    res.status(201).json({
-      ...row,
-      tags: tags.length > 0 ? tags : [],
-    });
   } catch (error) {
     next(error);
   }
@@ -1640,13 +1794,18 @@ export const updateOrderStatus = async (req, res, next) => {
       )
       .all(id);
 
-    // Send notification if order was completed or cancelled
+    res.json({
+      ...row,
+      tags: tags.length > 0 ? tags : [],
+      ...(cancelAffectedAccountIds !== null ? { affectedAccountIds: cancelAffectedAccountIds } : {}),
+    });
+
+    // Send notifications in background after response is sent
     if (status === 'completed' && currentOrder.status !== 'completed') {
       const allUsers = db.prepare("SELECT id FROM users").all();
       const allUserIds = allUsers.map(u => u.id);
       const userName = db.prepare("SELECT name FROM users WHERE id = ?").get(userId);
-      
-      await createNotification({
+      createNotification({
         userId: allUserIds,
         type: 'order_completed',
         title: 'Order Completed',
@@ -1654,13 +1813,12 @@ export const updateOrderStatus = async (req, res, next) => {
         entityType: 'order',
         entityId: id,
         actionUrl: `/orders`,
-      });
+      }).catch(err => console.error('[changeOrderStatus] completed notification failed:', err));
     } else if (status === 'cancelled' && currentOrder.status !== 'cancelled') {
       const allUsers = db.prepare("SELECT id FROM users").all();
       const allUserIds = allUsers.map(u => u.id);
       const userName = db.prepare("SELECT name FROM users WHERE id = ?").get(userId);
-      
-      await createNotification({
+      createNotification({
         userId: allUserIds,
         type: 'order_cancelled',
         title: 'Order Cancelled',
@@ -1668,14 +1826,8 @@ export const updateOrderStatus = async (req, res, next) => {
         entityType: 'order',
         entityId: id,
         actionUrl: `/orders`,
-      });
+      }).catch(err => console.error('[changeOrderStatus] cancelled notification failed:', err));
     }
-    
-    res.json({
-      ...row,
-      tags: tags.length > 0 ? tags : [],
-      ...(cancelAffectedAccountIds !== null ? { affectedAccountIds: cancelAffectedAccountIds } : {}),
-    });
   } catch (error) {
     next(error);
   }
@@ -1915,27 +2067,23 @@ export const deleteOrder = async (req, res, next) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    // Send notification to all users about order deletion (must not fail the HTTP delete)
-    try {
-      const allUsers = db.prepare("SELECT id FROM users").all();
-      const allUserIds = allUsers.map(u => u.id);
-      await createNotification({
-        userId: allUserIds,
-        type: 'order_deleted',
-        title: 'Order Deleted',
-        message: `Order #${id} - ${orderDetails?.customerName || 'Customer'} has been deleted by ${userName?.name || 'User'}`,
-        entityType: 'order',
-        entityId: id,
-        actionUrl: `/orders`,
-      });
-    } catch (notifyErr) {
-      console.error("[deleteOrder] notification failed (order was deleted):", notifyErr);
-    }
-
     res.json({ 
       success: true,
       affectedAccountIds: Array.from(affectedAccountIds)
     });
+
+    // Send notification in background after response is sent
+    const allUsers = db.prepare("SELECT id FROM users").all();
+    const allUserIds = allUsers.map(u => u.id);
+    createNotification({
+      userId: allUserIds,
+      type: 'order_deleted',
+      title: 'Order Deleted',
+      message: `Order #${id} - ${orderDetails?.customerName || 'Customer'} has been deleted by ${userName?.name || 'User'}`,
+      entityType: 'order',
+      entityId: id,
+      actionUrl: `/orders`,
+    }).catch(err => console.error('[deleteOrder] notification failed:', err));
   } catch (error) {
     next(error);
   }

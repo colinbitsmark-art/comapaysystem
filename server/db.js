@@ -439,6 +439,21 @@ const ensureSchema = () => {
     );`,
   ).run();
 
+  // Per-user pinned orders (sort order among pins only; max enforced in app)
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS user_order_pins (
+      userId INTEGER NOT NULL,
+      orderId INTEGER NOT NULL,
+      sortOrder INTEGER NOT NULL,
+      PRIMARY KEY (userId, orderId),
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (orderId) REFERENCES orders(id) ON DELETE CASCADE
+    );`,
+  ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_user_order_pins_user_sort ON user_order_pins (userId, sortOrder);`,
+  ).run();
+
   // Migration: legacy databases pointed order_tag_assignments.tagId to order_tags
   const orderTagFkInfo = db.prepare("PRAGMA foreign_key_list(order_tag_assignments);").all();
   const usesLegacyOrderTags = orderTagFkInfo.some((fk) => fk.table === "order_tags");

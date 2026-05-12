@@ -59,6 +59,10 @@ import {
 import {
   listOrders,
   exportOrders,
+  getPinnedOrderIds,
+  pinOrder,
+  unpinOrder,
+  reorderPinnedOrders,
   createOrder,
   updateOrder,
   updateOrderStatus,
@@ -84,7 +88,7 @@ import {
   confirmServiceCharge,
   addServiceChargeToOrder,
 } from "../controllers/ordersController.js";
-import { upload, backupUpload } from "../middleware/upload.js";
+import { upload, backupUpload, uploadBrandingFavicon } from "../middleware/upload.js";
 import {
   listAccounts,
   getAccountsSummary,
@@ -131,6 +135,9 @@ import {
 import { 
   getSetting, 
   setSetting, 
+  getPublicBranding,
+  uploadSiteFavicon,
+  deleteSiteFavicon,
   createBackup, 
   restoreBackup, 
   listSafetyBackups,
@@ -235,6 +242,8 @@ router.delete("/roles/:id", deleteRole);
 
 router.get("/orders", listOrders);
 router.get("/orders/export", exportOrders);
+router.get("/orders/pins", getPinnedOrderIds);
+router.put("/orders/pins/reorder", reorderPinnedOrders);
 router.post("/orders", createOrder);
 // More specific routes must come before less specific ones
 router.get("/orders/:id/changes", getOrderChanges);
@@ -258,6 +267,8 @@ router.put("/orders/service-charges/:serviceChargeId", updateServiceCharge);
 router.delete("/orders/service-charges/:serviceChargeId", deleteServiceCharge);
 router.post("/orders/service-charges/:serviceChargeId/confirm", confirmServiceCharge);
 router.patch("/orders/:id/status", updateOrderStatus);
+router.post("/orders/:id/pin", pinOrder);
+router.delete("/orders/:id/pin", unpinOrder);
 router.put("/orders/:id", updateOrder);
 // DELETE must come last as it matches /orders/:id
 router.delete("/orders/:id", deleteOrder);
@@ -301,6 +312,9 @@ router.put("/profit-calculations/:id/groups", renameGroup);
 router.put("/profit-calculations/:id/set-default", setDefaultCalculation);
 router.put("/profit-calculations/:id/unset-default", unsetDefaultCalculation);
 
+router.get("/settings/branding/public", getPublicBranding);
+router.post("/settings/branding/favicon", uploadBrandingFavicon.single("file"), uploadSiteFavicon);
+router.delete("/settings/branding/favicon", deleteSiteFavicon);
 router.get("/settings/:key", getSetting);
 router.put("/settings", setSetting);
 router.post("/settings/backup", createBackup);
