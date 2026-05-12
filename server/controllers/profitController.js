@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
 export const getProfitCalculations = (_req, res) => {
   const rows = db
@@ -113,6 +114,10 @@ export const createProfitCalculation = (req, res, next) => {
       exchangeRates: [],
       groups,
     });
+    scheduleCacheSync({
+      scopes: ["profitCalculations", "accounts", "customerLedger"],
+      calculationId: Number(result.lastInsertRowid),
+    });
   } catch (error) {
     next(error);
   }
@@ -200,6 +205,10 @@ export const updateProfitCalculation = (req, res, next) => {
       ...row,
       groups: parsedGroups,
     });
+    scheduleCacheSync({
+      scopes: ["profitCalculations", "accounts", "customerLedger"],
+      calculationId: Number(id),
+    });
   } catch (error) {
     next(error);
   }
@@ -226,6 +235,10 @@ export const deleteProfitCalculation = (req, res, next) => {
     }
     
     res.json({ success: true });
+    scheduleCacheSync({
+      scopes: ["profitCalculations", "accounts", "customerLedger"],
+      calculationId: Number(id),
+    });
   } catch (error) {
     next(error);
   }
@@ -313,6 +326,10 @@ export const updateAccountMultiplier = (req, res, next) => {
       .get(id, accountId);
     
     res.json(row);
+    scheduleCacheSync({
+      scopes: ["profitCalculations", "accounts", "customerLedger"],
+      calculationId: Number(id),
+    });
   } catch (error) {
     next(error);
   }
@@ -411,6 +428,10 @@ export const updateExchangeRate = (req, res, next) => {
       .get(id, fromCurrencyCode, toCurrencyCode);
     
     res.json(row);
+    scheduleCacheSync({
+      scopes: ["profitCalculations", "accounts", "customerLedger"],
+      calculationId: Number(id),
+    });
   } catch (error) {
     next(error);
   }
@@ -466,6 +487,10 @@ export const deleteGroup = (req, res, next) => {
     });
     
     res.json({ message: "Group deleted successfully" });
+    scheduleCacheSync({
+      scopes: ["profitCalculations", "accounts", "customerLedger"],
+      calculationId: Number(id),
+    });
   } catch (error) {
     next(error);
   }
@@ -570,6 +595,10 @@ export const renameGroup = (req, res, next) => {
     });
     
     res.json({ message: "Group renamed successfully" });
+    scheduleCacheSync({
+      scopes: ["profitCalculations", "accounts", "customerLedger"],
+      calculationId: Number(id),
+    });
   } catch (error) {
     next(error);
   }
@@ -598,6 +627,10 @@ export const setDefaultCalculation = (req, res, next) => {
     );
     
     res.json({ message: "Default calculation set successfully" });
+    scheduleCacheSync({
+      scopes: ["profitCalculations", "accounts", "customerLedger"],
+      calculationId: Number(id),
+    });
   } catch (error) {
     next(error);
   }
@@ -623,6 +656,10 @@ export const unsetDefaultCalculation = (req, res, next) => {
     );
     
     res.json({ message: "Default calculation unset successfully" });
+    scheduleCacheSync({
+      scopes: ["profitCalculations", "accounts", "customerLedger"],
+      calculationId: Number(id),
+    });
   } catch (error) {
     next(error);
   }

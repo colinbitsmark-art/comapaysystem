@@ -15,6 +15,7 @@ import {
   api
 } from "../services/api";
 import { APP_DISPLAY_NAME_EN_KEY, APP_DISPLAY_NAME_ZH_KEY } from "../constants/appBrandSettings";
+import { tagsFromCacheSyncPayload } from "../utils/cacheSyncTags";
 
 type SidebarEntry =
   | { kind: "link"; to: string; labelKey: string; end?: boolean; section?: string; adminOnly?: boolean }
@@ -190,6 +191,18 @@ export default function AppLayout() {
               { type: 'Wallet', id: 'SUMMARY' },
               'Wallet' // Invalidate all wallet-related queries including transactions
             ]));
+          }
+        } else if (data.type === 'cacheSync' && Array.isArray(data.scopes) && data.scopes.length > 0) {
+          const tags = tagsFromCacheSyncPayload({
+            scopes: data.scopes,
+            orderId: typeof data.orderId === "number" ? data.orderId : data.orderId != null ? Number(data.orderId) : undefined,
+            accountIds: Array.isArray(data.accountIds) ? data.accountIds : undefined,
+            customerId: typeof data.customerId === "number" ? data.customerId : data.customerId != null ? Number(data.customerId) : undefined,
+            calculationId: typeof data.calculationId === "number" ? data.calculationId : data.calculationId != null ? Number(data.calculationId) : undefined,
+            beneficiaryId: typeof data.beneficiaryId === "number" ? data.beneficiaryId : data.beneficiaryId != null ? Number(data.beneficiaryId) : undefined,
+          });
+          if (tags.length > 0) {
+            dispatch(api.util.invalidateTags(tags));
           }
         } else if (data.type === 'unreadCount') {
           // Initial unread count received

@@ -27,6 +27,27 @@ export const broadcastNotification = (userId, notification) => {
 };
 
 /**
+ * Push a tiny cache-sync message to every open notification SSE connection (all logged-in browser tabs).
+ * Client maps `scopes` + optional ids to RTK Query tag invalidations.
+ */
+export const broadcastCacheSyncToAllClients = (payload) => {
+  const message = JSON.stringify({
+    type: "cacheSync",
+    timestamp: Date.now(),
+    ...payload,
+  });
+  sseConnections.forEach((connections) => {
+    for (const res of Array.from(connections)) {
+      try {
+        res.write(`data: ${message}\n\n`);
+      } catch {
+        connections.delete(res);
+      }
+    }
+  });
+};
+
+/**
  * SSE endpoint for notification subscription
  */
 export const subscribeToNotifications = (req, res, next) => {

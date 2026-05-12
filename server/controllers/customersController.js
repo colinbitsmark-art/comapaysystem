@@ -1,5 +1,6 @@
 import { db } from "../db.js";
 import { normalizeKycCustomerType, resetCustomerKycForTypeChange } from "./customerKycController.js";
+import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
 const trimValue = (value) => (typeof value === "string" ? value.trim() : value);
 const sanitizePayload = (payload = {}) =>
@@ -79,6 +80,10 @@ export const createCustomer = (req, res, next) => {
     const result = stmt.run({ ...payload, customerType });
     const row = db.prepare("SELECT * FROM customers WHERE id = ?;").get(result.lastInsertRowid);
     res.status(201).json(row);
+    scheduleCacheSync({
+      scopes: ["customers", "customerKyc"],
+      customerId: Number(result.lastInsertRowid),
+    });
   } catch (error) {
     next(error);
   }
@@ -113,6 +118,9 @@ export const updateCustomer = (req, res, next) => {
       }
     }
     res.json(row);
+    const scopes = ["customers"];
+    if (updates.customerType !== undefined) scopes.push("customerKyc");
+    scheduleCacheSync({ scopes, customerId: Number(id) });
   } catch (error) {
     next(error);
   }
@@ -127,6 +135,10 @@ export const deleteCustomer = (req, res, next) => {
       return res.status(404).json({ message: "Customer not found" });
     }
     res.status(204).send();
+    scheduleCacheSync({
+      scopes: ["customers", "orders"],
+      customerId: Number(id),
+    });
   } catch (error) {
     next(error);
   }
@@ -197,6 +209,11 @@ export const addCustomerBeneficiary = (req, res, next) => {
       ...beneficiary,
       walletAddresses: beneficiary.walletAddresses ? JSON.parse(beneficiary.walletAddresses) : null,
     });
+    scheduleCacheSync({
+      scopes: ["customers", "customerBeneficiaries"],
+      customerId: Number(id),
+      beneficiaryId: Number(result.lastInsertRowid),
+    });
   } catch (error) {
     next(error);
   }
@@ -259,6 +276,11 @@ export const updateCustomerBeneficiary = (req, res, next) => {
       ...updated,
       walletAddresses: updated.walletAddresses ? JSON.parse(updated.walletAddresses) : null,
     });
+    scheduleCacheSync({
+      scopes: ["customers", "customerBeneficiaries"],
+      customerId: Number(customerId),
+      beneficiaryId: Number(beneficiaryId),
+    });
   } catch (error) {
     next(error);
   }
@@ -276,6 +298,11 @@ export const deleteCustomerBeneficiary = (req, res, next) => {
     }
 
     res.status(204).send();
+    scheduleCacheSync({
+      scopes: ["customers", "customerBeneficiaries"],
+      customerId: Number(customerId),
+      beneficiaryId: Number(beneficiaryId),
+    });
   } catch (error) {
     next(error);
   }

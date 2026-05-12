@@ -15,6 +15,7 @@ import {
   getAllowedAccountIdsForUser,
   requireAccountAccess,
 } from "../utils/accountAccess.js";
+import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
 const ORDER_AUDIT_FIELDS = [
   "customerId",
@@ -57,6 +58,35 @@ function insertOrderChange(orderId, userId, beforeRow, afterRow) {
   } catch (e) {
     console.error("[insertOrderChange]", e);
   }
+}
+
+function notifyOrderPins(orderId) {
+  scheduleCacheSync({
+    scopes: ["orders"],
+    orderId: orderId != null ? Number(orderId) : undefined,
+  });
+}
+
+function notifyOrderPinsGlobal() {
+  scheduleCacheSync({ scopes: ["orders"] });
+}
+
+function notifyOrderWrite(orderId) {
+  scheduleCacheSync({
+    scopes: ["orders", "profitCalculations"],
+    orderId: orderId != null ? Number(orderId) : undefined,
+  });
+}
+
+function notifyOrderFinancial(orderId, accountIds) {
+  scheduleCacheSync({
+    scopes: ["orders", "profitCalculations", "accounts"],
+    orderId: orderId != null ? Number(orderId) : undefined,
+    accountIds:
+      accountIds && accountIds.length > 0
+        ? [...new Set(accountIds.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0))]
+        : undefined,
+  });
 }
 
 const MAX_ORDER_PINS_GLOBAL = 10;
@@ -822,6 +852,7 @@ export const pinOrder = (req, res) => {
     (maxSort?.m ?? -1) + 1,
   );
   res.json({ success: true, orderIds: listGlobalPinnedOrderIds() });
+  notifyOrderPins(orderId);
 };
 
 export const unpinOrder = (req, res) => {
@@ -846,6 +877,7 @@ export const unpinOrder = (req, res) => {
   });
   normalize(remaining);
   res.json({ success: true, orderIds: remaining });
+  notifyOrderPins(orderId);
 };
 
 export const reorderPinnedOrders = (req, res) => {
@@ -879,6 +911,7 @@ export const reorderPinnedOrders = (req, res) => {
   });
   apply(orderIds);
   res.json({ success: true, orderIds: listGlobalPinnedOrderIds() });
+  notifyOrderPinsGlobal();
 };
 
 export const createOrder = async (req, res, next) => {
@@ -1269,6 +1302,8 @@ export const createOrder = async (req, res, next) => {
       tags: tags.length > 0 ? tags : [],
     });
 
+    notifyOrderFinancial(orderId);
+
     // Send notifications in background after response is sent
     const allUsers = db.prepare("SELECT id FROM users").all();
     const allUserIds = allUsers.map(u => u.id);
@@ -1604,6 +1639,7 @@ export const updateOrder = async (req, res, next) => {
       ...responseData,
       tags: tags.length > 0 ? tags : [],
     });
+    notifyOrderWrite(Number(id));
   } catch (error) {
     next(error);
   }
@@ -1796,6 +1832,10 @@ export const updateOrderStatus = async (req, res, next) => {
       tags: tags.length > 0 ? tags : [],
       ...(cancelAffectedAccountIds !== null ? { affectedAccountIds: cancelAffectedAccountIds } : {}),
     });
+    notifyOrderFinancial(
+      Number(id),
+      cancelAffectedAccountIds != null ? cancelAffectedAccountIds : undefined,
+    );
 
     // Send notifications in background after response is sent
     if (status === 'completed' && currentOrder.status !== 'completed') {
@@ -2068,6 +2108,7 @@ export const deleteOrder = async (req, res, next) => {
       success: true,
       affectedAccountIds: Array.from(affectedAccountIds)
     });
+    notifyOrderFinancial(id, Array.from(affectedAccountIds));
 
     // Send notification in background after response is sent
     const allUsers = db.prepare("SELECT id FROM users").all();
@@ -2309,6 +2350,7 @@ export const processOrder = (req, res, next) => {
         bankDetails: null,
       });
     }
+    notifyOrderWrite(Number(id));
   } catch (error) {
     console.error("Error processing order:", error);
     next(error);
@@ -2440,6 +2482,7 @@ export const addReceipt = (req, res, next) => {
     }
 
     res.json(receiptWithUrl);
+    notifyOrderWrite(Number(id));
   } catch (error) {
     console.error("Error adding receipt:", error);
     next(error);
@@ -2528,6 +2571,7 @@ export const addBeneficiary = (req, res, next) => {
 
     // Return success response
     res.json({ success: true, message: "Payment account set successfully" });
+    notifyOrderWrite(Number(id));
   } catch (error) {
     next(error);
   }
@@ -2741,6 +2785,7 @@ export const addPayment = (req, res, next) => {
     }
 
     res.json(paymentWithUrl);
+    notifyOrderWrite(Number(id));
   } catch (error) {
     console.error("Error adding payment:", error);
     next(error);
@@ -2828,6 +2873,7 @@ export const updateReceipt = (req, res, next) => {
     };
 
     res.json(receiptWithUrl);
+    notifyOrderWrite(Number(existingReceipt.orderId));
   } catch (error) {
     console.error("Error updating receipt:", error);
     next(error);
@@ -2877,6 +2923,10 @@ export const deleteReceipt = (req, res, next) => {
     db.prepare("DELETE FROM order_receipts WHERE id = ?;").run(receiptId);
 
     res.json({ success: true, orderId });
+    notifyOrderFinancial(
+      Number(orderId),
+      receipt.accountId ? [receipt.accountId] : undefined,
+    );
   } catch (error) {
     console.error("Error deleting receipt:", error);
     next(error);
@@ -2981,6 +3031,10 @@ export const confirmReceipt = (req, res, next) => {
     }
 
     res.json(receiptWithUrl);
+    notifyOrderFinancial(
+      Number(receipt.orderId),
+      receipt.accountId ? [receipt.accountId] : undefined,
+    );
   } catch (error) {
     console.error("Error confirming receipt:", error);
     next(error);
@@ -3068,6 +3122,7 @@ export const updatePayment = (req, res, next) => {
     };
 
     res.json(paymentWithUrl);
+    notifyOrderWrite(Number(existingPayment.orderId));
   } catch (error) {
     console.error("Error updating payment:", error);
     next(error);
@@ -3118,6 +3173,10 @@ export const deletePayment = (req, res, next) => {
     db.prepare("DELETE FROM order_payments WHERE id = ?;").run(paymentId);
 
     res.json({ success: true, orderId });
+    notifyOrderFinancial(
+      Number(orderId),
+      payment.accountId ? [payment.accountId] : undefined,
+    );
   } catch (error) {
     console.error("Error deleting payment:", error);
     next(error);
@@ -3199,6 +3258,10 @@ export const confirmPayment = (req, res, next) => {
     };
 
     res.json(paymentWithUrl);
+    notifyOrderFinancial(
+      Number(payment.orderId),
+      payment.accountId ? [payment.accountId] : undefined,
+    );
   } catch (error) {
     console.error("Error confirming payment:", error);
     next(error);
@@ -3282,6 +3345,7 @@ export const updateProfit = (req, res, next) => {
       .get(profitId);
 
     res.json(updatedProfit);
+    notifyOrderWrite(Number(existingProfit.orderId));
   } catch (error) {
     console.error("Error updating profit:", error);
     next(error);
@@ -3325,6 +3389,10 @@ export const deleteProfit = (req, res, next) => {
     db.prepare("DELETE FROM order_profits WHERE id = ?;").run(profitId);
 
     res.json({ success: true, orderId: profit.orderId });
+    notifyOrderFinancial(
+      Number(profit.orderId),
+      profit.accountId ? [profit.accountId] : undefined,
+    );
   } catch (error) {
     console.error("Error deleting profit:", error);
     next(error);
@@ -3389,6 +3457,10 @@ export const confirmProfit = (req, res, next) => {
       .get(profitId);
 
     res.json(confirmedProfit);
+    notifyOrderFinancial(
+      Number(profit.orderId),
+      profit.accountId ? [profit.accountId] : undefined,
+    );
   } catch (error) {
     console.error("Error confirming profit:", error);
     next(error);
@@ -3472,6 +3544,7 @@ export const updateServiceCharge = (req, res, next) => {
       .get(serviceChargeId);
 
     res.json(updatedServiceCharge);
+    notifyOrderWrite(Number(existingServiceCharge.orderId));
   } catch (error) {
     console.error("Error updating service charge:", error);
     next(error);
@@ -3529,6 +3602,10 @@ export const deleteServiceCharge = (req, res, next) => {
     db.prepare("DELETE FROM order_service_charges WHERE id = ?;").run(serviceChargeId);
 
     res.json({ success: true, orderId: serviceCharge.orderId });
+    notifyOrderFinancial(
+      Number(serviceCharge.orderId),
+      serviceCharge.accountId ? [serviceCharge.accountId] : undefined,
+    );
   } catch (error) {
     console.error("Error deleting service charge:", error);
     next(error);
@@ -3617,6 +3694,10 @@ export const confirmServiceCharge = (req, res, next) => {
       .get(serviceChargeId);
 
     res.json(confirmedServiceCharge);
+    notifyOrderFinancial(
+      Number(serviceCharge.orderId),
+      serviceCharge.accountId ? [serviceCharge.accountId] : undefined,
+    );
   } catch (error) {
     console.error("Error confirming service charge:", error);
     next(error);
@@ -3664,6 +3745,7 @@ export const addProfitToOrder = async (req, res, next) => {
     ).get(result.lastInsertRowid);
 
     res.json(profit);
+    notifyOrderWrite(Number(id));
   } catch (error) {
     next(error);
   }
@@ -3710,6 +3792,7 @@ export const addServiceChargeToOrder = async (req, res, next) => {
     ).get(result.lastInsertRowid);
 
     res.json(sc);
+    notifyOrderWrite(Number(id));
   } catch (error) {
     next(error);
   }

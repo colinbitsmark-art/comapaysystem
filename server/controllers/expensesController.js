@@ -12,6 +12,7 @@ import {
   appendAccountAccessFilter,
   requireAccountAccess,
 } from "../utils/accountAccess.js";
+import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
 export const listExpenses = (req, res) => {
   const {
@@ -513,6 +514,10 @@ export const createExpense = async (req, res, next) => {
     });
 
     res.status(201).json(expenseWithUrl);
+    scheduleCacheSync({
+      scopes: ["expenses", "accounts", "profitCalculations"],
+      accountIds: [accountIdNum],
+    });
   } catch (error) {
     next(error);
   }
@@ -795,6 +800,13 @@ export const updateExpense = (req, res, next) => {
     };
 
     res.json(expenseWithUrl);
+    const aid = Number(expense.accountId);
+    const prevAid = Number(existingExpense.accountId);
+    const accountIds = [aid, prevAid].filter((n) => Number.isFinite(n) && n > 0);
+    scheduleCacheSync({
+      scopes: ["expenses", "accounts", "profitCalculations"],
+      accountIds: [...new Set(accountIds)],
+    });
   } catch (error) {
     next(error);
   }
@@ -919,6 +931,10 @@ export const deleteExpense = async (req, res, next) => {
     });
     
     res.json({ success: true });
+    scheduleCacheSync({
+      scopes: ["expenses", "accounts", "profitCalculations"],
+      accountIds: [Number(expense.accountId)].filter((n) => Number.isFinite(n) && n > 0),
+    });
   } catch (error) {
     next(error);
   }

@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
 export const listCurrencies = (_req, res) => {
   const rows = db.prepare("SELECT * FROM currencies ORDER BY code ASC;").all();
@@ -15,6 +16,7 @@ export const createCurrency = (req, res, next) => {
     const result = stmt.run({ ...payload, active: payload.active ? 1 : 0 });
     const row = db.prepare("SELECT * FROM currencies WHERE id = ?;").get(result.lastInsertRowid);
     res.status(201).json({ ...row, active: Boolean(row.active) });
+    scheduleCacheSync({ scopes: ["currencies", "profitCalculations"] });
   } catch (error) {
     next(error);
   }
@@ -100,6 +102,9 @@ export const updateCurrency = (req, res, next) => {
 
     const row = db.prepare("SELECT * FROM currencies WHERE id = ?;").get(id);
     res.json({ ...row, active: Boolean(row.active) });
+    scheduleCacheSync({
+      scopes: ["currencies", "orders", "accounts", "transfers", "expenses", "profitCalculations"],
+    });
   } catch (error) {
     // Handle SQLite unique constraint error
     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || 
@@ -125,6 +130,7 @@ export const deleteCurrency = (req, res, next) => {
       return res.status(404).json({ message: "Currency not found" });
     }
     res.status(204).send();
+    scheduleCacheSync({ scopes: ["currencies", "profitCalculations"] });
   } catch (error) {
     next(error);
   }

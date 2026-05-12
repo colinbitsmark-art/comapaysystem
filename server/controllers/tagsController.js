@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
 export const listTags = (_req, res, next) => {
   try {
@@ -21,6 +22,7 @@ export const createTag = (req, res, next) => {
     const result = stmt.run({ name, color });
     const newTag = db.prepare("SELECT * FROM tags WHERE id = ?;").get(result.lastInsertRowid);
     res.status(201).json(newTag);
+    scheduleCacheSync({ scopes: ["tags"] });
   } catch (error) {
     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return res.status(400).json({ message: "Tag name already exists" });
@@ -45,6 +47,7 @@ export const updateTag = (req, res, next) => {
     }
     const updatedTag = db.prepare("SELECT * FROM tags WHERE id = ?;").get(id);
     res.json(updatedTag);
+    scheduleCacheSync({ scopes: ["tags"] });
   } catch (error) {
     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return res.status(400).json({ message: "Tag name already exists" });
@@ -84,6 +87,7 @@ export const deleteTag = (req, res, next) => {
         ? `Tag deleted. Removed from ${totalCount} item(s).`
         : "Tag deleted successfully."
     });
+    scheduleCacheSync({ scopes: ["tags", "orders", "transfers", "expenses"] });
   } catch (error) {
     next(error);
   }
@@ -279,6 +283,11 @@ export const batchAssignTags = (req, res, next) => {
         success: true, 
         message: `Tags assigned to ${validEntityIds.length} ${entityType}(s). ${insertedCount} new assignment(s) created.` 
       });
+      const scopes = ["tags"];
+      if (entityType === "order") scopes.push("orders");
+      if (entityType === "transfer") scopes.push("transfers");
+      if (entityType === "expense") scopes.push("expenses");
+      scheduleCacheSync({ scopes });
     } catch (transactionError) {
       console.error('Transaction error in batchAssignTags:', transactionError);
       // If it's already a user-friendly error, pass it through
@@ -348,6 +357,12 @@ export const batchUnassignTags = (req, res, next) => {
     });
 
     const removedCount = unassign(validEntityIds, validTagIds);
+
+    const scopes = ["tags"];
+    if (entityType === "order") scopes.push("orders");
+    if (entityType === "transfer") scopes.push("transfers");
+    if (entityType === "expense") scopes.push("expenses");
+    scheduleCacheSync({ scopes });
 
     return res.json({
       success: true,

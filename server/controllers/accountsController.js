@@ -1,5 +1,6 @@
 import { db } from "../db.js";
 import { appendAccountAccessFilter } from "../utils/accountAccess.js";
+import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
 export const getAccountReferences = (req, res, next) => {
   try {
@@ -335,6 +336,10 @@ export const createAccount = (req, res, next) => {
       )
       .get(result.lastInsertRowid);
     res.status(201).json(row);
+    scheduleCacheSync({
+      scopes: ["accounts", "profitCalculations"],
+      accountIds: [Number(result.lastInsertRowid)],
+    });
   } catch (error) {
     next(error);
   }
@@ -434,6 +439,10 @@ export const updateAccount = (req, res, next) => {
       )
       .get(id);
     res.json(row);
+    scheduleCacheSync({
+      scopes: ["accounts", "profitCalculations"],
+      accountIds: [Number(id)],
+    });
   } catch (error) {
     next(error);
   }
@@ -544,6 +553,10 @@ export const deleteAccount = (req, res, next) => {
     // Execute the transaction
     deleteAccountTransaction(id);
     res.json({ success: true });
+    scheduleCacheSync({
+      scopes: ["accounts", "profitCalculations", "orders"],
+      accountIds: [Number(id)],
+    });
   } catch (error) {
     // Handle the error
     console.error("Error deleting account:", error);
@@ -629,6 +642,10 @@ export const addFunds = (req, res, next) => {
       )
       .get(id);
     res.json(updated);
+    scheduleCacheSync({
+      scopes: ["accounts", "profitCalculations"],
+      accountIds: [Number(id)],
+    });
   } catch (error) {
     next(error);
   }
@@ -678,6 +695,10 @@ export const withdrawFunds = (req, res, next) => {
       )
       .get(id);
     res.json(updated);
+    scheduleCacheSync({
+      scopes: ["accounts", "profitCalculations"],
+      accountIds: [Number(id)],
+    });
   } catch (error) {
     next(error);
   }
@@ -733,6 +754,7 @@ export const clearAllTransactionLogs = (req, res, next) => {
       initialFundsLogged,
       message: `Successfully cleared ${result.changes} transaction log records and logged initial funds for ${initialFundsLogged} account(s)`
     });
+    scheduleCacheSync({ scopes: ["accounts", "profitCalculations"] });
   } catch (error) {
     next(error);
   }

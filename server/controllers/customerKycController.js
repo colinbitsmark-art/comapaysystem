@@ -7,6 +7,7 @@ import {
   getFileUrl,
   generateKycDocumentFilename,
 } from "../utils/fileStorage.js";
+import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
 export const KYC_SCHEMA_KEY_INDIVIDUAL = "kyc_customer_schema_individual";
 export const KYC_SCHEMA_KEY_CORPORATE = "kyc_customer_schema_corporate";
@@ -541,6 +542,7 @@ export const updateCustomerKyc = (req, res, next) => {
       },
       documents: mapDocuments(updated.id),
     });
+    scheduleCacheSync({ scopes: ["customerKyc", "customers"], customerId });
   } catch (e) {
     next(e);
   }
@@ -601,6 +603,7 @@ export const uploadCustomerKycDocument = (req, res, next) => {
         createdAt: now,
       });
       const row = db.prepare("SELECT * FROM customer_kyc_documents WHERE id = ?").get(existing.id);
+      scheduleCacheSync({ scopes: ["customerKyc", "customers"], customerId });
       return res.json({
         document: {
           ...row,
@@ -632,6 +635,7 @@ export const uploadCustomerKycDocument = (req, res, next) => {
         fileUrl: getFileUrl(row.filePath),
       },
     });
+    scheduleCacheSync({ scopes: ["customerKyc", "customers"], customerId });
   } catch (e) {
     next(e);
   }
@@ -662,6 +666,7 @@ export const deleteCustomerKycDocument = (req, res, next) => {
     deleteFile(row.filePath);
     db.prepare("DELETE FROM customer_kyc_documents WHERE id = ?").run(documentId);
     res.status(204).send();
+    scheduleCacheSync({ scopes: ["customerKyc", "customers"], customerId });
   } catch (e) {
     next(e);
   }

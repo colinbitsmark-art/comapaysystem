@@ -1,5 +1,6 @@
 import { db } from "../db.js";
 import { getUserIdFromHeader } from "../utils/auth.js";
+import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 import { convertCurrency } from "../utils/currencyConversion.js";
 
 // ─────────────────────────────────────────────
@@ -265,6 +266,10 @@ export const createLedgerEntry = (req, res, next) => {
       .get(entryId);
 
     res.status(201).json(entry);
+    scheduleCacheSync({
+      scopes: ["customerLedger", "customers"],
+      customerId: parseInt(customerId, 10),
+    });
   } catch (error) {
     next(error);
   }
@@ -348,6 +353,10 @@ export const updateLedgerEntry = (req, res, next) => {
       .get(existing.id);
 
     res.json(updated);
+    scheduleCacheSync({
+      scopes: ["customerLedger", "customers"],
+      customerId: parseInt(customerId, 10),
+    });
   } catch (error) {
     next(error);
   }
@@ -377,6 +386,10 @@ export const deleteLedgerEntry = (req, res, next) => {
     ).run(deletedBy || null, now, existing.id);
 
     res.status(204).send();
+    scheduleCacheSync({
+      scopes: ["customerLedger", "customers"],
+      customerId: parseInt(customerId, 10),
+    });
   } catch (error) {
     next(error);
   }

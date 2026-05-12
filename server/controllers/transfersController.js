@@ -6,6 +6,7 @@ import {
   appendAccountAccessFilter,
   requireAccountAccess,
 } from "../utils/accountAccess.js";
+import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
 export const listTransfers = (req, res) => {
   const {
@@ -570,6 +571,12 @@ export const createTransfer = async (req, res, next) => {
       ...transfer,
       tags: tags.length > 0 ? tags : [],
     });
+    scheduleCacheSync({
+      scopes: ["transfers", "accounts", "profitCalculations"],
+      accountIds: [Number(transfer.fromAccountId), Number(transfer.toAccountId)].filter(
+        (n) => Number.isFinite(n) && n > 0,
+      ),
+    });
   } catch (error) {
     next(error);
   }
@@ -888,6 +895,20 @@ export const updateTransfer = async (req, res, next) => {
       ...transfer,
       tags: tags.length > 0 ? tags : [],
     });
+    const ids = new Set(
+      [
+        existingTransfer.fromAccountId,
+        existingTransfer.toAccountId,
+        transfer.fromAccountId,
+        transfer.toAccountId,
+      ]
+        .map((x) => Number(x))
+        .filter((n) => Number.isFinite(n) && n > 0),
+    );
+    scheduleCacheSync({
+      scopes: ["transfers", "accounts", "profitCalculations"],
+      accountIds: [...ids],
+    });
   } catch (error) {
     next(error);
   }
@@ -1026,6 +1047,12 @@ export const deleteTransfer = async (req, res, next) => {
     });
     
     res.json({ success: true });
+    scheduleCacheSync({
+      scopes: ["transfers", "accounts", "profitCalculations"],
+      accountIds: [Number(transfer.fromAccountId), Number(transfer.toAccountId)].filter(
+        (n) => Number.isFinite(n) && n > 0,
+      ),
+    });
   } catch (error) {
     next(error);
   }
