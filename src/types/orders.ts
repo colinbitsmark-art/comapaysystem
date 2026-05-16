@@ -8,7 +8,7 @@ export interface OrderFilters {
   dateTo: string | null;
   handlerId: number | null;
   customerId: number | null;
-  currencyPair: string | null;
+  currencyPairs: string[];
   buyAccountId: number | null;
   sellAccountId: number | null;
   status: OrderStatus | null;
@@ -20,8 +20,7 @@ export interface OrderQueryParams {
   dateTo?: string;
   handlerId?: number;
   customerId?: number;
-  fromCurrency?: string;
-  toCurrency?: string;
+  currencyPairs?: string;
   buyAccountId?: number;
   sellAccountId?: number;
   status?: OrderStatus;

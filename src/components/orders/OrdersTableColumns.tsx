@@ -1,17 +1,44 @@
 import React from "react";
 import Badge from "../common/Badge";
 import { AccountTooltip } from "./AccountTooltip";
-import type { Order } from "../../types";
+import type { Order, Currency, Customer, User } from "../../types";
 import type { OrderStatus } from "../../types";
 import { formatDate } from "../../utils/format";
 import type { Account } from "../../types";
+import { StyledCurrencyAmount } from "../common/StyledCurrencyAmount";
 
 interface OrdersTableColumnsProps {
   columnKey: string;
   order: Order;
   accounts: Account[];
+  customers?: Customer[];
+  users?: User[];
+  currencyByCode: Map<string, Currency>;
   getStatusTone: (status: OrderStatus) => "amber" | "blue" | "emerald" | "rose" | "slate" | "orange";
   t: (key: string) => string;
+}
+
+function getAccountStyle(
+  accountId: number | null | undefined,
+  accounts: Account[],
+  currencyByCode: Map<string, Currency>,
+): React.CSSProperties | undefined {
+  if (!accountId) return undefined;
+  const account = accounts.find((a) => a.id === accountId);
+  const poolCurrency = account ? currencyByCode.get(account.currencyCode) : undefined;
+  const effectiveBg = account?.displayBgColor || poolCurrency?.accountPoolDisplayBgColor;
+  if (!effectiveBg) return undefined;
+  const effectiveText = account?.displayBgColor
+    ? (account.displayTextColor || "#ffffff")
+    : (poolCurrency?.accountPoolDisplayTextColor || "#ffffff");
+  return {
+    backgroundColor: effectiveBg,
+    color: effectiveText,
+    fontWeight: 700,
+    borderRadius: "0.375rem",
+    padding: "0.125rem 0.375rem",
+    display: "inline-block",
+  };
 }
 
 /**
@@ -21,6 +48,9 @@ export function renderOrderCell({
   columnKey,
   order,
   accounts,
+  customers,
+  users,
+  currencyByCode,
   getStatusTone,
   t,
 }: OrdersTableColumnsProps): React.ReactElement | null {
@@ -34,17 +64,28 @@ export function renderOrderCell({
         (order.createdByName && String(order.createdByName).trim()) ||
         (order.handlerName && String(order.handlerName).trim()) ||
         "";
+      const creatorId = order.createdBy ?? order.handlerId;
+      const creatorUser = creatorId ? users?.find((u) => u.id === creatorId) : undefined;
+      const creatorStyle = creatorUser?.displayBgColor
+        ? { backgroundColor: creatorUser.displayBgColor, color: creatorUser.displayTextColor || "#ffffff", fontWeight: 700, borderRadius: "0.375rem", padding: "0.125rem 0.375rem", display: "inline-block" }
+        : undefined;
       return (
         <td key={columnKey} className="py-2 text-slate-700">
-          {creatorLabel ? creatorLabel : <span className="text-slate-400">—</span>}
+          {creatorLabel
+            ? <span style={creatorStyle}>{creatorLabel}</span>
+            : <span className="text-slate-400">—</span>}
         </td>
       );
     }
-    case "customer":
+    case "customer": {
+      const customerRecord = customers?.find((c) => c.id === order.customerId);
+      const customerStyle = customerRecord?.displayBgColor
+        ? { backgroundColor: customerRecord.displayBgColor, color: customerRecord.displayTextColor || "#ffffff", fontWeight: 700, borderRadius: "0.375rem", padding: "0.125rem 0.375rem", display: "inline-block" }
+        : undefined;
       return (
         <td key={columnKey} className="py-2 font-semibold">
           <div className="flex items-center gap-2">
-            {order.customerName || order.customerId}
+            <span style={customerStyle}>{order.customerName || order.customerId}</span>
 
             {/* 我 TAGS DISPLAY NEXT TO CUSTOMER NAME 
             {order.tags && Array.isArray(order.tags) && order.tags.length > 0 &&
@@ -56,30 +97,39 @@ export function renderOrderCell({
           </div>
         </td>
       );
+    }
     case "pair":
       return (
         <td key={columnKey} className="py-2">
           {order.fromCurrency} → {order.toCurrency}
         </td>
       );
-    case "buy":
+    case "buy": {
+      const buyAmount = order.amountBuy;
       return (
         <td key={columnKey} className="py-2">
-          <span>
-            {Math.round(order.amountBuy)}
-            <span className="ml-1 text-slate-500 text-sm font-semibold">{order.fromCurrency}</span>
-          </span>
+          <StyledCurrencyAmount
+            signedAmount={buyAmount}
+            currencyCode={order.fromCurrency}
+            currencyByCode={currencyByCode}
+            formatAbsValue={(n) => Math.round(n).toLocaleString()}
+          />
         </td>
       );
-    case "sell":
+    }
+    case "sell": {
+      const sellDisplayAmount = -order.amountSell;
       return (
         <td key={columnKey} className="py-2">
-          <span>
-            -{Math.round(order.amountSell)}
-            <span className="ml-1 text-slate-500 text-sm font-semibold">{order.toCurrency}</span>
-          </span>
+          <StyledCurrencyAmount
+            signedAmount={sellDisplayAmount}
+            currencyCode={order.toCurrency}
+            currencyByCode={currencyByCode}
+            formatAbsValue={(n) => Math.round(n).toLocaleString()}
+          />
         </td>
       );
+    }
     case "rate":
       return (
         <td key={columnKey} className="py-2">
@@ -114,7 +164,8 @@ export function renderOrderCell({
 
       const firstAccount = buyAccounts.length > 0 ? buyAccounts[0] : null;
       const accountName = firstAccount?.accountName || fallbackAccountName || "-";
-      
+      const buyAccountStyle = getAccountStyle(order.buyAccountId, accounts, currencyByCode);
+
       // Check if profit or service charge should appear in buy account tooltip
       // Buy account is for fromCurrency, so check if profit/service charge currency matches fromCurrency
       const showProfitInBuy = order.profitCurrency === order.fromCurrency && 
@@ -165,7 +216,7 @@ export function renderOrderCell({
               currency={order.fromCurrency}
             >
               <div className="flex items-center gap-2 cursor-pointer">
-                <span>{accountName}</span>
+                <span style={buyAccountStyle}>{accountName}</span>
                 {showBadge && (
                   <span className="flex items-center justify-center w-5 h-5 text-xs font-semibold text-white bg-blue-600 rounded-full">
                     {accountCount}
@@ -174,7 +225,7 @@ export function renderOrderCell({
               </div>
             </AccountTooltip>
           ) : (
-            <span>{accountName}</span>
+            <span style={buyAccountStyle}>{accountName}</span>
           )}
         </td>
       );
@@ -199,7 +250,8 @@ export function renderOrderCell({
 
       const firstAccount = sellAccounts.length > 0 ? sellAccounts[0] : null;
       const accountName = firstAccount?.accountName || fallbackAccountName || "-";
-      
+      const sellAccountStyle = getAccountStyle(order.sellAccountId, accounts, currencyByCode);
+
       // Check if profit or service charge should appear in sell account tooltip
       // Sell account is for toCurrency, so check if profit/service charge currency matches toCurrency
       const showProfitInSell = order.profitCurrency === order.toCurrency && 
@@ -251,7 +303,7 @@ export function renderOrderCell({
               currency={order.toCurrency}
             >
               <div className="flex items-center gap-2 cursor-pointer">
-                <span>{accountName}</span>
+                <span style={sellAccountStyle}>{accountName}</span>
                 {showBadge && (
                   <span className="flex items-center justify-center w-5 h-5 text-xs font-semibold text-white bg-blue-600 rounded-full">
                     {accountCount}
@@ -260,25 +312,20 @@ export function renderOrderCell({
               </div>
             </AccountTooltip>
           ) : (
-            <span>{accountName}</span>
+            <span style={sellAccountStyle}>{accountName}</span>
           )}
         </td>
       );
     }
     case "profit": {
-      const entries = order.profitEntries && order.profitEntries.length > 0
-        ? order.profitEntries
-        : (order.profitAmount !== null && order.profitAmount !== undefined ? [{ amount: order.profitAmount, currency: order.profitCurrency || "" }] : []);
+      const amount = order.calculatedProfit;
+      const currency = order.calculatedProfitCurrency;
       return (
         <td key={columnKey} className="py-2 text-slate-600">
-          {entries.length > 0 ? (
-            <div className="flex flex-col gap-0.5">
-              {entries.map((e, i) => (
-                <span key={i} className="text-blue-700 font-medium whitespace-nowrap">
-                  {e.amount > 0 ? "+" : ""}{e.amount.toFixed(2)} {e.currency}
-                </span>
-              ))}
-            </div>
+          {amount !== null && amount !== undefined && currency ? (
+            <span className={`font-medium whitespace-nowrap ${amount >= 0 ? "text-blue-700" : "text-red-600"}`}>
+              {amount > 0 ? "+" : ""}{amount.toFixed(2)} {currency}
+            </span>
           ) : (
             <span className="text-slate-400">-</span>
           )}
@@ -294,9 +341,13 @@ export function renderOrderCell({
           {entries.length > 0 ? (
             <div className="flex flex-col gap-0.5">
               {entries.map((e, i) => (
-                <span key={i} className={`font-medium whitespace-nowrap ${e.amount < 0 ? "text-red-600" : "text-green-700"}`}>
-                  {e.amount > 0 ? "+" : ""}{e.amount.toFixed(2)} {e.currency}
-                </span>
+                <StyledCurrencyAmount
+                  key={i}
+                  signedAmount={e.amount}
+                  currencyCode={e.currency}
+                  currencyByCode={currencyByCode}
+                  formatAbsValue={(n) => n.toFixed(2)}
+                />
               ))}
             </div>
           ) : (

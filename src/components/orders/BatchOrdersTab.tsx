@@ -1,4 +1,4 @@
-import React, { useRef, useState, type FormEvent } from "react";
+import React, { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Account, Currency } from "../../types";
 import {
@@ -11,6 +11,7 @@ import {
   useUpdateOrderStatusMutation,
 } from "../../services/api";
 import { ORDER_RECEIPT_PAYMENT_TOLERANCE } from "../../utils/orders/orderAmountTolerance";
+import FileUploadModal from "../common/FileUploadModal";
 
 type Row = {
   id: string;
@@ -27,8 +28,6 @@ type Row = {
   receiptFile: File | null;
   paymentFile: File | null;
   showExtras: boolean;
-  profitAmount: string;
-  profitAccountId: string;
   serviceChargeAmount: string;
   serviceChargeAccountId: string;
   remarks: string;
@@ -50,8 +49,6 @@ function emptyRow(): Row {
     receiptFile: null,
     paymentFile: null,
     showExtras: false,
-    profitAmount: "",
-    profitAccountId: "",
     serviceChargeAmount: "",
     serviceChargeAccountId: "",
     remarks: "",
@@ -69,7 +66,7 @@ export function BatchOrdersTab({ currencies, accounts, onDone, setAlertModal }: 
   const { t } = useTranslation();
   const [rows, setRows] = useState<Row[]>([emptyRow(), emptyRow(), emptyRow()]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [uploadModal, setUploadModal] = useState<{ rowId: string; kind: "receipt" | "payment" } | null>(null);
   const [addOrder] = useAddOrderMutation();
   const [updateOrder] = useUpdateOrderMutation();
   const [addReceipt] = useAddReceiptMutation();
@@ -238,14 +235,6 @@ export function BatchOrdersTab({ currencies, accounts, onDone, setAlertModal }: 
           sellAccountId: Number(row.sellAccountId),
           remarks: row.remarks.trim() || null,
         };
-        if (row.profitAmount && row.profitAccountId) {
-          const pAcc = accounts.find((a) => a.id === Number(row.profitAccountId));
-          if (pAcc) {
-            updatePayload.profitAmount = Number(row.profitAmount);
-            updatePayload.profitAccountId = Number(row.profitAccountId);
-            updatePayload.profitCurrency = pAcc.currencyCode;
-          }
-        }
         if (row.serviceChargeAmount && row.serviceChargeAccountId) {
           const scAcc = accounts.find((a) => a.id === Number(row.serviceChargeAccountId));
           if (scAcc) {
@@ -398,15 +387,15 @@ export function BatchOrdersTab({ currencies, accounts, onDone, setAlertModal }: 
             </div>
 
             <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-6">
-              <div className="flex items-center">
-                <input
-                  type="number"
-                  placeholder={`${t("orders.lineReceipt")} ${t("orders.amount")}`}
-                  className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
-                  value={row.receiptAmount}
-                  onChange={(e) => setRow(row.id, (r) => ({ ...r, receiptAmount: e.target.value }))}
-                />
-              </div>
+              {/* Receipt amount */}
+              <input
+                type="number"
+                placeholder={`${t("orders.lineReceipt")} ${t("orders.amount")}`}
+                className="rounded border border-slate-200 px-2 py-1.5 text-sm"
+                value={row.receiptAmount}
+                onChange={(e) => setRow(row.id, (r) => ({ ...r, receiptAmount: e.target.value }))}
+              />
+              {/* Receipt account */}
               <select
                 className="rounded border border-slate-200 px-1 py-1.5 text-sm"
                 value={row.buyAccountId}
@@ -421,48 +410,48 @@ export function BatchOrdersTab({ currencies, accounts, onDone, setAlertModal }: 
                     </option>
                   ))}
               </select>
+              {/* Receipt file upload */}
               <div className="flex items-center gap-2">
-                <input
-                  ref={(el) => {
-                    fileRefs.current[`${row.id}-receipt`] = el;
-                  }}
-                  type="file"
-                  accept="image/*,application/pdf"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    setRow(row.id, (r) => ({ ...r, receiptFile: f }));
-                    e.currentTarget.value = "";
-                  }}
-                />
                 <button
                   type="button"
                   title={`${t("orders.upload")} ${t("orders.lineReceipt")}`}
-                  aria-label={`${t("orders.upload")} ${t("orders.lineReceipt")}`}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
-                  onClick={() => fileRefs.current[`${row.id}-receipt`]?.click()}
+                  onClick={() => setUploadModal({ rowId: row.id, kind: "receipt" })}
+                  className={`flex flex-1 items-center gap-1.5 truncate rounded border px-2 py-1.5 text-sm transition-colors ${
+                    row.receiptFile
+                      ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+                      : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                  }`}
                 >
-                  <svg
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
+                  <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
                   </svg>
+                  <span className="truncate">
+                    {row.receiptFile ? row.receiptFile.name : t("orders.lineReceipt")}
+                  </span>
                 </button>
+                {row.receiptFile && (
+                  <button
+                    type="button"
+                    title={t("common.remove")}
+                    onClick={() => setRow(row.id, (r) => ({ ...r, receiptFile: null }))}
+                    className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
               </div>
-              <div className="flex items-center">
-                <input
-                  type="number"
-                  placeholder={`${t("orders.linePayment")} ${t("orders.amount")}`}
-                  className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
-                  value={row.paymentAmount}
-                  onChange={(e) => setRow(row.id, (r) => ({ ...r, paymentAmount: e.target.value }))}
-                />
-              </div>
+              {/* Payment amount */}
+              <input
+                type="number"
+                placeholder={`${t("orders.linePayment")} ${t("orders.amount")}`}
+                className="rounded border border-slate-200 px-2 py-1.5 text-sm"
+                value={row.paymentAmount}
+                onChange={(e) => setRow(row.id, (r) => ({ ...r, paymentAmount: e.target.value }))}
+              />
+              {/* Payment account */}
               <select
                 className="rounded border border-slate-200 px-1 py-1.5 text-sm"
                 value={row.sellAccountId}
@@ -477,63 +466,44 @@ export function BatchOrdersTab({ currencies, accounts, onDone, setAlertModal }: 
                     </option>
                   ))}
               </select>
+              {/* Payment file upload */}
               <div className="flex items-center gap-2">
-                <input
-                  ref={(el) => {
-                    fileRefs.current[`${row.id}-payment`] = el;
-                  }}
-                  type="file"
-                  accept="image/*,application/pdf"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    setRow(row.id, (r) => ({ ...r, paymentFile: f }));
-                    e.currentTarget.value = "";
-                  }}
-                />
                 <button
                   type="button"
                   title={`${t("orders.upload")} ${t("orders.linePayment")}`}
-                  aria-label={`${t("orders.upload")} ${t("orders.linePayment")}`}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
-                  onClick={() => fileRefs.current[`${row.id}-payment`]?.click()}
+                  onClick={() => setUploadModal({ rowId: row.id, kind: "payment" })}
+                  className={`flex flex-1 items-center gap-1.5 truncate rounded border px-2 py-1.5 text-sm transition-colors ${
+                    row.paymentFile
+                      ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+                      : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                  }`}
                 >
-                  <svg
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
+                  <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
                   </svg>
+                  <span className="truncate">
+                    {row.paymentFile ? row.paymentFile.name : t("orders.linePayment")}
+                  </span>
                 </button>
+                {row.paymentFile && (
+                  <button
+                    type="button"
+                    title={t("common.remove")}
+                    onClick={() => setRow(row.id, (r) => ({ ...r, paymentFile: null }))}
+                    className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
               </div>
             </div>
 
             {row.showExtras ? (
               <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <input
-                    type="number"
-                    placeholder={t("orders.profit")}
-                    className="rounded border border-slate-200 px-2 py-1.5 text-sm"
-                    value={row.profitAmount}
-                    onChange={(e) => setRow(row.id, (r) => ({ ...r, profitAmount: e.target.value }))}
-                  />
-                  <select
-                    className="rounded border border-slate-200 px-1 py-1.5 text-sm"
-                    value={row.profitAccountId}
-                    onChange={(e) => setRow(row.id, (r) => ({ ...r, profitAccountId: e.target.value }))}
-                  >
-                    <option value="">{t("orders.selectAccount")} ({t("orders.profit")})</option>
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} ({a.currencyCode})
-                      </option>
-                    ))}
-                  </select>
                   <input
                     type="number"
                     placeholder={t("orders.serviceCharges")}
@@ -585,6 +555,25 @@ export function BatchOrdersTab({ currencies, accounts, onDone, setAlertModal }: 
           </button>
         </div>
       </form>
+
+      <FileUploadModal
+        isOpen={uploadModal !== null}
+        onClose={() => setUploadModal(null)}
+        title={uploadModal?.kind === "receipt"
+          ? `${t("orders.upload")} ${t("orders.lineReceipt")}`
+          : `${t("orders.upload")} ${t("orders.linePayment")}`
+        }
+        onFileSelected={(file) => {
+          if (uploadModal) {
+            const { rowId, kind } = uploadModal;
+            setRow(rowId, (r) => ({
+              ...r,
+              ...(kind === "receipt" ? { receiptFile: file } : { paymentFile: file }),
+            }));
+          }
+          setUploadModal(null);
+        }}
+      />
     </div>
   );
 }

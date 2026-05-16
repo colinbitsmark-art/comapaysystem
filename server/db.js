@@ -89,9 +89,18 @@ const ensureSchema = () => {
 
   // Ensure password column exists for legacy databases
   const userColumns = db.prepare("PRAGMA table_info(users);").all();
-  const hasPasswordColumn = userColumns.some((col) => col.name === "password");
-  if (!hasPasswordColumn) {
+  const userColumnNames = userColumns.map((col) => col.name);
+  if (!userColumnNames.includes("password")) {
     db.prepare("ALTER TABLE users ADD COLUMN password TEXT;").run();
+  }
+  if (!userColumnNames.includes("displayBgColor")) {
+    db.prepare("ALTER TABLE users ADD COLUMN displayBgColor TEXT;").run();
+  }
+  if (!userColumnNames.includes("displayTextColor")) {
+    db.prepare("ALTER TABLE users ADD COLUMN displayTextColor TEXT;").run();
+  }
+  if (!userColumnNames.includes("sidebarBgColor")) {
+    db.prepare("ALTER TABLE users ADD COLUMN sidebarBgColor TEXT;").run();
   }
 
   db.prepare(
@@ -968,6 +977,12 @@ const migrateDatabase = () => {
     if (!customerColumnNames.includes("customerType")) {
       db.prepare("ALTER TABLE customers ADD COLUMN customerType TEXT NOT NULL DEFAULT 'individual'").run();
     }
+    if (!customerColumnNames.includes("displayBgColor")) {
+      db.prepare("ALTER TABLE customers ADD COLUMN displayBgColor TEXT").run();
+    }
+    if (!customerColumnNames.includes("displayTextColor")) {
+      db.prepare("ALTER TABLE customers ADD COLUMN displayTextColor TEXT").run();
+    }
 
     const kycProfileCols = db.prepare("PRAGMA table_info(customer_kyc_profiles)").all().map((c) => c.name);
     if (!kycProfileCols.includes("kycCustomerType")) {
@@ -1055,6 +1070,51 @@ const migrateDatabase = () => {
     // Check profit_calculations table for isDefault column
     if (!profitCalcColumnNames.includes("isDefault")) {
       db.prepare("ALTER TABLE profit_calculations ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0").run();
+    }
+
+    const currencyTableInfo = db.prepare("PRAGMA table_info(currencies)").all();
+    const currencyColumnNames = currencyTableInfo.map((col) => col.name);
+    if (!currencyColumnNames.includes("displayBgColor")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN displayBgColor TEXT").run();
+    }
+    if (!currencyColumnNames.includes("displayPositiveColor")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN displayPositiveColor TEXT").run();
+    }
+    if (!currencyColumnNames.includes("displayNegativeColor")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN displayNegativeColor TEXT").run();
+    }
+    if (!currencyColumnNames.includes("codeDisplaySameAsAmount")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN codeDisplaySameAsAmount INTEGER DEFAULT 1").run();
+    }
+    if (!currencyColumnNames.includes("codeDisplayBgColor")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN codeDisplayBgColor TEXT").run();
+    }
+    if (!currencyColumnNames.includes("codeDisplayPositiveColor")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN codeDisplayPositiveColor TEXT").run();
+    }
+    if (!currencyColumnNames.includes("codeDisplayNegativeColor")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN codeDisplayNegativeColor TEXT").run();
+    }
+    if (!currencyColumnNames.includes("amountDisplayMode")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN amountDisplayMode TEXT DEFAULT 'code'").run();
+    }
+    if (!currencyColumnNames.includes("currencySymbol")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN currencySymbol TEXT").run();
+    }
+    if (!currencyColumnNames.includes("accountPoolDisplayBgColor")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN accountPoolDisplayBgColor TEXT").run();
+    }
+    if (!currencyColumnNames.includes("accountPoolDisplayTextColor")) {
+      db.prepare("ALTER TABLE currencies ADD COLUMN accountPoolDisplayTextColor TEXT").run();
+    }
+
+    const accountTableInfo = db.prepare("PRAGMA table_info(accounts)").all();
+    const accountColumnNames = accountTableInfo.map((col) => col.name);
+    if (!accountColumnNames.includes("displayBgColor")) {
+      db.prepare("ALTER TABLE accounts ADD COLUMN displayBgColor TEXT").run();
+    }
+    if (!accountColumnNames.includes("displayTextColor")) {
+      db.prepare("ALTER TABLE accounts ADD COLUMN displayTextColor TEXT").run();
     }
 
     db.prepare(

@@ -7,7 +7,26 @@ export interface Currency {
   baseRateSell: number;
   conversionRateSell: number;
   active: boolean | number;
+  /** When set, amount cells for this currency use custom table styling */
+  displayBgColor?: string | null;
+  displayPositiveColor?: string | null;
+  displayNegativeColor?: string | null;
+  /** When true (default), currency code in tables uses amount display colors */
+  codeDisplaySameAsAmount?: boolean | number;
+  codeDisplayBgColor?: string | null;
+  codeDisplayPositiveColor?: string | null;
+  codeDisplayNegativeColor?: string | null;
+  /** How amounts appear in tables: suffix code (100 USD) or prefix symbol ($100) */
+  amountDisplayMode?: "code" | "symbol" | null;
+  /** Symbol when amountDisplayMode is symbol, e.g. $ or ¥ */
+  currencySymbol?: string | null;
+  /** Pool-level default background color for account names in this currency */
+  accountPoolDisplayBgColor?: string | null;
+  /** Pool-level default text color for account names in this currency */
+  accountPoolDisplayTextColor?: string | null;
 }
+
+export type CurrencyAmountDisplayMode = "code" | "symbol";
 
 export type CustomerType = "individual" | "corporate";
 
@@ -19,6 +38,8 @@ export interface Customer {
   remarks?: string;
   /** Defaults to individual when omitted (legacy rows). */
   customerType?: CustomerType;
+  displayBgColor?: string | null;
+  displayTextColor?: string | null;
 }
 
 export interface CustomerListResponse {
@@ -34,6 +55,8 @@ export interface User {
   email: string;
   role: string;
   password?: string | null;
+  displayBgColor?: string | null;
+  displayTextColor?: string | null;
 }
 
 export interface AuthResponse {
@@ -43,6 +66,16 @@ export interface AuthResponse {
   role: string;
   permissions?: RolePermissions;
   roleUpdatedAt?: string; // Timestamp when user's role was last updated (stored at login)
+  /** User's preferred sidebar background color (hex, e.g. "#0f172a") */
+  sidebarBgColor?: string | null;
+  /** User's preferred app background color (hex, e.g. "#f8fafc") */
+  displayBgColor?: string | null;
+  themeHeaderBg?: string | null;
+  themeCardBg?: string | null;
+  themeBorder?: string | null;
+  themeTextPrimary?: string | null;
+  themeTextSecondary?: string | null;
+  themeSidebarNavText?: string | null;
 }
 
 export interface RolePermissions {
@@ -127,6 +160,8 @@ export interface Order {
   profitAccountId?: number | null;
   profitEntries?: Array<{ amount: number; currency: string }>;
   serviceChargeEntries?: Array<{ amount: number; currency: string }>;
+  calculatedProfit?: number | null;
+  calculatedProfitCurrency?: string | null;
   orderType?: "online" | "otc";
   tags?: Tag[];
   remarks?: string;
@@ -245,6 +280,8 @@ export interface Account {
   name: string;
   balance: number;
   createdAt: string;
+  displayBgColor?: string | null;
+  displayTextColor?: string | null;
 }
 
 export interface AccountSummary {

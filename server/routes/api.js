@@ -46,6 +46,7 @@ import {
   createUser,
   updateUser,
   deleteUser,
+  updateUserPreferences,
 } from "../controllers/usersController.js";
 import { login } from "../controllers/authController.js";
 import {
@@ -231,6 +232,7 @@ router.get("/users", listUsers);
 router.post("/users", createUser);
 router.put("/users/:id", updateUser);
 router.delete("/users/:id", deleteUser);
+router.patch("/users/:id/preferences", updateUserPreferences);
 router.post("/auth/login", login);
 
 router.get("/roles", listRoles);

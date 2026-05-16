@@ -1,9 +1,23 @@
 import { db } from "../db.js";
 import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
+const normalizeCurrencyRow = (row) => ({
+  ...row,
+  active: Boolean(row.active),
+  codeDisplaySameAsAmount: row.codeDisplaySameAsAmount !== 0,
+});
+
+const normalizeCurrencyUpdates = (updates) => ({
+  ...updates,
+  ...(updates.active !== undefined ? { active: updates.active ? 1 : 0 } : {}),
+  ...(updates.codeDisplaySameAsAmount !== undefined
+    ? { codeDisplaySameAsAmount: updates.codeDisplaySameAsAmount ? 1 : 0 }
+    : {}),
+});
+
 export const listCurrencies = (_req, res) => {
   const rows = db.prepare("SELECT * FROM currencies ORDER BY code ASC;").all();
-  res.json(rows.map((row) => ({ ...row, active: Boolean(row.active) })));
+  res.json(rows.map(normalizeCurrencyRow));
 };
 
 export const createCurrency = (req, res, next) => {
@@ -13,9 +27,9 @@ export const createCurrency = (req, res, next) => {
       `INSERT INTO currencies (code, name, baseRateBuy, conversionRateBuy, baseRateSell, conversionRateSell, active)
        VALUES (@code, @name, @baseRateBuy, @conversionRateBuy, @baseRateSell, @conversionRateSell, @active);`,
     );
-    const result = stmt.run({ ...payload, active: payload.active ? 1 : 0 });
+    const result = stmt.run(normalizeCurrencyUpdates({ ...payload, active: payload.active }));
     const row = db.prepare("SELECT * FROM currencies WHERE id = ?;").get(result.lastInsertRowid);
-    res.status(201).json({ ...row, active: Boolean(row.active) });
+    res.status(201).json(normalizeCurrencyRow(row));
     scheduleCacheSync({ scopes: ["currencies", "profitCalculations"] });
   } catch (error) {
     next(error);
@@ -60,8 +74,7 @@ export const updateCurrency = (req, res, next) => {
             // First, update the currency code in currencies table
             const assignments = fields.map((field) => `${field} = @${field}`).join(", ");
             db.prepare(`UPDATE currencies SET ${assignments} WHERE id = @id;`).run({
-              ...updates,
-              active: updates.active ? 1 : 0,
+              ...normalizeCurrencyUpdates(updates),
               id,
             });
 
@@ -85,8 +98,7 @@ export const updateCurrency = (req, res, next) => {
         // Code is not changing, just update other fields
         const assignments = fields.map((field) => `${field} = @${field}`).join(", ");
         db.prepare(`UPDATE currencies SET ${assignments} WHERE id = @id;`).run({
-          ...updates,
-          active: updates.active ? 1 : 0,
+          ...normalizeCurrencyUpdates(updates),
           id,
         });
       }
@@ -94,14 +106,13 @@ export const updateCurrency = (req, res, next) => {
       // Code is not being updated, just update other fields
       const assignments = fields.map((field) => `${field} = @${field}`).join(", ");
       db.prepare(`UPDATE currencies SET ${assignments} WHERE id = @id;`).run({
-        ...updates,
-        active: updates.active ? 1 : 0,
+        ...normalizeCurrencyUpdates(updates),
         id,
       });
     }
 
     const row = db.prepare("SELECT * FROM currencies WHERE id = ?;").get(id);
-    res.json({ ...row, active: Boolean(row.active) });
+    res.json(normalizeCurrencyRow(row));
     scheduleCacheSync({
       scopes: ["currencies", "orders", "accounts", "transfers", "expenses", "profitCalculations"],
     });

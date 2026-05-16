@@ -29,6 +29,7 @@ import { useOrdersImportExport } from "../hooks/orders/useOrdersImportExport";
 import { useOrdersCustomer } from "../hooks/orders/useOrdersCustomer";
 import { useOrdersActions } from "../hooks/orders/useOrdersActions";
 import { useBatchDelete } from "../hooks/useBatchDelete";
+import { useCurrencyByCode } from "../hooks/useCurrencyByCode";
 
 import {
   useAddOrderMutation,
@@ -116,6 +117,8 @@ export default function OrdersPage() {
   const { data: ordersData, isLoading, refetch: refetchOrders } = useGetOrdersQuery(queryParams);
   const orders = ordersData?.orders || [];
   const totalOrders = ordersData?.total || 0;
+  const totalCalculatedProfit = ordersData?.totalCalculatedProfit ?? null;
+  const totalCalculatedProfitCurrency = ordersData?.totalCalculatedProfitCurrency ?? null;
 
   const { data: pinsData } = useGetOrderPinsQuery(undefined, { skip: !authUser?.id || !canPinOrders });
   const pinnedOrderIds = pinsData?.orderIds ?? [];
@@ -130,6 +133,7 @@ export default function OrdersPage() {
   const { data: customersData } = useGetCustomersQuery();
   const customers = customersData?.customers ?? [];
   const { data: currencies = [] } = useGetCurrenciesQuery();
+  const currencyByCode = useCurrencyByCode();
   const { data: users = [] } = useGetUsersQuery();
   const { data: orderAccounts = [] } = useGetAccountsQuery({ scope: "order.account" });
   const { data: profitAccounts = [] } = useGetAccountsQuery({ scope: "profit.account" });
@@ -1429,11 +1433,17 @@ export default function OrdersPage() {
               tags={tags}
               selectedTagNames={selectedTagNames}
               tagFilterLabel={tagFilterLabel}
+              totalCalculatedProfit={totalCalculatedProfit}
+              totalCalculatedProfitCurrency={totalCalculatedProfitCurrency}
+              isOrdersLoading={isLoading}
             />
 
             <OrdersTable
               orders={orders}
               accounts={accounts}
+              customers={customers}
+              users={users}
+              currencyByCode={currencyByCode}
               columnOrder={columnOrder}
               visibleColumns={visibleColumns}
               getColumnLabel={getColumnLabel}
@@ -1540,6 +1550,7 @@ export default function OrdersPage() {
         onOpenCreateCustomer={() => setIsCreateCustomerModalOpen(true)}
         onAutoFill={unifiedOrder.fillReceiptPaymentFromTotals}
         addLineRow={unifiedOrder.addLineRow}
+        addPresetServiceCharge={unifiedOrder.addPresetServiceCharge}
         viewerModal={newOrderViewerModal}
         setViewerModal={setNewOrderViewerModal}
       />

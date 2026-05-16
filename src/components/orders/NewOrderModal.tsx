@@ -6,6 +6,7 @@ import type { UnifiedLine, UnifiedLineKind } from "../../hooks/orders/useUnified
 import { CurrencyPairSwapButton } from "./CurrencyPairSwapButton";
 import { AccountSelect } from "../common/AccountSelect";
 import { CustomerSelect } from "../common/CustomerSelect";
+import FileUploadModal from "../common/FileUploadModal";
 
 export type NewOrderViewerState = {
   isOpen: boolean;
@@ -58,6 +59,7 @@ type Props = {
   onOpenCreateCustomer: () => void;
   onAutoFill: () => void;
   addLineRow: (kind: UnifiedLineKind) => void;
+  addPresetServiceCharge: (amount: string) => void;
   viewerModal: NewOrderViewerState;
   setViewerModal: (v: NewOrderViewerState) => void;
 };
@@ -392,11 +394,12 @@ export default function NewOrderModal({
   onOpenCreateCustomer,
   onAutoFill,
   addLineRow,
+  addPresetServiceCharge,
   viewerModal,
   setViewerModal,
 }: Props) {
   const { t } = useTranslation();
-  const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [uploadModalLineId, setUploadModalLineId] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -411,8 +414,6 @@ export default function NewOrderModal({
   };
 
   const clearLineRow = (localId: string) => {
-    const input = fileRefs.current[localId];
-    if (input) input.value = "";
     updateLine(localId, {
       amount: "",
       accountId: "",
@@ -436,7 +437,10 @@ export default function NewOrderModal({
       return sourceAccounts.filter((a) => a.currencyCode === toCurrency);
     }
     if (line.kind === "service_charge") {
-      return sourceAccounts.filter((a) => a.currencyCode === fromCurrency || a.currencyCode === toCurrency);
+      if (line.serviceChargeCurrency) {
+        return sourceAccounts.filter((a) => a.currencyCode === line.serviceChargeCurrency);
+      }
+      return [];
     }
     return sourceAccounts;
   };
@@ -618,16 +622,15 @@ export default function NewOrderModal({
 
                 // Compute live preview for percentage mode
                 let computedPreview: string | null = null;
-                if (isPercentMode && line.serviceChargePercent && line.accountId) {
+                if (isPercentMode && line.serviceChargePercent && line.serviceChargeCurrency) {
                   const pct = Number(line.serviceChargePercent);
-                  const acc = accounts.find((a) => a.id === Number(line.accountId));
-                  if (acc && !Number.isNaN(pct) && pct !== 0) {
-                    const base = acc.currencyCode === fromCurrency
+                  if (!Number.isNaN(pct) && pct !== 0) {
+                    const base = line.serviceChargeCurrency === fromCurrency
                       ? Number(amountBuy || 0)
                       : Number(amountSell || 0);
                     if (base > 0) {
                       const result = (pct / 100) * base;
-                      computedPreview = `≈ ${result.toFixed(2)} ${acc.currencyCode}`;
+                      computedPreview = `≈ ${result.toFixed(2)} ${line.serviceChargeCurrency}`;
                     }
                   }
                 }
@@ -707,35 +710,30 @@ export default function NewOrderModal({
                     onWheel={handleNumberInputWheel}
                   />
                   )}
+                  {isServiceCharge && (
+                    <select
+                      className="rounded border border-slate-200 px-2 py-1.5 text-sm text-slate-700 bg-white"
+                      value={line.serviceChargeCurrency ?? ""}
+                      onChange={(e) => updateLine(line.localId, { serviceChargeCurrency: e.target.value, accountId: "" })}
+                    >
+                      <option value="">{t("orders.selectCurrency")}</option>
+                      {activeCurrencies.map((c) => (
+                        <option key={c.code} value={c.code}>{c.code}</option>
+                      ))}
+                    </select>
+                  )}
                   <div className="min-w-[240px] flex-1">
                     <AccountSelect
                       value={line.accountId}
                       onChange={(accountId) => updateLine(line.localId, { accountId })}
                       accounts={accountOptionsForLine(line)}
-                      placeholder={t("orders.selectAccount")}
+                      placeholder={isServiceCharge && !line.serviceChargeCurrency ? t("orders.selectCurrencyFirst") : t("orders.selectAccount")}
                       showBalance
                       showSelectedBalanceBelow={false}
                       showOptionBalanceInline
                       t={t}
                     />
                   </div>
-                  <input
-                    ref={(el) => {
-                      fileRefs.current[line.localId] = el;
-                    }}
-                    type="file"
-                    accept="image/*,application/pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      if (f) {
-                        updateLine(line.localId, { file: f, serverImagePath: undefined });
-                      } else {
-                        updateLine(line.localId, { file: null });
-                      }
-                      e.target.value = "";
-                    }}
-                  />
                   {line.file || line.serverImagePath ? (
                     <div className="flex flex-wrap gap-1">
                       <button
@@ -767,7 +765,7 @@ export default function NewOrderModal({
                         type="button"
                         className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                         title={t("orders.replaceUploadTooltip")}
-                        onClick={() => fileRefs.current[line.localId]?.click()}
+                        onClick={() => setUploadModalLineId(line.localId)}
                       >
                         {t("orders.replaceUpload")}
                       </button>
@@ -776,7 +774,7 @@ export default function NewOrderModal({
                     <button
                       type="button"
                       className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      onClick={() => fileRefs.current[line.localId]?.click()}
+                      onClick={() => setUploadModalLineId(line.localId)}
                     >
                       {t("orders.upload")}
                     </button>
@@ -827,16 +825,17 @@ export default function NewOrderModal({
               <button
                 type="button"
                 className="text-xs font-medium text-blue-600 hover:underline"
-                onClick={() => addLineRow("profit")}
-              >
-                + {t("orders.profit")}
-              </button>
-              <button
-                type="button"
-                className="text-xs font-medium text-blue-600 hover:underline"
                 onClick={() => addLineRow("service_charge")}
               >
                 + {t("orders.serviceCharges")}
+              </button>
+              <button
+                type="button"
+                title={t("orders.trxFeeTooltip")}
+                className="text-xs font-medium text-orange-600 hover:underline"
+                onClick={() => addPresetServiceCharge("-1")}
+              >
+                {t("orders.trxFee")}
               </button>
             </div>
           </div>
@@ -991,6 +990,16 @@ export default function NewOrderModal({
           </div>
         </div>
       ) : null}
+      <FileUploadModal
+        isOpen={uploadModalLineId !== null}
+        onClose={() => setUploadModalLineId(null)}
+        onFileSelected={(file) => {
+          if (uploadModalLineId) {
+            updateLine(uploadModalLineId, { file, serverImagePath: undefined });
+          }
+          setUploadModalLineId(null);
+        }}
+      />
     </div>
   );
 }

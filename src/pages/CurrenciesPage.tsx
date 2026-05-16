@@ -12,6 +12,13 @@ import {
 } from "../services/api";
 import { useAppSelector } from "../app/hooks";
 import { hasActionPermission } from "../utils/permissions";
+import { CurrencyDisplayColorFields } from "../components/common/CurrencyDisplayColorFields";
+import {
+  currencyToFullDisplayFields,
+  emptyCurrencyFullDisplayFields,
+  fullDisplayFieldsToPayload,
+  isCurrencyDisplayConfigured,
+} from "../utils/currencyAmountDisplay";
 
 export default function CurrenciesPage() {
   const { t } = useTranslation();
@@ -44,6 +51,7 @@ export default function CurrenciesPage() {
     conversionRateBuy: "",
     conversionRateSell: "",
     active: true,
+    ...emptyCurrencyFullDisplayFields(),
   });
 
   const handleSubmit = async (event: FormEvent) => {
@@ -58,6 +66,7 @@ export default function CurrenciesPage() {
       conversionRateBuy: Number(form.conversionRateBuy || form.baseRateBuy || 0),
       conversionRateSell: Number(form.conversionRateSell || form.baseRateSell || 0),
       active: Boolean(form.active),
+      ...fullDisplayFieldsToPayload(form),
     });
 
     setForm({
@@ -68,6 +77,7 @@ export default function CurrenciesPage() {
       conversionRateBuy: "",
       conversionRateSell: "",
       active: true,
+      ...emptyCurrencyFullDisplayFields(),
     });
   };
 
@@ -90,6 +100,7 @@ export default function CurrenciesPage() {
       conversionRateBuy: String(current.conversionRateBuy),
       conversionRateSell: String(current.conversionRateSell),
       active: Boolean(current.active),
+      ...currencyToFullDisplayFields(current),
     });
   };
 
@@ -112,6 +123,7 @@ export default function CurrenciesPage() {
           conversionRateBuy: Number(editForm.conversionRateBuy || editForm.baseRateBuy || 0),
           conversionRateSell: Number(editForm.conversionRateSell || editForm.baseRateSell || 0),
           active: Boolean(editForm.active),
+          ...fullDisplayFieldsToPayload(editForm),
         },
       }).unwrap();
       cancelEdit();
@@ -191,9 +203,14 @@ export default function CurrenciesPage() {
                   <td className="py-2">{currency.baseRateBuy}</td>
                   <td className="py-2">{currency.baseRateSell}</td>
                   <td className="py-2">
-                    <Badge tone={currency.active ? "emerald" : "slate"}>
-                      {currency.active ? t("common.active") : t("common.inactive")}
-                    </Badge>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Badge tone={currency.active ? "emerald" : "slate"}>
+                        {currency.active ? t("common.active") : t("common.inactive")}
+                      </Badge>
+                      {isCurrencyDisplayConfigured(currency) && (
+                        <Badge tone="blue">{t("currencies.displayConfigured")}</Badge>
+                      )}
+                    </div>
                   </td>
                   {canUpdateCurrency && (
                     <td className="py-2">
@@ -312,6 +329,19 @@ export default function CurrenciesPage() {
               />
               {t("common.active")}
             </label>
+            <CurrencyDisplayColorFields
+              currencyCode={editForm.code || "USD"}
+              fields={{
+                displayBgColor: editForm.displayBgColor,
+                displayPositiveColor: editForm.displayPositiveColor,
+                displayNegativeColor: editForm.displayNegativeColor,
+                amountDisplayMode: editForm.amountDisplayMode,
+                currencySymbol: editForm.currencySymbol,
+              }}
+              onChange={(displayFields) =>
+                setEditForm((p) => (p ? { ...p, ...displayFields } : p))
+              }
+            />
             <button
               type="submit"
               className="col-span-full rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-amber-700"
@@ -393,6 +423,17 @@ export default function CurrenciesPage() {
             />
             {t("common.active")}
           </label>
+          <CurrencyDisplayColorFields
+            currencyCode={form.code || "USD"}
+            fields={{
+              displayBgColor: form.displayBgColor,
+              displayPositiveColor: form.displayPositiveColor,
+              displayNegativeColor: form.displayNegativeColor,
+              amountDisplayMode: form.amountDisplayMode,
+              currencySymbol: form.currencySymbol,
+            }}
+            onChange={(displayFields) => setForm((p) => ({ ...p, ...displayFields }))}
+          />
           <button
             type="submit"
             disabled={isSaving}

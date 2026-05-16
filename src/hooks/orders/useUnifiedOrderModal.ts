@@ -33,6 +33,8 @@ export type UnifiedLine = {
   serverPaymentId?: number;
   serviceChargeMode?: "fixed" | "percentage";
   serviceChargePercent?: string;
+  /** Currency selected for this service charge (free choice, not restricted to the pair) */
+  serviceChargeCurrency?: string;
 };
 
 function newLine(kind: UnifiedLineKind): UnifiedLine {
@@ -42,7 +44,7 @@ function newLine(kind: UnifiedLineKind): UnifiedLine {
     amount: "",
     accountId: "",
     file: null,
-    ...(kind === "service_charge" ? { serviceChargeMode: "fixed" as const, serviceChargePercent: "" } : {}),
+    ...(kind === "service_charge" ? { serviceChargeMode: "fixed" as const, serviceChargePercent: "", serviceChargeCurrency: "" } : {}),
   };
 }
 
@@ -297,16 +299,6 @@ export function useUnifiedOrderModal(
         serverPaymentId: p.id,
       });
     }
-    const profits = orderDetails.profits || [];
-    for (const p of profits) {
-      nextLines.push({
-        localId: `pf-${p.id}`,
-        kind: "profit",
-        amount: String(p.amount ?? ""),
-        accountId: p.accountId ? String(p.accountId) : "",
-        file: null,
-      });
-    }
     const scs = orderDetails.serviceCharges || [];
     for (const sc of scs) {
       nextLines.push({
@@ -317,6 +309,7 @@ export function useUnifiedOrderModal(
         file: null,
         serviceChargeMode: "fixed",
         serviceChargePercent: "",
+        serviceChargeCurrency: sc.currencyCode || "",
       });
     }
     if (nextLines.length === 0) {
@@ -354,10 +347,13 @@ export function useUnifiedOrderModal(
     setLines((prev) => [...prev, newLine(kind)]);
   }, []);
 
+  const addPresetServiceCharge = useCallback((amount: string) => {
+    setLines((prev) => [...prev, { ...newLine("service_charge"), amount }]);
+  }, []);
+
   const buildPayload = useCallback(() => {
     const receiptLines = lines.filter((l) => l.kind === "receipt");
     const paymentLines = lines.filter((l) => l.kind === "payment");
-    const profitLines = lines.filter((l) => l.kind === "profit");
     const scLines = lines.filter((l) => l.kind === "service_charge");
     const firstReceiptAcc = receiptLines.find((l) => l.accountId)?.accountId;
     const firstPayAcc = paymentLines.find((l) => l.accountId)?.accountId;
@@ -397,12 +393,7 @@ export function useUnifiedOrderModal(
       return { amount: resolvedAmount, currencyCode: acc.currencyCode, accountId: Number(scLine.accountId) };
     }).filter((x): x is { amount: number; currencyCode: string; accountId: number } => x !== null);
 
-    const resolvedProfitLines = profitLines.map((profitLine) => {
-      if (!profitLine.amount || !profitLine.accountId) return null;
-      const acc = accounts.find((a) => a.id === Number(profitLine.accountId));
-      if (!acc) return null;
-      return { amount: Number(profitLine.amount), currencyCode: acc.currencyCode, accountId: Number(profitLine.accountId) };
-    }).filter((x): x is { amount: number; currencyCode: string; accountId: number } => x !== null);
+    const resolvedProfitLines: { amount: number; currencyCode: string; accountId: number }[] = [];
 
     return { payload, receiptLines, paymentLines, resolvedProfitLines, resolvedScLines };
   }, [
@@ -760,6 +751,7 @@ export function useUnifiedOrderModal(
     handleSave,
     handleComplete,
     addLineRow,
+    addPresetServiceCharge,
     fillReceiptPaymentFromTotals,
     handleAmountBuyChange,
     handleAmountSellChange,

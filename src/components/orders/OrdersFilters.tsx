@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo } from "react";
+import React, { useRef, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Badge from "../common/Badge";
 import { SearchableSelect } from "../common/SearchableSelect";
@@ -30,6 +30,10 @@ interface OrdersFiltersProps {
   tags: Tag[];
   selectedTagNames: string[];
   tagFilterLabel: string;
+  // Profit summary
+  totalCalculatedProfit?: number | null;
+  totalCalculatedProfitCurrency?: string | null;
+  isOrdersLoading?: boolean;
 }
 
 export function OrdersFilters({
@@ -55,6 +59,9 @@ export function OrdersFilters({
   tags,
   selectedTagNames,
   tagFilterLabel,
+  totalCalculatedProfit,
+  totalCalculatedProfitCurrency,
+  isOrdersLoading = false,
 }: OrdersFiltersProps) {
   const { t } = useTranslation();
 
@@ -168,24 +175,13 @@ export function OrdersFilters({
             allOptionLabel={t("orders.all") || "All"}
           />
 
-          {/* Currency Pair */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              {t("orders.currencyPair") || "Currency Pair"}
-            </label>
-            <select
-              value={filters.currencyPair || ""}
-              onChange={(e) => onFilterChange('currencyPair', e.target.value || null)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">{t("orders.all") || "All"}</option>
-              {currencyPairs.map((pair) => (
-                <option key={pair} value={pair}>
-                  {pair}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Currency Pair multi-select */}
+          <CurrencyPairFilter
+            currencyPairs={currencyPairs}
+            selectedPairs={filters.currencyPairs}
+            onFilterChange={onFilterChange}
+            t={t}
+          />
 
           {/* Buy Account */}
           <SearchableSelect
@@ -344,6 +340,138 @@ export function OrdersFilters({
                     {t("orders.export") || "Export to Excel"}
                   </>
                 )}
+              </button>
+            </div>
+          )}
+
+          {/* Total Profit — always shown when filters are expanded */}
+          <div className="flex flex-col justify-end">
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              {t("orders.totalProfit")}
+            </label>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm flex items-center min-h-[42px]">
+              {isOrdersLoading ? (
+                <span className="text-slate-400">{t("common.loading")}</span>
+              ) : totalCalculatedProfitCurrency &&
+                totalCalculatedProfit !== null &&
+                totalCalculatedProfit !== undefined ? (
+                <span
+                  className={`font-bold tabular-nums ${
+                    totalCalculatedProfit >= 0 ? "text-blue-700" : "text-red-600"
+                  }`}
+                >
+                  {totalCalculatedProfit > 0 ? "+" : ""}
+                  {totalCalculatedProfit.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{" "}
+                  {totalCalculatedProfitCurrency}
+                </span>
+              ) : (
+                <span className="text-slate-400">—</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface CurrencyPairFilterProps {
+  currencyPairs: string[];
+  selectedPairs: string[];
+  onFilterChange: <K extends keyof OrderFilters>(key: K, value: OrderFilters[K]) => void;
+  t: (key: string) => string;
+}
+
+function CurrencyPairFilter({ currencyPairs, selectedPairs, onFilterChange, t }: CurrencyPairFilterProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
+
+  const label = useMemo(() => {
+    if (selectedPairs.length === 0) return t("orders.all") || "All";
+    if (selectedPairs.length === 1) return selectedPairs[0];
+    return selectedPairs.join(", ");
+  }, [selectedPairs, t]);
+
+  const toggle = (pair: string) => {
+    const next = selectedPairs.includes(pair)
+      ? selectedPairs.filter((p) => p !== pair)
+      : [...selectedPairs, pair];
+    onFilterChange("currencyPairs", next);
+  };
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <label className="block text-xs font-semibold text-slate-700 mb-1">
+        {t("orders.currencyPair") || "Currency Pair"}
+      </label>
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm flex items-center justify-between hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      >
+        <span
+          className="truncate flex-1 min-w-0 text-left"
+          title={selectedPairs.length > 0 ? selectedPairs.join(", ") : undefined}
+        >
+          {label}
+        </span>
+        {selectedPairs.length > 0 && (
+          <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-700 font-medium shrink-0">
+            {selectedPairs.length}
+          </span>
+        )}
+        <svg className="w-4 h-4 text-slate-500 shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 8l4 4 4-4" />
+        </svg>
+      </button>
+      {isOpen && (
+        <div className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto p-2">
+          {currencyPairs.length === 0 && (
+            <div className="text-sm text-slate-500 px-2 py-1">
+              {t("orders.noCurrencyPairs") || "No currency pairs available"}
+            </div>
+          )}
+          {currencyPairs.map((pair) => (
+            <label
+              key={pair}
+              className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-slate-50"
+            >
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={selectedPairs.includes(pair)}
+                onChange={() => toggle(pair)}
+              />
+              <span className="text-sm text-slate-700">{pair}</span>
+            </label>
+          ))}
+          {currencyPairs.length > 0 && (
+            <div className="flex justify-between items-center pt-2 mt-2 border-t border-slate-200">
+              <button
+                className="text-xs text-slate-600 hover:text-slate-900"
+                onClick={() => onFilterChange("currencyPairs", [])}
+              >
+                {t("common.clear") || "Clear"}
+              </button>
+              <button
+                className="text-xs text-blue-600 hover:text-blue-800"
+                onClick={() => setIsOpen(false)}
+              >
+                {t("common.done") || "Done"}
               </button>
             </div>
           )}

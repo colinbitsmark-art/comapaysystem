@@ -22,12 +22,14 @@ import {
   useGetSettingQuery,
   useSetSettingMutation,
   useAddCurrencyMutation,
+  useUpdateCurrencyMutation,
 } from "../services/api";
 import { formatDate } from "../utils/format";
 import { useAppSelector } from "../app/hooks";
 import { hasActionPermission } from "../utils/permissions";
 import { useProfitSummary } from "../hooks/useProfitSummary";
 import { useBatchDelete } from "../hooks/useBatchDelete";
+import { ColorInput } from "../components/common/CurrencyDisplayColorFields";
 import * as XLSX from "xlsx";
 
 // Helper function to format currency with proper number formatting
@@ -46,6 +48,7 @@ export default function AccountsPage() {
   const { data: currencies = [], refetch: refetchCurrencies } = useGetCurrenciesQuery();
   const [createAccount, { isLoading: isCreating }] = useCreateAccountMutation();
   const [updateAccount] = useUpdateAccountMutation();
+  const [updateCurrency] = useUpdateCurrencyMutation();
   const [deleteAccount, { isLoading: isDeleting }] = useDeleteAccountMutation();
   const [addFunds] = useAddFundsMutation();
   const [withdrawFunds] = useWithdrawFundsMutation();
@@ -71,6 +74,9 @@ export default function AccountsPage() {
 
   const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Pool color editor: which currency pool is currently being configured
+  const [poolColorEditCode, setPoolColorEditCode] = useState<string | null>(null);
+  const [poolColorForm, setPoolColorForm] = useState({ displayBgColor: "", displayTextColor: "" });
   const [fundsModalAccountId, setFundsModalAccountId] = useState<number | null>(null);
   const [fundsModalType, setFundsModalType] = useState<"add" | "withdraw" | null>(null);
   const [transactionsModalAccountId, setTransactionsModalAccountId] = useState<number | null>(null);
@@ -168,6 +174,8 @@ export default function AccountsPage() {
   const [editForm, setEditForm] = useState({
     name: "",
     balance: "",
+    displayBgColor: "",
+    displayTextColor: "",
   });
 
   const [fundsForm, setFundsForm] = useState({
@@ -238,12 +246,46 @@ export default function AccountsPage() {
     setEditForm({ 
       name: account.name,
       balance: (account.balance ?? 0).toString(),
+      displayBgColor: account.displayBgColor ?? "",
+      displayTextColor: account.displayTextColor ?? "",
     });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
-    setEditForm({ name: "", balance: "" });
+    setEditForm({ name: "", balance: "", displayBgColor: "", displayTextColor: "" });
+  };
+
+  const openPoolColorEditor = (currencyCode: string) => {
+    const currency = currencies.find((c) => c.code === currencyCode);
+    setPoolColorForm({
+      displayBgColor: currency?.accountPoolDisplayBgColor ?? "",
+      displayTextColor: currency?.accountPoolDisplayTextColor ?? "",
+    });
+    setPoolColorEditCode(currencyCode);
+  };
+
+  const closePoolColorEditor = () => {
+    setPoolColorEditCode(null);
+    setPoolColorForm({ displayBgColor: "", displayTextColor: "" });
+  };
+
+  const savePoolColor = async () => {
+    if (!poolColorEditCode) return;
+    const currency = currencies.find((c) => c.code === poolColorEditCode);
+    if (!currency) return;
+    try {
+      await updateCurrency({
+        id: currency.id,
+        data: {
+          accountPoolDisplayBgColor: poolColorForm.displayBgColor.trim() || null,
+          accountPoolDisplayTextColor: poolColorForm.displayTextColor.trim() || null,
+        },
+      }).unwrap();
+      closePoolColorEditor();
+    } catch (error: any) {
+      setAlertModal({ isOpen: true, message: error?.data?.message || t("common.errorSaving") || "Error saving", type: "error" });
+    }
   };
 
   const submitEdit = async (event: FormEvent) => {
@@ -280,9 +322,11 @@ export default function AccountsPage() {
     }
 
     try {
-      const updateData: { id: number; name: string; balance?: number } = {
+      const updateData: { id: number; name: string; balance?: number; displayBgColor?: string | null; displayTextColor?: string | null } = {
         id: editingId,
         name: editForm.name,
+        displayBgColor: editForm.displayBgColor.trim() || null,
+        displayTextColor: editForm.displayTextColor.trim() || null,
       };
       if (balanceValue !== undefined) {
         updateData.balance = balanceValue;
@@ -831,6 +875,7 @@ export default function AccountsPage() {
             {Object.entries(accountsByCurrencyMap).map(([currencyCode, currencyAccounts]) => {
               const totalBalance = currencyAccounts.reduce((sum, acc) => sum + acc.balance, 0);
               const currency = currencies.find((c) => c.code === currencyCode);
+              const isEditingPoolColor = poolColorEditCode === currencyCode;
               return (
                 <div
                   key={currencyCode}
@@ -838,9 +883,37 @@ export default function AccountsPage() {
                 >
                   <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h3 className="text-lg font-semibold text-slate-900">
-                        {currencyCode} {t("accounts.currencyPool")}
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-semibold text-slate-900">
+                          {currencyCode} {t("accounts.currencyPool")}
+                        </h3>
+                        {hasActionPermission(authUser, "updateCurrency") && (
+                          <button
+                            type="button"
+                            title={t("accounts.configurePoolColor") || "Configure pool color"}
+                            onClick={() => isEditingPoolColor ? closePoolColorEditor() : openPoolColorEditor(currencyCode)}
+                            className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${
+                              isEditingPoolColor
+                                ? "bg-blue-100 text-blue-700"
+                                : currency?.accountPoolDisplayBgColor
+                                  ? "text-slate-600 hover:text-slate-800"
+                                  : "text-slate-400 hover:text-slate-600"
+                            }`}
+                          >
+                            {currency?.accountPoolDisplayBgColor ? (
+                              <span
+                                className="inline-block w-3 h-3 rounded-sm border border-slate-300"
+                                style={{ backgroundColor: currency.accountPoolDisplayBgColor }}
+                              />
+                            ) : (
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                              </svg>
+                            )}
+                            {t("accounts.poolColor") || "Pool color"}
+                          </button>
+                        )}
+                      </div>
                       <p className="text-sm text-slate-500">
                         {currency?.name || currencyCode}
                       </p>
@@ -856,6 +929,73 @@ export default function AccountsPage() {
                       </div>
                     </div>
                   </div>
+                  {isEditingPoolColor && (
+                    <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-sm font-semibold text-blue-900">
+                          {t("accounts.poolColorTitle") || "Pool Color — applies to all accounts in this pool"}
+                        </span>
+                        <button type="button" onClick={closePoolColorEditor} className="text-slate-400 hover:text-slate-600">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                      <p className="mb-3 text-xs text-slate-500">
+                        {t("accounts.poolColorHint") || "Individual account colors take priority over the pool color."}
+                      </p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <ColorInput
+                          label={t("accounts.displayBgColor") || "Background Color"}
+                          value={poolColorForm.displayBgColor}
+                          placeholder="#1e3a8a"
+                          onChange={(v) => setPoolColorForm((p) => ({ ...p, displayBgColor: v }))}
+                        />
+                        <ColorInput
+                          label={t("accounts.displayTextColor") || "Text Color"}
+                          value={poolColorForm.displayTextColor}
+                          placeholder="#ffffff"
+                          onChange={(v) => setPoolColorForm((p) => ({ ...p, displayTextColor: v }))}
+                        />
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        {poolColorForm.displayBgColor.trim() ? (
+                          <>
+                            <span className="text-xs font-medium text-slate-600">{t("common.preview") || "Preview"}:</span>
+                            {currencyAccounts.slice(0, 3).map((a) => (
+                              <span
+                                key={a.id}
+                                className="inline-block rounded-md px-2 py-0.5 text-sm font-semibold"
+                                style={{
+                                  backgroundColor: a.displayBgColor || poolColorForm.displayBgColor,
+                                  color: a.displayTextColor || poolColorForm.displayTextColor || "#ffffff",
+                                }}
+                              >
+                                {a.name}
+                              </span>
+                            ))}
+                          </>
+                        ) : (
+                          <p className="text-xs text-slate-500">{t("accounts.nameDisplayPreviewDefault") || "No custom styling."}</p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setPoolColorForm({ displayBgColor: "", displayTextColor: "" })}
+                          className="text-xs font-semibold text-slate-600 hover:text-slate-800"
+                        >
+                          {t("accounts.clearDisplayColors") || "Clear colors"}
+                        </button>
+                      </div>
+                      <div className="mt-3 flex justify-end gap-2">
+                        <button type="button" onClick={closePoolColorEditor} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                          {t("common.cancel")}
+                        </button>
+                        <button type="button" onClick={savePoolColor} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700">
+                          {t("accounts.savePoolColor") || "Save pool color"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                       <thead>
@@ -912,7 +1052,22 @@ export default function AccountsPage() {
                                 />
                               </td>
                             )}
-                            <td className="py-2 font-semibold">{account.name}</td>
+                            <td className="py-2 font-semibold">
+                              {(() => {
+                                const effectiveBg = account.displayBgColor || currency?.accountPoolDisplayBgColor;
+                                const effectiveText = account.displayBgColor
+                                  ? (account.displayTextColor || "#ffffff")
+                                  : (currency?.accountPoolDisplayTextColor || "#ffffff");
+                                return effectiveBg ? (
+                                  <span
+                                    className="inline-block rounded-md px-2 py-0.5"
+                                    style={{ backgroundColor: effectiveBg, color: effectiveText, fontWeight: 700 }}
+                                  >
+                                    {account.name}
+                                  </span>
+                                ) : account.name;
+                              })()}
+                            </td>
                             <td className="py-2">
                               <span className={`font-semibold ${
                                 account.balance < 0 ? "text-red-600" : "text-slate-900"
@@ -1098,6 +1253,49 @@ export default function AccountsPage() {
                   );
                 })()}
               </div>
+              <fieldset className="rounded-lg border border-slate-200 p-4">
+                <legend className="px-1 text-sm font-semibold text-slate-800">{t("accounts.nameDisplayTitle") || "Name Display"}</legend>
+                <p className="mb-3 text-xs text-slate-500">{t("accounts.nameDisplayHint") || "Optionally style this account name with a background and text color in tables."}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ColorInput
+                    label={t("accounts.displayBgColor") || "Background Color"}
+                    value={editForm.displayBgColor}
+                    placeholder="#1e3a8a"
+                    onChange={(v) => setEditForm((p) => ({ ...p, displayBgColor: v }))}
+                  />
+                  <ColorInput
+                    label={t("accounts.displayTextColor") || "Text Color"}
+                    value={editForm.displayTextColor}
+                    placeholder="#ffffff"
+                    onChange={(v) => setEditForm((p) => ({ ...p, displayTextColor: v }))}
+                  />
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  {editForm.displayBgColor.trim() ? (
+                    <>
+                      <span className="text-xs font-medium text-slate-600">{t("common.preview") || "Preview"}:</span>
+                      <span
+                        className="inline-block rounded-md px-2 py-0.5 text-sm font-semibold"
+                        style={{
+                          backgroundColor: editForm.displayBgColor,
+                          color: editForm.displayTextColor || "#ffffff",
+                        }}
+                      >
+                        {editForm.name || t("accounts.accountNamePlaceholder")}
+                      </span>
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-500">{t("accounts.nameDisplayPreviewDefault") || "No custom styling — account name will appear as plain text."}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setEditForm((p) => ({ ...p, displayBgColor: "", displayTextColor: "" }))}
+                    className="text-sm font-semibold text-slate-600 hover:text-slate-800"
+                  >
+                    {t("accounts.clearDisplayColors") || "Clear colors"}
+                  </button>
+                </div>
+              </fieldset>
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"

@@ -33,14 +33,14 @@ import {
 import { useAppSelector } from "../app/hooks";
 import { formatDate, formatDateTime } from "../utils/format";
 import { hasActionPermission } from "../utils/permissions";
+import { useCurrencyByCode } from "../hooks/useCurrencyByCode";
+import { StyledCurrencyAmount } from "../components/common/StyledCurrencyAmount";
 
-// Helper function to format currency with proper number formatting
-const formatCurrency = (amount: number, currencyCode: string) => {
-  return `${amount.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} ${currencyCode}`;
-};
+const formatAmount = (amount: number) =>
+  Math.round(amount).toLocaleString("en-US");
+
+const formatCurrency = (amount: number, currencyCode: string) =>
+  `${formatAmount(amount)} ${currencyCode}`;
 
 export default function TransfersPage() {
   const { t } = useTranslation();
@@ -72,6 +72,7 @@ export default function TransfersPage() {
   const { data: tags = [] } = useGetTagsQuery();
   const { data: users = [] } = useGetUsersQuery();
   const { data: currencies = [] } = useGetCurrenciesQuery();
+  const currencyByCode = useCurrencyByCode();
   const [createTransfer, { isLoading: isCreating }] = useCreateTransferMutation();
   const [updateTransfer, { isLoading: isUpdating }] = useUpdateTransferMutation();
   const [deleteTransfer, { isLoading: isDeleting }] = useDeleteTransferMutation();
@@ -131,6 +132,8 @@ export default function TransfersPage() {
   const [isBatchTagMode, setIsBatchTagMode] = useState(false);
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [formTagIds, setFormTagIds] = useState<number[]>([]);
+  const [showFormTagPicker, setShowFormTagPicker] = useState(false);
   const [viewAuditTrailTransferId, setViewAuditTrailTransferId] = useState<number | null>(null);
   
   // Column management via hook
@@ -229,6 +232,8 @@ export default function TransfersPage() {
       file: undefined,
     });
     setEditingTransferId(null);
+    setFormTagIds([]);
+    setShowFormTagPicker(false);
     if (imageInputRef.current) imageInputRef.current.value = "";
   };
 
@@ -299,6 +304,14 @@ export default function TransfersPage() {
       imagePath: transfer.imagePath ? `/api/uploads/${transfer.imagePath}` : "",
       file: undefined,
     });
+    const existingTags = (transfer as any).tags;
+    if (Array.isArray(existingTags) && existingTags.length > 0) {
+      setFormTagIds(existingTags.map((x: any) => x.id));
+      setShowFormTagPicker(true);
+    } else {
+      setFormTagIds([]);
+      setShowFormTagPicker(false);
+    }
     setIsModalOpen(true);
   };
 
@@ -320,6 +333,7 @@ export default function TransfersPage() {
             transactionFee: form.transactionFee ? Number(form.transactionFee) : undefined,
             updatedBy: authUser?.id,
             entryDate: entryDateIso,
+            tagIds: formTagIds,
             ...(form.file ? { file: form.file } : { imagePath: form.imagePath || "" }),
           },
         }).unwrap();
@@ -332,6 +346,7 @@ export default function TransfersPage() {
           transactionFee: form.transactionFee ? Number(form.transactionFee) : undefined,
           createdBy: authUser?.id,
           entryDate: entryDateIso,
+          tagIds: formTagIds,
           ...(form.file ? { file: form.file } : {}),
         }).unwrap();
       }
@@ -661,28 +676,60 @@ export default function TransfersPage() {
             )}
           </td>
         );
-      case "fromAccount":
+      case "fromAccount": {
+        const fromAcct = accounts.find((a) => a.id === transfer.fromAccountId);
+        const fromPool = fromAcct ? currencyByCode.get(fromAcct.currencyCode) : undefined;
+        const fromBg = fromAcct?.displayBgColor || fromPool?.accountPoolDisplayBgColor;
+        const fromText = fromAcct?.displayBgColor ? (fromAcct.displayTextColor || "#ffffff") : (fromPool?.accountPoolDisplayTextColor || "#ffffff");
+        const fromStyle = fromBg
+          ? { backgroundColor: fromBg, color: fromText, fontWeight: 700, borderRadius: "0.375rem", padding: "0.125rem 0.375rem" }
+          : undefined;
         return (
           <td key={columnKey} className="py-2 font-semibold text-slate-900">
-            {transfer.fromAccountName || transfer.fromAccountId}
+            <span style={fromStyle}>{transfer.fromAccountName || transfer.fromAccountId}</span>
           </td>
         );
-      case "toAccount":
+      }
+      case "toAccount": {
+        const toAcct = accounts.find((a) => a.id === transfer.toAccountId);
+        const toPool = toAcct ? currencyByCode.get(toAcct.currencyCode) : undefined;
+        const toBg = toAcct?.displayBgColor || toPool?.accountPoolDisplayBgColor;
+        const toText = toAcct?.displayBgColor ? (toAcct.displayTextColor || "#ffffff") : (toPool?.accountPoolDisplayTextColor || "#ffffff");
+        const toStyle = toBg
+          ? { backgroundColor: toBg, color: toText, fontWeight: 700, borderRadius: "0.375rem", padding: "0.125rem 0.375rem" }
+          : undefined;
         return (
           <td key={columnKey} className="py-2 font-semibold text-slate-900">
-            {transfer.toAccountName || transfer.toAccountId}
+            <span style={toStyle}>{transfer.toAccountName || transfer.toAccountId}</span>
           </td>
         );
+      }
       case "amount":
         return (
-          <td key={columnKey} className="py-2 font-semibold text-slate-900">
-            {formatCurrency(transfer.amount, transfer.currencyCode)}
+          <td key={columnKey} className="py-2">
+            <StyledCurrencyAmount
+              signedAmount={transfer.amount}
+              currencyCode={transfer.currencyCode}
+              currencyByCode={currencyByCode}
+              formatAbsValue={formatAmount}
+              defaultClassName="font-semibold text-slate-900"
+            />
           </td>
         );
       case "transactionFee":
         return (
-          <td key={columnKey} className="py-2 text-slate-600">
-            {transfer.transactionFee !== null && transfer.transactionFee !== undefined ? formatCurrency(transfer.transactionFee, transfer.currencyCode) : "-"}
+          <td key={columnKey} className="py-2">
+            {transfer.transactionFee !== null && transfer.transactionFee !== undefined ? (
+              <StyledCurrencyAmount
+                signedAmount={transfer.transactionFee}
+                currencyCode={transfer.currencyCode}
+                currencyByCode={currencyByCode}
+                formatAbsValue={formatAmount}
+                defaultClassName="text-slate-600"
+              />
+            ) : (
+              "-"
+            )}
           </td>
         );
       case "currency":
@@ -718,18 +765,32 @@ export default function TransfersPage() {
             </div>
           </td>
         );
-      case "createdBy":
+      case "createdBy": {
+        const createdByUser = transfer.createdBy ? users.find((u) => u.id === transfer.createdBy) : undefined;
+        const createdByStyle = createdByUser?.displayBgColor
+          ? { backgroundColor: createdByUser.displayBgColor, color: createdByUser.displayTextColor || "#ffffff", fontWeight: 700, borderRadius: "0.375rem", padding: "0.125rem 0.375rem", display: "inline-block" }
+          : undefined;
         return (
           <td key={columnKey} className="py-2 text-slate-600">
-            {transfer.createdByName || "-"}
+            {transfer.createdByName
+              ? <span style={createdByStyle}>{transfer.createdByName}</span>
+              : "-"}
           </td>
         );
-      case "updatedBy":
+      }
+      case "updatedBy": {
+        const updatedByUser = transfer.updatedBy ? users.find((u) => u.id === transfer.updatedBy) : undefined;
+        const updatedByStyle = updatedByUser?.displayBgColor
+          ? { backgroundColor: updatedByUser.displayBgColor, color: updatedByUser.displayTextColor || "#ffffff", fontWeight: 700, borderRadius: "0.375rem", padding: "0.125rem 0.375rem", display: "inline-block" }
+          : undefined;
         return (
           <td key={columnKey} className="py-2 text-slate-600">
-            {transfer.updatedByName || "-"}
+            {transfer.updatedByName
+              ? <span style={updatedByStyle}>{transfer.updatedByName}</span>
+              : "-"}
           </td>
         );
+      }
       case "updatedAt":
         return (
           <td key={columnKey} className="py-2 text-slate-600 text-xs">
@@ -1208,6 +1269,59 @@ export default function TransfersPage() {
                 </div>
               </div>
 
+              {/* Tag Picker */}
+              {!showFormTagPicker ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 w-fit"
+                  onClick={() => setShowFormTagPicker(true)}
+                >
+                  {t("transfers.tag")}
+                </button>
+              ) : (
+                <div>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-slate-700">{t("transfers.tags")}</span>
+                    {tags.length > 0 && formTagIds.length > 0 && (
+                      <button
+                        type="button"
+                        className="text-xs text-slate-600 hover:text-slate-900"
+                        onClick={() => setFormTagIds([])}
+                      >
+                        {t("common.clear")}
+                      </button>
+                    )}
+                  </div>
+                  {tags.length === 0 ? (
+                    <p className="text-sm text-slate-500">{t("transfers.noTagsAvailable")}</p>
+                  ) : (
+                    <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                      {tags.map((tag) => (
+                        <label
+                          key={tag.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 hover:bg-slate-50"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={formTagIds.includes(tag.id)}
+                            onChange={(e) => {
+                              const on = e.target.checked;
+                              setFormTagIds((prev) =>
+                                on ? [...prev, tag.id] : prev.filter((id) => id !== tag.id),
+                              );
+                            }}
+                          />
+                          <Badge tone="slate" backgroundColor={tag.color}>
+                            {tag.name}
+                          </Badge>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"
@@ -1409,8 +1523,14 @@ export default function TransfersPage() {
                                 <td className="py-2 px-3 border-b border-slate-100 text-slate-600">
                                   {change.toAccountName || change.toAccountId}
                                 </td>
-                                <td className="py-2 px-3 border-b border-slate-100 font-semibold text-slate-900">
-                                  {formatCurrency(change.amount, transfer.currencyCode)}
+                                <td className="py-2 px-3 border-b border-slate-100">
+                                  <StyledCurrencyAmount
+                                    signedAmount={change.amount}
+                                    currencyCode={transfer.currencyCode}
+                                    currencyByCode={currencyByCode}
+                                    formatAbsValue={formatAmount}
+                                    defaultClassName="font-semibold text-slate-900"
+                                  />
                                 </td>
                                 <td className="py-2 px-3 border-b border-slate-100 text-slate-600">
                                   {change.description || "-"}

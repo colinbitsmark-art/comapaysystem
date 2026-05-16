@@ -5,6 +5,7 @@ import SectionCard from "../components/common/SectionCard";
 import { Pagination } from "../components/common/Pagination";
 import AlertModal from "../components/common/AlertModal";
 import ConfirmModal from "../components/common/ConfirmModal";
+import { ColorInput } from "../components/common/CurrencyDisplayColorFields";
 import type { Customer, CustomerBeneficiary, CustomerType } from "../types";
 import {
   useAddCustomerMutation,
@@ -121,7 +122,14 @@ export default function CustomersPage() {
     phone: "",
     remarks: "",
     customerType: "individual" as CustomerType,
+    displayBgColor: "",
+    displayTextColor: "",
   });
+
+  // Bulk color selection state
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<number>>(new Set());
+  const [bulkColorForm, setBulkColorForm] = useState({ displayBgColor: "", displayTextColor: "" });
+  const [isBulkColorMode, setIsBulkColorMode] = useState(false);
 
   const [includeBeneficiary, setIncludeBeneficiary] = useState(false);
   const [beneficiaryForm, setBeneficiaryForm] = useState({
@@ -209,7 +217,7 @@ export default function CustomersPage() {
       await addCustomerBeneficiary(payload);
     }
 
-    setForm({ name: "", email: "", phone: "", remarks: "", customerType: "individual" });
+    setForm({ name: "", email: "", phone: "", remarks: "", customerType: "individual", displayBgColor: "", displayTextColor: "" });
     setIncludeBeneficiary(false);
     setBeneficiaryForm({
       paymentType: "CRYPTO",
@@ -227,7 +235,7 @@ export default function CustomersPage() {
 
   const closeCreateModal = () => {
     setIsCreateModalOpen(false);
-    setForm({ name: "", email: "", phone: "", remarks: "", customerType: "individual" });
+    setForm({ name: "", email: "", phone: "", remarks: "", customerType: "individual", displayBgColor: "", displayTextColor: "" });
     setIncludeBeneficiary(false);
     setBeneficiaryForm({
       paymentType: "CRYPTO",
@@ -319,6 +327,8 @@ export default function CustomersPage() {
       phone: current.phone,
       remarks: current.remarks || "",
       customerType: current.customerType === "corporate" ? "corporate" : "individual",
+      displayBgColor: current.displayBgColor ?? "",
+      displayTextColor: current.displayTextColor ?? "",
     });
   };
 
@@ -326,6 +336,30 @@ export default function CustomersPage() {
     setEditingId(null);
     setEditForm(null);
     cancelEditBeneficiary();
+  };
+
+  const toggleCustomerSelection = (id: number) => {
+    setSelectedCustomerIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedCustomerIds(checked ? new Set(customers.map((c: Customer) => c.id)) : new Set());
+  };
+
+  const applyBulkColor = async (bgColor: string | null, textColor: string | null) => {
+    const ids = Array.from(selectedCustomerIds);
+    await Promise.all(
+      ids.map((id) =>
+        updateCustomer({ id, data: { displayBgColor: bgColor, displayTextColor: textColor } }).unwrap().catch(() => null)
+      )
+    );
+    setSelectedCustomerIds(new Set());
+    setIsBulkColorMode(false);
+    setBulkColorForm({ displayBgColor: "", displayTextColor: "" });
   };
 
   const editingCustomerRow =
@@ -346,6 +380,8 @@ export default function CustomersPage() {
       phone: editForm.phone.trim(),
       remarks: (editForm.remarks || "").trim(),
       customerType: editForm.customerType,
+      displayBgColor: (editForm.displayBgColor || "").trim() || null,
+      displayTextColor: (editForm.displayTextColor || "").trim() || null,
     };
 
     if (!trimmedEditForm.name) {
@@ -481,12 +517,92 @@ export default function CustomersPage() {
               autoComplete="off"
             />
           </div>
+          <button
+            type="button"
+            onClick={() => { setIsBulkColorMode((v) => !v); setSelectedCustomerIds(new Set()); }}
+            className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              isBulkColorMode
+                ? "border-blue-400 bg-blue-50 text-blue-700"
+                : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            {t("customers.colorFormat") || "Color format"}
+          </button>
         </div>
+
+        {isBulkColorMode && selectedCustomerIds.size > 0 && (
+          <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-blue-900">
+                {selectedCustomerIds.size} {t("customers.selectedForColor") || "customer(s) selected"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedCustomerIds(new Set())}
+                className="text-xs text-slate-500 hover:underline"
+              >
+                {t("customers.deselectAll") || "Deselect all"}
+              </button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 mb-3">
+              <ColorInput
+                label={t("accounts.displayBgColor") || "Background Color"}
+                value={bulkColorForm.displayBgColor}
+                placeholder="#1e3a8a"
+                onChange={(v) => setBulkColorForm((p) => ({ ...p, displayBgColor: v }))}
+              />
+              <ColorInput
+                label={t("accounts.displayTextColor") || "Text Color"}
+                value={bulkColorForm.displayTextColor}
+                placeholder="#ffffff"
+                onChange={(v) => setBulkColorForm((p) => ({ ...p, displayTextColor: v }))}
+              />
+            </div>
+            {bulkColorForm.displayBgColor.trim() && (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-slate-600">{t("common.preview") || "Preview"}:</span>
+                <span
+                  className="inline-block rounded-md px-2 py-0.5 text-sm font-semibold"
+                  style={{ backgroundColor: bulkColorForm.displayBgColor, color: bulkColorForm.displayTextColor || "#ffffff" }}
+                >
+                  {customers.find((c: Customer) => selectedCustomerIds.has(c.id))?.name || "Customer"}
+                </span>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => applyBulkColor(bulkColorForm.displayBgColor.trim() || null, bulkColorForm.displayTextColor.trim() || null)}
+                disabled={!bulkColorForm.displayBgColor.trim()}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {t("customers.applyColor") || "Apply color"}
+              </button>
+              <button
+                type="button"
+                onClick={() => applyBulkColor(null, null)}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                {t("customers.clearColor") || "Clear color"}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="overflow-x-auto min-h-[60vh]">
           <table className="w-full table-fixed text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-slate-600">
+                {isBulkColorMode && (
+                  <th className="py-2 w-8">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={customers.length > 0 && customers.every((c: Customer) => selectedCustomerIds.has(c.id))}
+                      onChange={(e) => toggleSelectAll(e.target.checked)}
+                    />
+                  </th>
+                )}
                 <th className="py-2 w-1/6">{t("customers.name")}</th>
                 <th className="py-2 w-[7%] whitespace-nowrap">{t("customers.customerType")}</th>
                 <th className="py-2 w-1/6">{t("customers.email")}</th>
@@ -501,9 +617,31 @@ export default function CustomersPage() {
             </thead>
             <tbody>
               {customers.map((customer: Customer) => (
-                <tr key={customer.id} className="border-b border-slate-100">
+                <tr
+                  key={customer.id}
+                  className={`border-b border-slate-100 ${isBulkColorMode && selectedCustomerIds.has(customer.id) ? "bg-blue-50" : ""}`}
+                  onClick={isBulkColorMode ? () => toggleCustomerSelection(customer.id) : undefined}
+                  style={isBulkColorMode ? { cursor: "pointer" } : undefined}
+                >
+                  {isBulkColorMode && (
+                    <td className="py-2 w-8" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={selectedCustomerIds.has(customer.id)}
+                        onChange={() => toggleCustomerSelection(customer.id)}
+                      />
+                    </td>
+                  )}
                   <td className="py-2 w-1/6 font-semibold truncate" title={customer.name}>
-                    {customer.name}
+                    {customer.displayBgColor ? (
+                      <span
+                        className="inline-block rounded-md px-2 py-0.5"
+                        style={{ backgroundColor: customer.displayBgColor, color: customer.displayTextColor || "#ffffff", fontWeight: 700 }}
+                      >
+                        {customer.name}
+                      </span>
+                    ) : customer.name}
                   </td>
                   <td className="py-2 w-[7%] text-xs text-slate-600 whitespace-nowrap">
                     {t(
@@ -598,7 +736,7 @@ export default function CustomersPage() {
               ))}
               {!customers.length && (
                 <tr>
-                  <td className="py-4 text-sm text-slate-500" colSpan={7}>
+                  <td className="py-4 text-sm text-slate-500" colSpan={isBulkColorMode ? 8 : 7}>
                     {t("customers.noCustomers")}
                   </td>
                 </tr>
@@ -671,6 +809,46 @@ export default function CustomersPage() {
                 {t("customers.kycResetOnTypeChange")}
               </p>
             )}
+            <fieldset className="col-span-full rounded-lg border border-slate-200 p-4">
+              <legend className="px-1 text-sm font-semibold text-slate-800">{t("customers.nameDisplayTitle") || "Name Display"}</legend>
+              <p className="mb-3 text-xs text-slate-500">{t("customers.nameDisplayHint") || "Optionally style this customer's name with a background and text color in tables."}</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <ColorInput
+                  label={t("accounts.displayBgColor") || "Background Color"}
+                  value={editForm.displayBgColor || ""}
+                  placeholder="#1e3a8a"
+                  onChange={(v) => setEditForm((p) => (p ? { ...p, displayBgColor: v } : p))}
+                />
+                <ColorInput
+                  label={t("accounts.displayTextColor") || "Text Color"}
+                  value={editForm.displayTextColor || ""}
+                  placeholder="#ffffff"
+                  onChange={(v) => setEditForm((p) => (p ? { ...p, displayTextColor: v } : p))}
+                />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                {(editForm.displayBgColor || "").trim() ? (
+                  <>
+                    <span className="text-xs font-medium text-slate-600">{t("common.preview") || "Preview"}:</span>
+                    <span
+                      className="inline-block rounded-md px-2 py-0.5 text-sm font-semibold"
+                      style={{ backgroundColor: editForm.displayBgColor!, color: editForm.displayTextColor || "#ffffff" }}
+                    >
+                      {editForm.name || t("customers.namePlaceholder")}
+                    </span>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-500">{t("customers.nameDisplayPreviewDefault") || "No custom styling."}</p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEditForm((p) => (p ? { ...p, displayBgColor: "", displayTextColor: "" } : p))}
+                  className="text-sm font-semibold text-slate-600 hover:text-slate-800"
+                >
+                  {t("accounts.clearDisplayColors") || "Clear colors"}
+                </button>
+              </div>
+            </fieldset>
             <button
               type="submit"
               className="col-span-full rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-amber-700"

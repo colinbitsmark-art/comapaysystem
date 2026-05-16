@@ -516,6 +516,16 @@ export const api = createApi({
         { type: "User", id: "LIST" },
       ],
     }),
+    updateUserPreferences: builder.mutation<
+      { id: number; sidebarBgColor?: string | null; displayBgColor?: string | null; themeHeaderBg?: string | null; themeCardBg?: string | null; themeBorder?: string | null; themeTextPrimary?: string | null; themeTextSecondary?: string | null; themeSidebarNavText?: string | null },
+      { id: number; sidebarBgColor?: string | null; displayBgColor?: string | null; themeHeaderBg?: string | null; themeCardBg?: string | null; themeBorder?: string | null; themeTextPrimary?: string | null; themeTextSecondary?: string | null; themeSidebarNavText?: string | null }
+    >({
+      query: ({ id, ...body }) => ({
+        url: `users/${id}/preferences`,
+        method: "PATCH",
+        body,
+      }),
+    }),
     getRoles: builder.query<Role[], void>({
       query: () => "roles",
       providesTags: (result) =>
@@ -572,14 +582,15 @@ export const api = createApi({
         page: number;
         limit: number;
         totalPages: number;
+        totalCalculatedProfit: number | null;
+        totalCalculatedProfitCurrency: string | null;
       },
       {
         dateFrom?: string;
         dateTo?: string;
         handlerId?: number;
         customerId?: number;
-        fromCurrency?: string;
-        toCurrency?: string;
+        currencyPairs?: string;
         buyAccountId?: number;
         sellAccountId?: number;
         status?: OrderStatus;
@@ -595,8 +606,7 @@ export const api = createApi({
         if (params.dateTo) queryParams.append("dateTo", params.dateTo);
         if (params.handlerId !== undefined) queryParams.append("handlerId", params.handlerId.toString());
         if (params.customerId !== undefined) queryParams.append("customerId", params.customerId.toString());
-        if (params.fromCurrency) queryParams.append("fromCurrency", params.fromCurrency);
-        if (params.toCurrency) queryParams.append("toCurrency", params.toCurrency);
+        if (params.currencyPairs) queryParams.append("currencyPairs", params.currencyPairs);
         if (params.buyAccountId !== undefined) queryParams.append("buyAccountId", params.buyAccountId.toString());
         if (params.sellAccountId !== undefined) queryParams.append("sellAccountId", params.sellAccountId.toString());
         if (params.status) queryParams.append("status", params.status);
@@ -622,8 +632,7 @@ export const api = createApi({
         dateTo?: string;
         handlerId?: number;
         customerId?: number;
-        fromCurrency?: string;
-        toCurrency?: string;
+        currencyPairs?: string;
         buyAccountId?: number;
         sellAccountId?: number;
         status?: OrderStatus;
@@ -637,8 +646,7 @@ export const api = createApi({
         if (params.dateTo) queryParams.append("dateTo", params.dateTo);
         if (params.handlerId !== undefined) queryParams.append("handlerId", params.handlerId.toString());
         if (params.customerId !== undefined) queryParams.append("customerId", params.customerId.toString());
-        if (params.fromCurrency) queryParams.append("fromCurrency", params.fromCurrency);
-        if (params.toCurrency) queryParams.append("toCurrency", params.toCurrency);
+        if (params.currencyPairs) queryParams.append("currencyPairs", params.currencyPairs);
         if (params.buyAccountId !== undefined) queryParams.append("buyAccountId", params.buyAccountId.toString());
         if (params.sellAccountId !== undefined) queryParams.append("sellAccountId", params.sellAccountId.toString());
         if (params.status) queryParams.append("status", params.status);
@@ -1200,7 +1208,7 @@ export const api = createApi({
       }),
       invalidatesTags: [{ type: "Account", id: "LIST" }],
     }),
-    updateAccount: builder.mutation<Account, { id: number; name: string; balance?: number }>({
+    updateAccount: builder.mutation<Account, { id: number; name: string; balance?: number; displayBgColor?: string | null; displayTextColor?: string | null }>({
       query: ({ id, ...body }) => ({
         url: `accounts/${id}`,
         method: "PUT",
@@ -2049,6 +2057,7 @@ export const {
   useAddUserMutation,
   useUpdateUserMutation,
   useDeleteUserMutation,
+  useUpdateUserPreferencesMutation,
   useGetRolesQuery,
   useAddRoleMutation,
   useUpdateRoleMutation,

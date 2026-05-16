@@ -22,9 +22,18 @@ const authSlice = createSlice({
         localStorage.removeItem("auth_user");
       }
     },
+    updateThemePreferences(
+      state,
+      action: PayloadAction<{ sidebarBgColor?: string | null; displayBgColor?: string | null; themeHeaderBg?: string | null; themeCardBg?: string | null; themeBorder?: string | null; themeTextPrimary?: string | null; themeTextSecondary?: string | null; themeSidebarNavText?: string | null }>
+    ) {
+      if (state.user) {
+        state.user = { ...state.user, ...action.payload };
+        localStorage.setItem("auth_user", JSON.stringify(state.user));
+      }
+    },
   },
 });
 
-export const { setUser } = authSlice.actions;
+export const { setUser, updateThemePreferences } = authSlice.actions;
 export default authSlice.reducer;
 

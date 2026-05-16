@@ -3,11 +3,14 @@ import { useTranslation } from "react-i18next";
 import { OrdersTableRow } from "./OrdersTableRow";
 import { Pagination } from "../common/Pagination";
 import { getStatusTone } from "../../utils/orders/orderFormatters";
-import type { Order, Account, AuthResponse } from "../../types";
+import type { Order, Account, AuthResponse, Currency, Customer, User } from "../../types";
 
 interface OrdersTableProps {
   orders: Order[];
   accounts: Account[];
+  customers?: Customer[];
+  users?: User[];
+  currencyByCode: Map<string, Currency>;
   // Column management
   columnOrder: string[];
   visibleColumns: Set<string>;
@@ -54,6 +57,9 @@ interface OrdersTableProps {
 export function OrdersTable({
   orders,
   accounts,
+  customers,
+  users,
+  currencyByCode,
   columnOrder,
   visibleColumns,
   getColumnLabel,
@@ -142,6 +148,9 @@ export function OrdersTable({
                 columnOrder={columnOrder}
                 visibleColumns={visibleColumns}
                 accounts={accounts}
+                customers={customers}
+                users={users}
+                currencyByCode={currencyByCode}
                 getStatusTone={getStatusTone}
                 showCheckbox={showCheckbox}
                 isSelected={selectedOrderIds.includes(order.id)}

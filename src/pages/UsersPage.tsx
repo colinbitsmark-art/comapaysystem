@@ -5,6 +5,7 @@ import Badge from "../components/common/Badge";
 import SectionCard from "../components/common/SectionCard";
 import AlertModal from "../components/common/AlertModal";
 import ConfirmModal from "../components/common/ConfirmModal";
+import { ColorInput } from "../components/common/CurrencyDisplayColorFields";
 import {
   useAddUserMutation,
   useDeleteUserMutation,
@@ -42,6 +43,8 @@ export default function UsersPage() {
     email: "",
     password: "",
     role: "manager",
+    displayBgColor: "",
+    displayTextColor: "",
   });
 
   // When roles are loaded, ensure the create-user form defaults to a valid role
@@ -76,6 +79,8 @@ export default function UsersPage() {
       email: current.email,
       password: "",
       role: current.role,
+      displayBgColor: current.displayBgColor ?? "",
+      displayTextColor: current.displayTextColor ?? "",
     });
   };
 
@@ -92,6 +97,8 @@ export default function UsersPage() {
     if (!payload.password) {
       delete payload.password;
     }
+    payload.displayBgColor = (payload.displayBgColor || "").trim() || null;
+    payload.displayTextColor = (payload.displayTextColor || "").trim() || null;
     await updateUser({ id: editingId, data: payload });
     cancelEdit();
   };
@@ -162,7 +169,14 @@ export default function UsersPage() {
               {users.map((user) => (
                 <tr key={user.id} className="border-b border-slate-100">
                   <td className="w-1/4 py-2 font-semibold truncate" title={user.name}>
-                    {user.name}
+                    {user.displayBgColor ? (
+                      <span
+                        className="inline-block rounded-md px-2 py-0.5"
+                        style={{ backgroundColor: user.displayBgColor, color: user.displayTextColor || "#ffffff", fontWeight: 700 }}
+                      >
+                        {user.name}
+                      </span>
+                    ) : user.name}
                   </td>
                   <td className="w-1/4 py-2 truncate" title={user.email || undefined}>
                     {user.email}
@@ -252,6 +266,46 @@ export default function UsersPage() {
               value={editForm.password}
               onChange={(e) => setEditForm((p) => (p ? { ...p, password: e.target.value } : p))}
             />
+            <fieldset className="col-span-full rounded-lg border border-slate-200 p-4">
+              <legend className="px-1 text-sm font-semibold text-slate-800">{t("users.nameDisplayTitle") || "Name Display"}</legend>
+              <p className="mb-3 text-xs text-slate-500">{t("users.nameDisplayHint") || "Optionally style this user's name with a background and text color in tables."}</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <ColorInput
+                  label={t("accounts.displayBgColor") || "Background Color"}
+                  value={editForm.displayBgColor || ""}
+                  placeholder="#1e3a8a"
+                  onChange={(v) => setEditForm((p) => (p ? { ...p, displayBgColor: v } : p))}
+                />
+                <ColorInput
+                  label={t("accounts.displayTextColor") || "Text Color"}
+                  value={editForm.displayTextColor || ""}
+                  placeholder="#ffffff"
+                  onChange={(v) => setEditForm((p) => (p ? { ...p, displayTextColor: v } : p))}
+                />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                {(editForm.displayBgColor || "").trim() ? (
+                  <>
+                    <span className="text-xs font-medium text-slate-600">{t("common.preview") || "Preview"}:</span>
+                    <span
+                      className="inline-block rounded-md px-2 py-0.5 text-sm font-semibold"
+                      style={{ backgroundColor: editForm.displayBgColor!, color: editForm.displayTextColor || "#ffffff" }}
+                    >
+                      {editForm.name}
+                    </span>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-500">{t("users.nameDisplayPreviewDefault") || "No custom styling."}</p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEditForm((p) => (p ? { ...p, displayBgColor: "", displayTextColor: "" } : p))}
+                  className="text-sm font-semibold text-slate-600 hover:text-slate-800"
+                >
+                  {t("accounts.clearDisplayColors") || "Clear colors"}
+                </button>
+              </div>
+            </fieldset>
             <button
               type="submit"
               className="col-span-full rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-amber-700"

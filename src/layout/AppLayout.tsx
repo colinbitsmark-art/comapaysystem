@@ -16,6 +16,7 @@ import {
 } from "../services/api";
 import { APP_DISPLAY_NAME_EN_KEY, APP_DISPLAY_NAME_ZH_KEY } from "../constants/appBrandSettings";
 import { tagsFromCacheSyncPayload } from "../utils/cacheSyncTags";
+import { useThemePreferences, isLightColor } from "../hooks/useThemePreferences";
 
 type SidebarEntry =
   | { kind: "link"; to: string; labelKey: string; end?: boolean; section?: string; adminOnly?: boolean }
@@ -42,7 +43,6 @@ function CustomersNavGroup({ onNavigate }: { onNavigate: () => void }) {
   const { pathname } = useLocation();
   const parentActive = pathname.startsWith("/customers");
   const [open, setOpen] = useState(() => pathname.startsWith("/customers"));
-
   useEffect(() => {
     if (!pathname.startsWith("/customers")) {
       setOpen(false);
@@ -51,7 +51,7 @@ function CustomersNavGroup({ onNavigate }: { onNavigate: () => void }) {
 
   const subNavCls = ({ isActive }: { isActive: boolean }) =>
     `block w-full rounded-lg px-3 py-2 text-left text-xs font-semibold transition ${
-      isActive ? "bg-slate-700 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+      isActive ? "sidebar-nav-active" : "sidebar-nav-item"
     }`;
 
   const handleParentClick = (e: ReactMouseEvent<HTMLAnchorElement>) => {
@@ -77,14 +77,14 @@ function CustomersNavGroup({ onNavigate }: { onNavigate: () => void }) {
         }}
         className={() =>
           `block w-full rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
-            parentActive ? "bg-white text-slate-900 shadow-sm" : "bg-slate-800 text-slate-100 hover:bg-slate-700"
+            parentActive ? "sidebar-nav-active shadow-sm" : "sidebar-nav-item"
           }`
         }
       >
         {t("nav.customers")}
       </NavLink>
       {open && (
-        <div className="mt-2 ml-2 flex flex-col gap-1 border-l border-slate-600 pl-3">
+        <div className="mt-2 ml-2 flex flex-col gap-1 border-l pl-3" style={{ borderColor: "var(--theme-sidebar-nav-hover)" }}>
           <NavLink to="/customers" end onClick={onNavigate} className={subNavCls}>
             {t("nav.customerList")}
           </NavLink>
@@ -114,6 +114,10 @@ export default function AppLayout() {
   const notificationDropdownRef = useRef<HTMLDivElement>(null);
   const notificationEventSourceRef = useRef<EventSource | null>(null);
   const [realtimeUnreadCount, setRealtimeUnreadCount] = useState(0);
+
+  // Theme preferences — CSS vars are injected automatically by the hook
+  const { sidebarBgColor, appBgColor, derived } = useThemePreferences();
+  const sidebarIsLight = isLightColor(sidebarBgColor);
 
   // Fetch notifications (no polling, SSE will handle real-time updates)
   const { data: unreadCountData, refetch: refetchUnreadCount } = useGetUnreadCountQuery(undefined, {
@@ -387,6 +391,7 @@ export default function AppLayout() {
 
   const headerTitle = useMemo(() => {
     if (pathname === "/" || pathname === "") return t("nav.dashboard");
+    if (pathname === "/preferences") return t("nav.preferences");
     if (pathname.startsWith("/customers/settings")) return t("customerSettings.pageTitle");
     if (pathname === "/customers") return t("nav.customerList");
     if (pathname.startsWith("/customers/")) return t("customers.title");
@@ -406,7 +411,7 @@ export default function AppLayout() {
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `w-full rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
-      isActive ? "bg-white text-slate-900 shadow-sm" : "bg-slate-800 text-slate-100 hover:bg-slate-700"
+      isActive ? "sidebar-nav-active shadow-sm" : "sidebar-nav-item"
     }`;
 
   const changeLanguage = (lng: string) => {
@@ -491,13 +496,17 @@ export default function AppLayout() {
   };
 
   return (
-    <div className={`relative grid min-h-screen bg-slate-50 text-slate-900 transition-all duration-300 ${
-      isSidebarCollapsed ? 'lg:grid-cols-[0_1fr]' : 'lg:grid-cols-[240px_1fr]'
-    }`}>
+    <div
+      className={`relative grid min-h-screen text-slate-900 transition-all duration-300 ${
+        isSidebarCollapsed ? 'lg:grid-cols-[0_1fr]' : 'lg:grid-cols-[240px_1fr]'
+      }`}
+      style={{ backgroundColor: appBgColor }}
+    >
       {/* Mobile Hamburger Menu Button */}
       <button
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        className="fixed top-4 left-4 z-50 flex items-center justify-center w-10 h-10 bg-slate-900 text-slate-100 rounded-lg shadow-lg hover:bg-slate-800 transition-colors lg:hidden"
+        className="fixed top-4 left-4 z-50 flex items-center justify-center w-10 h-10 rounded-lg shadow-lg transition-colors lg:hidden"
+        style={{ backgroundColor: sidebarBgColor, color: derived.sidebarNavText }}
         aria-label="Toggle menu"
       >
         <svg
@@ -535,11 +544,12 @@ export default function AppLayout() {
       {/* Toggle Arrow Button - Fixed position, centered vertically (Desktop only) */}
       <button
         onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-        className={`fixed top-1/2 -translate-y-1/2 z-50 flex items-center justify-center w-8 h-24 bg-slate-800 hover:bg-slate-700 text-slate-100 shadow-lg transition-all duration-300 hidden lg:flex ${
+        className={`fixed top-1/2 -translate-y-1/2 z-50 flex items-center justify-center w-8 h-24 shadow-lg transition-all duration-300 hidden lg:flex ${
           isSidebarCollapsed 
             ? 'left-0 rounded-r-lg border-l-0' 
             : 'left-[240px] -ml-px rounded-r-lg border-l-0'
         }`}
+        style={{ backgroundColor: derived.sidebarNavHover, color: derived.sidebarNavText }}
         aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
         <svg
@@ -559,16 +569,19 @@ export default function AppLayout() {
         </svg>
       </button>
 
-      <aside className={`fixed lg:sticky lg:top-0 top-0 left-0 h-screen flex flex-col gap-6 border-b border-slate-200 bg-slate-900 text-slate-50 lg:border-b-0 lg:border-r transition-all duration-300 z-40 ${
-        isSidebarCollapsed ? 'lg:w-0 lg:px-0 lg:overflow-visible lg:border-r-0' : 'px-6 py-6 overflow-y-auto'
-      } ${
-        isMobileMenuOpen 
-          ? 'w-64 translate-x-0' 
-          : '-translate-x-full lg:translate-x-0'
-      }`}>
+      <aside
+        className={`fixed lg:sticky lg:top-0 top-0 left-0 h-screen flex flex-col border-b border-slate-200 lg:border-b-0 lg:border-r transition-all duration-300 z-40 ${
+          isSidebarCollapsed ? 'lg:w-0 lg:px-0 lg:overflow-visible lg:border-r-0' : 'px-6 py-6 overflow-y-auto'
+        } ${
+          isMobileMenuOpen 
+            ? 'w-64 translate-x-0' 
+            : '-translate-x-full lg:translate-x-0'
+        }`}
+        style={{ backgroundColor: sidebarBgColor, color: derived.sidebarNavText }}
+      >
         <div className={`transition-opacity duration-300 ${isSidebarCollapsed ? 'opacity-0 lg:w-0 lg:overflow-hidden' : 'opacity-100'}`}>
           {sidebarAppName ? (
-            <div className="text-lg font-semibold text-slate-50 leading-snug">{sidebarAppName}</div>
+            <div className="text-lg font-semibold leading-snug" style={{ color: derived.sidebarNavText }}>{sidebarAppName}</div>
           ) : null}
           <nav className={`flex flex-wrap gap-2 lg:flex-col ${sidebarAppName ? "mt-6" : ""}`}>
             {visibleSidebarEntries.map((entry) =>
@@ -588,18 +601,31 @@ export default function AppLayout() {
             )}
           </nav>
         </div>
- {/*        <div className="rounded-xl bg-slate-800/60 p-4 text-xs text-slate-200">
-          Data is stored in an embedded SQLite database. Start both API & client with{" "}
-          <code className="rounded bg-slate-900 px-1 py-0.5">npm run dev</code>.
-        </div> */}
+
+        {/* Preferences button — pinned to the bottom of the sidebar */}
+        <div className={`mt-auto pt-4 transition-opacity duration-300 ${isSidebarCollapsed ? 'opacity-0 lg:w-0 lg:overflow-hidden' : 'opacity-100'}`}>
+          <NavLink
+            to="/preferences"
+            onClick={() => setIsMobileMenuOpen(false)}
+            className={({ isActive }) =>
+              `flex items-center gap-2 w-full rounded-xl px-4 py-3 text-sm font-semibold transition ${
+                isActive ? "sidebar-nav-active shadow-sm" : "sidebar-nav-item"
+              }`
+            }
+            title={t("preferences.title")}
+          >
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            {t("preferences.title")}
+          </NavLink>
+        </div>
       </aside>
       <div className="min-w-0 overflow-x-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4 lg:px-10 pt-16 lg:pt-4">
+        <div className="theme-header flex items-center justify-between border-b px-6 py-4 lg:px-10 pt-16 lg:pt-4">
           <div>
-   {/*          <p className="text-xs uppercase tracking-wide text-slate-500">
-              FX Control Center
-            </p> */}
-            <h1 className="text-2xl font-semibold text-slate-900">{headerTitle}</h1>
+            <h1 className="text-2xl font-semibold">{headerTitle}</h1>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -738,10 +764,11 @@ export default function AppLayout() {
                   )}
                 </div>
 
-                <div className="text-sm text-slate-600">{user.email} ({user.role})</div>
+                <div className="text-sm" style={{ color: "var(--theme-text-secondary)" }}>{user.email} ({user.role})</div>
                 <button
                   onClick={logout}
-                  className="rounded-lg border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  className="rounded-lg border px-3 py-1 text-sm font-semibold transition-colors hover:opacity-80"
+                  style={{ borderColor: "var(--theme-border)", color: "var(--theme-text-primary)" }}
                 >
                   {t("common.logout")}
                 </button>

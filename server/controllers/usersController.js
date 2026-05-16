@@ -1,8 +1,10 @@
 import bcrypt from "bcryptjs";
 import { db } from "../db.js";
 
+const USER_SELECT_FIELDS = "id, name, email, role, displayBgColor, displayTextColor, sidebarBgColor, themeHeaderBg, themeCardBg, themeBorder, themeTextPrimary, themeTextSecondary, themeSidebarNavText";
+
 export const listUsers = (_req, res) => {
-  const rows = db.prepare("SELECT id, name, email, role FROM users ORDER BY name ASC;").all();
+  const rows = db.prepare(`SELECT ${USER_SELECT_FIELDS} FROM users ORDER BY name ASC;`).all();
   res.json(rows);
 };
 
@@ -19,7 +21,7 @@ export const createUser = (req, res, next) => {
       `INSERT INTO users (name, email, password, role) VALUES (@name, @email, @password, @role);`,
     );
     const result = stmt.run(data);
-    const row = db.prepare("SELECT id, name, email, role FROM users WHERE id = ?;").get(result.lastInsertRowid);
+    const row = db.prepare(`SELECT ${USER_SELECT_FIELDS} FROM users WHERE id = ?;`).get(result.lastInsertRowid);
     res.status(201).json(row);
   } catch (error) {
     next(error);
@@ -43,7 +45,27 @@ export const updateUser = (req, res, next) => {
       ...normalized,
       id,
     });
-    const row = db.prepare("SELECT id, name, email, role FROM users WHERE id = ?;").get(id);
+    const row = db.prepare(`SELECT ${USER_SELECT_FIELDS} FROM users WHERE id = ?;`).get(id);
+    res.json(row);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateUserPreferences = (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const requestingUserId = req.headers["x-user-id"];
+    if (String(requestingUserId) !== String(id)) {
+      return res.status(403).json({ message: "You can only update your own preferences" });
+    }
+    const { sidebarBgColor, displayBgColor, themeHeaderBg, themeCardBg, themeBorder, themeTextPrimary, themeTextSecondary, themeSidebarNavText } = req.body || {};
+    db.prepare(
+      "UPDATE users SET sidebarBgColor = @sidebarBgColor, displayBgColor = @displayBgColor, themeHeaderBg = @themeHeaderBg, themeCardBg = @themeCardBg, themeBorder = @themeBorder, themeTextPrimary = @themeTextPrimary, themeTextSecondary = @themeTextSecondary, themeSidebarNavText = @themeSidebarNavText WHERE id = @id;"
+    ).run({ sidebarBgColor: sidebarBgColor ?? null, displayBgColor: displayBgColor ?? null, themeHeaderBg: themeHeaderBg ?? null, themeCardBg: themeCardBg ?? null, themeBorder: themeBorder ?? null, themeTextPrimary: themeTextPrimary ?? null, themeTextSecondary: themeTextSecondary ?? null, themeSidebarNavText: themeSidebarNavText ?? null, id });
+    const row = db
+      .prepare(`SELECT ${USER_SELECT_FIELDS} FROM users WHERE id = ?;`)
+      .get(id);
     res.json(row);
   } catch (error) {
     next(error);

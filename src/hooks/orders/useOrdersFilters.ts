@@ -8,7 +8,7 @@ const defaultFilters: OrderFilters = {
   dateTo: null,
   handlerId: null,
   customerId: null,
-  currencyPair: null,
+  currencyPairs: [],
   buyAccountId: null,
   sellAccountId: null,
   status: null,
@@ -52,10 +52,8 @@ export function useOrdersFilters(
     if (filterState.dateTo) params.dateTo = filterState.dateTo;
     if (filterState.handlerId !== null) params.handlerId = filterState.handlerId;
     if (filterState.customerId !== null) params.customerId = filterState.customerId;
-    if (filterState.currencyPair) {
-      const [from, to] = filterState.currencyPair.split('/');
-      params.fromCurrency = from;
-      params.toCurrency = to;
+    if (filterState.currencyPairs.length > 0) {
+      params.currencyPairs = filterState.currencyPairs.join(',');
     }
     if (filterState.buyAccountId !== null) params.buyAccountId = filterState.buyAccountId;
     if (filterState.sellAccountId !== null) params.sellAccountId = filterState.sellAccountId;

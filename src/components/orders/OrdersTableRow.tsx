@@ -1,5 +1,5 @@
 import React from "react";
-import type { Order, AuthResponse } from "../../types";
+import type { Order, AuthResponse, Currency, Customer, User } from "../../types";
 import { renderOrderCell } from "./OrdersTableColumns";
 import { OrderActionsMenu } from "./OrderActionsMenu";
 import type { Account } from "../../types";
@@ -10,6 +10,9 @@ interface OrdersTableRowProps {
   columnOrder: string[];
   visibleColumns: Set<string>;
   accounts: Account[];
+  customers?: Customer[];
+  users?: User[];
+  currencyByCode: Map<string, Currency>;
   getStatusTone: (status: OrderStatus) => "amber" | "blue" | "emerald" | "rose" | "slate" | "orange";
   // Selection
   showCheckbox: boolean;
@@ -53,6 +56,9 @@ export function OrdersTableRow({
   columnOrder,
   visibleColumns,
   accounts,
+  customers,
+  users,
+  currencyByCode,
   getStatusTone,
   showCheckbox,
   isSelected,
@@ -168,6 +174,9 @@ export function OrdersTableRow({
           columnKey,
           order,
           accounts,
+          customers,
+          users,
+          currencyByCode,
           getStatusTone,
           t,
         }) : null

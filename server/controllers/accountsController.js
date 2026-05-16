@@ -348,69 +348,79 @@ export const createAccount = (req, res, next) => {
 export const updateAccount = (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, balance } = req.body || {};
+    const { name, balance, displayBgColor, displayTextColor } = req.body || {};
     
     if (!name) {
       return res.status(400).json({ message: "Name is required" });
     }
 
-    // Check if account exists and get current balance
-    const existing = db.prepare("SELECT id, balance, currencyCode FROM accounts WHERE id = ?").get(id);
+    // Check if account exists and get current state
+    const existing = db.prepare("SELECT id, name, balance, currencyCode FROM accounts WHERE id = ?").get(id);
     if (!existing) {
       return res.status(404).json({ message: "Account not found" });
     }
 
-    // Check if another account with the same name already exists within the same currency (excluding current account, case-insensitive)
-    const duplicateAccount = db.prepare("SELECT id FROM accounts WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND currencyCode = ? AND id != ?").get(name, existing.currencyCode, id);
-    if (duplicateAccount) {
-      return res.status(400).json({ message: "An account with this name already exists for this currency" });
+    const nameChanged = name.trim().toLowerCase() !== existing.name.trim().toLowerCase();
+    const balanceChanged = balance !== undefined && balance !== null && parseFloat(balance) !== existing.balance;
+
+    // Name/balance changes are restricted when the account is linked to records
+    if (nameChanged || balanceChanged) {
+      // Check if another account with the same name already exists within the same currency (excluding current account, case-insensitive)
+      const duplicateAccount = db.prepare("SELECT id FROM accounts WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND currencyCode = ? AND id != ?").get(name, existing.currencyCode, id);
+      if (duplicateAccount) {
+        return res.status(400).json({ message: "An account with this name already exists for this currency" });
+      }
+
+      // Check if account is used in any orders
+      const orderCount = db
+        .prepare("SELECT COUNT(*) as count FROM orders WHERE buyAccountId = ? OR sellAccountId = ?")
+        .get(id, id);
+      if (orderCount.count > 0) {
+        return res.status(400).json({ 
+          message: "Cannot edit account that is linked to existing orders" 
+        });
+      }
+
+      // Check if account is used in any internal transfers
+      const transferCount = db
+        .prepare("SELECT COUNT(*) as count FROM internal_transfers WHERE fromAccountId = ? OR toAccountId = ?")
+        .get(id, id);
+      if (transferCount.count > 0) {
+        return res.status(400).json({ 
+          message: "Cannot edit account that is linked to existing transfers" 
+        });
+      }
+
+      // Check if account is used in any expenses
+      const expenseCount = db
+        .prepare("SELECT COUNT(*) as count FROM expenses WHERE accountId = ?")
+        .get(id);
+      if (expenseCount.count > 0) {
+        return res.status(400).json({ 
+          message: "Cannot edit account that is linked to existing expenses" 
+        });
+      }
     }
 
-    // Check if account is used in any orders
-    const orderCount = db
-      .prepare("SELECT COUNT(*) as count FROM orders WHERE buyAccountId = ? OR sellAccountId = ?")
-      .get(id, id);
-    if (orderCount.count > 0) {
-      return res.status(400).json({ 
-        message: "Cannot edit account that is linked to existing orders" 
-      });
-    }
-
-    // Check if account is used in any internal transfers
-    const transferCount = db
-      .prepare("SELECT COUNT(*) as count FROM internal_transfers WHERE fromAccountId = ? OR toAccountId = ?")
-      .get(id, id);
-    if (transferCount.count > 0) {
-      return res.status(400).json({ 
-        message: "Cannot edit account that is linked to existing transfers" 
-      });
-    }
-
-    // Check if account is used in any expenses
-    const expenseCount = db
-      .prepare("SELECT COUNT(*) as count FROM expenses WHERE accountId = ?")
-      .get(id);
-    if (expenseCount.count > 0) {
-      return res.status(400).json({ 
-        message: "Cannot edit account that is linked to existing expenses" 
-      });
-    }
+    const bgColor = displayBgColor !== undefined ? (displayBgColor || null) : undefined;
+    const textColor = displayTextColor !== undefined ? (displayTextColor || null) : undefined;
 
     // Update name and balance if provided
-    if (balance !== undefined && balance !== null) {
+    if (balanceChanged) {
       const parsedBalance = parseFloat(balance);
       if (isNaN(parsedBalance)) {
         return res.status(400).json({ message: "Invalid balance value" });
       }
       
-      // Get old balance before updating
       const oldBalance = existing.balance;
       const balanceDifference = parsedBalance - oldBalance;
       
-      // Update the balance
-      db.prepare("UPDATE accounts SET name = @name, balance = @balance WHERE id = @id;").run({ id, name, balance: parsedBalance });
+      db.prepare("UPDATE accounts SET name = @name, balance = @balance, displayBgColor = @displayBgColor, displayTextColor = @displayTextColor WHERE id = @id;").run({
+        id, name, balance: parsedBalance,
+        displayBgColor: bgColor !== undefined ? bgColor : existing.displayBgColor ?? null,
+        displayTextColor: textColor !== undefined ? textColor : existing.displayTextColor ?? null,
+      });
       
-      // Log transaction if balance changed
       if (balanceDifference !== 0) {
         const transactionType = balanceDifference > 0 ? 'add' : 'withdraw';
         const absoluteDifference = Math.abs(balanceDifference);
@@ -428,7 +438,11 @@ export const updateAccount = (req, res, next) => {
         );
       }
     } else {
-      db.prepare("UPDATE accounts SET name = @name WHERE id = @id;").run({ id, name });
+      db.prepare("UPDATE accounts SET name = @name, displayBgColor = @displayBgColor, displayTextColor = @displayTextColor WHERE id = @id;").run({
+        id, name,
+        displayBgColor: bgColor !== undefined ? bgColor : existing.displayBgColor ?? null,
+        displayTextColor: textColor !== undefined ? textColor : existing.displayTextColor ?? null,
+      });
     }
     
     const row = db

@@ -16,6 +16,7 @@ import {
   requireAccountAccess,
 } from "../utils/accountAccess.js";
 import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
+import { convertCurrency } from "../utils/currencyConversion.js";
 
 const ORDER_AUDIT_FIELDS = [
   "customerId",
@@ -202,6 +203,50 @@ const calculateAmountBuy = (amountSell, rate, fromCurrency, toCurrency) => {
   }
 };
 
+/** Service charge lines for profit calc (confirmed, else draft) — same rules as the orders table row. */
+function getServiceChargeEntriesForOrder(orderId) {
+  const confirmedScRows = db
+    .prepare(
+      `SELECT SUM(amount) as total, currencyCode
+       FROM order_service_charges
+       WHERE orderId = ? AND status = 'confirmed'
+       GROUP BY currencyCode
+       ORDER BY MIN(createdAt) ASC;`,
+    )
+    .all(orderId);
+  const scRows =
+    confirmedScRows.length > 0
+      ? confirmedScRows
+      : db
+          .prepare(
+            `SELECT SUM(amount) as total, currencyCode
+             FROM order_service_charges
+             WHERE orderId = ? AND status = 'draft'
+             GROUP BY currencyCode
+             ORDER BY MIN(createdAt) ASC;`,
+          )
+          .all(orderId);
+  return scRows.map((r) => ({ amount: Number(r.total), currency: r.currencyCode }));
+}
+
+/** Auto-calculated profit in target currency — same formula as the Profit column in the table. */
+function computeCalculatedProfit(order, serviceChargeEntries, profitTargetCurrency, calcConvertToTarget) {
+  if (!profitTargetCurrency) return null;
+  const received = calcConvertToTarget(Number(order.amountBuy), order.fromCurrency);
+  const paid = calcConvertToTarget(Number(order.amountSell), order.toCurrency);
+  if (received === null || paid === null) return null;
+
+  let scTotal = 0;
+  for (const sc of serviceChargeEntries) {
+    const cv = calcConvertToTarget(sc.amount, sc.currency);
+    if (cv === null) return null;
+    scTotal += cv;
+  }
+
+  const result = received - paid + scTotal;
+  return Number.isFinite(result) ? result : null;
+}
+
 export const listOrders = (req, res) => {
   // Extract query parameters
   const {
@@ -211,6 +256,7 @@ export const listOrders = (req, res) => {
     customerId,
     fromCurrency,
     toCurrency,
+    currencyPairs,
     buyAccountId,
     sellAccountId,
     status,
@@ -267,13 +313,31 @@ export const listOrders = (req, res) => {
     conditions.push('o.customerId = @customerId');
     params.customerId = parseInt(customerId, 10);
   }
-  if (fromCurrency) {
+  // Support multi-select currency pairs (comma-separated "FROM/TO" list)
+  if (currencyPairs) {
+    const pairList = String(currencyPairs).split(',').map((p) => p.trim()).filter(Boolean);
+    if (pairList.length === 1) {
+      const [from, to] = pairList[0].split('/');
+      if (from) { conditions.push('o.fromCurrency = @cpFrom0'); params.cpFrom0 = from; }
+      if (to) { conditions.push('o.toCurrency = @cpTo0'); params.cpTo0 = to; }
+    } else if (pairList.length > 1) {
+      const pairClauses = pairList.map((pair, i) => {
+        const [from, to] = pair.split('/');
+        const fromKey = `cpFrom${i}`;
+        const toKey = `cpTo${i}`;
+        params[fromKey] = from || '';
+        params[toKey] = to || '';
+        return `(o.fromCurrency = @${fromKey} AND o.toCurrency = @${toKey})`;
+      });
+      conditions.push(`(${pairClauses.join(' OR ')})`);
+    }
+  } else if (fromCurrency) {
     conditions.push('o.fromCurrency = @fromCurrency');
     params.fromCurrency = fromCurrency;
-  }
-  if (toCurrency) {
-    conditions.push('o.toCurrency = @toCurrency');
-    params.toCurrency = toCurrency;
+    if (toCurrency) {
+      conditions.push('o.toCurrency = @toCurrency');
+      params.toCurrency = toCurrency;
+    }
   }
   if (buyAccountId) {
     // Check if buyAccountId matches the order's buyAccountId OR exists in order_receipts
@@ -351,11 +415,57 @@ export const listOrders = (req, res) => {
     LIMIT @limit OFFSET @offset;
   `;
 
+  // Snapshot params before adding pagination limits (used later for profit aggregation)
+  const filterOnlyParams = { ...params };
+
   params.limit = limitNum;
   params.offset = offset;
 
   const rows = db.prepare(query).all(params);
-  
+
+  // Load default profit calculation once for auto-calculated profit column
+  const defaultProfitCalc = db
+    .prepare("SELECT id, targetCurrencyCode FROM profit_calculations WHERE isDefault = 1 LIMIT 1;")
+    .get();
+  const profitTargetCurrency = defaultProfitCalc?.targetCurrencyCode ?? null;
+  const profitRateMap = new Map();
+  const allCurrenciesForProfit = defaultProfitCalc
+    ? db.prepare("SELECT * FROM currencies ORDER BY code ASC;").all()
+    : [];
+  if (defaultProfitCalc) {
+    db.prepare(
+      "SELECT fromCurrencyCode, toCurrencyCode, rate FROM profit_exchange_rates WHERE profitCalculationId = ?;"
+    ).all(defaultProfitCalc.id).forEach((r) => {
+      profitRateMap.set(`${r.fromCurrencyCode}_${r.toCurrencyCode}`, r.rate);
+    });
+  }
+
+  const calcConvertToTarget = (amount, currency) => {
+    if (!profitTargetCurrency) return null;
+    if (currency === profitTargetCurrency) return amount;
+    const rate = profitRateMap.get(`${currency}_${profitTargetCurrency}`);
+    if (!rate) return null;
+    return convertCurrency(amount, rate, currency, profitTargetCurrency, allCurrenciesForProfit);
+  };
+
+  // Total profit for ALL filtered orders (same per-order logic as the Profit column)
+  let totalCalculatedProfit = null;
+  if (profitTargetCurrency) {
+    const allFilteredOrdersQuery = `
+      SELECT o.id, o.fromCurrency, o.toCurrency, o.amountBuy, o.amountSell
+      FROM orders o
+      ${whereClause}
+    `;
+    const allFilteredOrders = db.prepare(allFilteredOrdersQuery).all(filterOnlyParams);
+    let profitSum = 0;
+    for (const o of allFilteredOrders) {
+      const scEntries = getServiceChargeEntriesForOrder(o.id);
+      const cp = computeCalculatedProfit(o, scEntries, profitTargetCurrency, calcConvertToTarget);
+      if (cp !== null) profitSum += cp;
+    }
+    totalCalculatedProfit = profitSum;
+  }
+
   // Parse JSON fields and check for beneficiaries
   const orders = rows.map((rawRow) => {
     const { pinSortOrder, ...order } = rawRow;
@@ -462,6 +572,13 @@ export const listOrders = (req, res) => {
       const profitEntries = profitRows.map(r => ({ amount: Number(r.total), currency: r.currencyCode }));
       const serviceChargeEntries = scRows.map(r => ({ amount: Number(r.total), currency: r.currencyCode }));
 
+      const calculatedProfit = computeCalculatedProfit(
+        order,
+        serviceChargeEntries,
+        profitTargetCurrency,
+        calcConvertToTarget,
+      );
+
       // Resolve accountId from order_profits/order_service_charges as a fallback for unified-modal orders
       // (legacy orders.profitAccountId is null for those; the table entry is the source of truth)
       const firstProfitEntry = profitRows.length > 0
@@ -498,6 +615,8 @@ export const listOrders = (req, res) => {
         serviceChargeAmount,
         serviceChargeCurrency,
         serviceChargeAccountId,
+        calculatedProfit,
+        calculatedProfitCurrency: profitTargetCurrency,
       };
     } catch (e) {
       // Get tags for this order even in error case
@@ -550,6 +669,13 @@ export const listOrders = (req, res) => {
       const serviceChargeCurrency = serviceChargeEntries.length > 0 ? serviceChargeEntries[0].currency : (order.serviceChargeCurrency ?? null);
       const serviceChargeAccountId = order.serviceChargeAccountId ?? firstScEntry?.accountId ?? null;
 
+      const calculatedProfit = computeCalculatedProfit(
+        order,
+        serviceChargeEntries,
+        profitTargetCurrency,
+        calcConvertToTarget,
+      );
+
       return {
         ...order,
         pinned,
@@ -568,6 +694,8 @@ export const listOrders = (req, res) => {
         serviceChargeAmount,
         serviceChargeCurrency,
         serviceChargeAccountId,
+        calculatedProfit,
+        calculatedProfitCurrency: profitTargetCurrency,
       };
     }
   });
@@ -578,6 +706,8 @@ export const listOrders = (req, res) => {
     page: pageNum,
     limit: limitNum,
     totalPages,
+    totalCalculatedProfit,
+    totalCalculatedProfitCurrency: profitTargetCurrency,
   });
 };
 
@@ -590,6 +720,7 @@ export const exportOrders = (req, res) => {
     customerId,
     fromCurrency,
     toCurrency,
+    currencyPairs,
     buyAccountId,
     sellAccountId,
     status,
@@ -644,13 +775,31 @@ export const exportOrders = (req, res) => {
     conditions.push('o.customerId = @customerId');
     params.customerId = parseInt(customerId, 10);
   }
-  if (fromCurrency) {
+  // Support multi-select currency pairs (comma-separated "FROM/TO" list)
+  if (currencyPairs) {
+    const pairList = String(currencyPairs).split(',').map((p) => p.trim()).filter(Boolean);
+    if (pairList.length === 1) {
+      const [from, to] = pairList[0].split('/');
+      if (from) { conditions.push('o.fromCurrency = @cpFrom0'); params.cpFrom0 = from; }
+      if (to) { conditions.push('o.toCurrency = @cpTo0'); params.cpTo0 = to; }
+    } else if (pairList.length > 1) {
+      const pairClauses = pairList.map((pair, i) => {
+        const [from, to] = pair.split('/');
+        const fromKey = `cpFrom${i}`;
+        const toKey = `cpTo${i}`;
+        params[fromKey] = from || '';
+        params[toKey] = to || '';
+        return `(o.fromCurrency = @${fromKey} AND o.toCurrency = @${toKey})`;
+      });
+      conditions.push(`(${pairClauses.join(' OR ')})`);
+    }
+  } else if (fromCurrency) {
     conditions.push('o.fromCurrency = @fromCurrency');
     params.fromCurrency = fromCurrency;
-  }
-  if (toCurrency) {
-    conditions.push('o.toCurrency = @toCurrency');
-    params.toCurrency = toCurrency;
+    if (toCurrency) {
+      conditions.push('o.toCurrency = @toCurrency');
+      params.toCurrency = toCurrency;
+    }
   }
   if (buyAccountId) {
     conditions.push(`(o.buyAccountId = @buyAccountId OR EXISTS (

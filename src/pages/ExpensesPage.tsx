@@ -33,14 +33,15 @@ import {
 import { useAppSelector } from "../app/hooks";
 import { formatDate, formatDateTime } from "../utils/format";
 import { hasActionPermission } from "../utils/permissions";
+import { useCurrencyByCode } from "../hooks/useCurrencyByCode";
+import { StyledCurrencyAmount } from "../components/common/StyledCurrencyAmount";
 
 // Helper function to format currency with proper number formatting
-const formatCurrency = (amount: number, currencyCode: string) => {
-  return `${amount.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} ${currencyCode}`;
-};
+const formatAmount = (amount: number) =>
+  Math.round(amount).toLocaleString("en-US");
+
+const formatCurrency = (amount: number, currencyCode: string) =>
+  `${formatAmount(amount)} ${currencyCode}`;
 
 export default function ExpensesPage() {
   const { t } = useTranslation();
@@ -72,6 +73,7 @@ export default function ExpensesPage() {
   const { data: tags = [] } = useGetTagsQuery();
   const { data: users = [] } = useGetUsersQuery();
   const { data: currencies = [] } = useGetCurrenciesQuery();
+  const currencyByCode = useCurrencyByCode();
   const [createExpense, { isLoading: isCreating }] = useCreateExpenseMutation();
   const [updateExpense, { isLoading: isUpdating }] = useUpdateExpenseMutation();
   const [deleteExpense, { isLoading: isDeleting }] = useDeleteExpenseMutation();
@@ -128,6 +130,8 @@ export default function ExpensesPage() {
   const [isBatchTagMode, setIsBatchTagMode] = useState(false);
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [formTagIds, setFormTagIds] = useState<number[]>([]);
+  const [showFormTagPicker, setShowFormTagPicker] = useState(false);
   const [viewImageExpenseId, setViewImageExpenseId] = useState<number | null>(null);
   const [viewAuditTrailExpenseId, setViewAuditTrailExpenseId] = useState<number | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -223,6 +227,8 @@ export default function ExpensesPage() {
       entryDatePart: datePart,
       entryTimePart: timePart,
     });
+    setFormTagIds([]);
+    setShowFormTagPicker(false);
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
@@ -252,6 +258,14 @@ export default function ExpensesPage() {
       entryDatePart: datePart,
       entryTimePart: timePart,
     });
+    const existingTags = (expense as any).tags;
+    if (Array.isArray(existingTags) && existingTags.length > 0) {
+      setFormTagIds(existingTags.map((x: any) => x.id));
+      setShowFormTagPicker(true);
+    } else {
+      setFormTagIds([]);
+      setShowFormTagPicker(false);
+    }
     setIsModalOpen(true);
   };
 
@@ -396,6 +410,7 @@ export default function ExpensesPage() {
           type: form.type,
           updatedBy: authUser?.id,
           entryDate: entryDateIso,
+          tagIds: formTagIds,
         };
         // Send File object if available, otherwise fallback to base64 (backward compatibility)
         if (form.file) {
@@ -416,6 +431,7 @@ export default function ExpensesPage() {
           type: form.type,
           createdBy: authUser?.id,
           entryDate: entryDateIso,
+          tagIds: formTagIds,
         };
         // Send File object if available, otherwise fallback to base64 (backward compatibility)
         if (form.file) {
@@ -735,18 +751,39 @@ export default function ExpensesPage() {
             )}
           </td>
         );
-      case "account":
+      case "account": {
+        const expenseAccount = accounts.find((a) => a.id === expense.accountId);
+        const poolCurrency = expenseAccount ? currencyByCode.get(expenseAccount.currencyCode) : undefined;
+        const effectiveBg = expenseAccount?.displayBgColor || poolCurrency?.accountPoolDisplayBgColor;
+        const effectiveText = expenseAccount?.displayBgColor
+          ? (expenseAccount.displayTextColor || "#ffffff")
+          : (poolCurrency?.accountPoolDisplayTextColor || "#ffffff");
+        const acctStyle = effectiveBg
+          ? { backgroundColor: effectiveBg, color: effectiveText, fontWeight: 700, borderRadius: "0.375rem", padding: "0.125rem 0.375rem" }
+          : undefined;
         return (
           <td key={columnKey} className="py-2 font-semibold text-slate-900">
-            {expense.accountName || expense.accountId}
+            <span style={acctStyle}>{expense.accountName || expense.accountId}</span>
           </td>
         );
-      case "amount":
+      }
+      case "amount": {
+        const isIncome = expense.type === "income";
+        const signedAmount = isIncome ? expense.amount : -expense.amount;
+        const defaultAmountClass = `font-semibold ${isIncome ? "text-emerald-600" : "text-rose-600"}`;
         return (
-          <td key={columnKey} className={`py-2 font-semibold ${expense.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
-            {expense.type === 'income' ? '+' : '-'}{formatCurrency(expense.amount, expense.currencyCode)}
+          <td key={columnKey} className="py-2">
+            <StyledCurrencyAmount
+              signedAmount={signedAmount}
+              currencyCode={expense.currencyCode}
+              currencyByCode={currencyByCode}
+              formatAbsValue={formatAmount}
+              defaultClassName={defaultAmountClass}
+              unconfiguredLabel={`${isIncome ? "+" : "-"}${formatAmount(expense.amount)} ${expense.currencyCode}`}
+            />
           </td>
         );
+      }
       case "currency":
         return <td key={columnKey} className="py-2">{expense.currencyCode}</td>;
       case "proof":
@@ -780,18 +817,32 @@ export default function ExpensesPage() {
             </div>
           </td>
         );
-      case "createdBy":
+      case "createdBy": {
+        const createdByUser = expense.createdBy ? users.find((u) => u.id === expense.createdBy) : undefined;
+        const createdByStyle = createdByUser?.displayBgColor
+          ? { backgroundColor: createdByUser.displayBgColor, color: createdByUser.displayTextColor || "#ffffff", fontWeight: 700, borderRadius: "0.375rem", padding: "0.125rem 0.375rem", display: "inline-block" }
+          : undefined;
         return (
           <td key={columnKey} className="py-2 text-slate-600">
-            {expense.createdByName || "-"}
+            {expense.createdByName
+              ? <span style={createdByStyle}>{expense.createdByName}</span>
+              : "-"}
           </td>
         );
-      case "updatedBy":
+      }
+      case "updatedBy": {
+        const updatedByUser = expense.updatedBy ? users.find((u) => u.id === expense.updatedBy) : undefined;
+        const updatedByStyle = updatedByUser?.displayBgColor
+          ? { backgroundColor: updatedByUser.displayBgColor, color: updatedByUser.displayTextColor || "#ffffff", fontWeight: 700, borderRadius: "0.375rem", padding: "0.125rem 0.375rem", display: "inline-block" }
+          : undefined;
         return (
           <td key={columnKey} className="py-2 text-slate-600">
-            {expense.updatedByName || "-"}
+            {expense.updatedByName
+              ? <span style={updatedByStyle}>{expense.updatedByName}</span>
+              : "-"}
           </td>
         );
+      }
       case "updatedAt":
         return (
           <td key={columnKey} className="py-2 text-slate-600 text-xs">
@@ -1329,6 +1380,59 @@ export default function ExpensesPage() {
                 </div>
               </div>
 
+              {/* Tag Picker */}
+              {!showFormTagPicker ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 w-fit"
+                  onClick={() => setShowFormTagPicker(true)}
+                >
+                  {t("expenses.tag")}
+                </button>
+              ) : (
+                <div>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-slate-700">{t("expenses.tags")}</span>
+                    {tags.length > 0 && formTagIds.length > 0 && (
+                      <button
+                        type="button"
+                        className="text-xs text-slate-600 hover:text-slate-900"
+                        onClick={() => setFormTagIds([])}
+                      >
+                        {t("common.clear")}
+                      </button>
+                    )}
+                  </div>
+                  {tags.length === 0 ? (
+                    <p className="text-sm text-slate-500">{t("expenses.noTagsAvailable")}</p>
+                  ) : (
+                    <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                      {tags.map((tag) => (
+                        <label
+                          key={tag.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 hover:bg-slate-50"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={formTagIds.includes(tag.id)}
+                            onChange={(e) => {
+                              const on = e.target.checked;
+                              setFormTagIds((prev) =>
+                                on ? [...prev, tag.id] : prev.filter((id) => id !== tag.id),
+                              );
+                            }}
+                          />
+                          <Badge tone="slate" backgroundColor={tag.color}>
+                            {tag.name}
+                          </Badge>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"
@@ -1565,8 +1669,14 @@ export default function ExpensesPage() {
                                     </span>
                                   )}
                                 </td>
-                                <td className={`py-2 px-3 border-b border-slate-100 font-semibold ${change.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                  {change.type === 'income' ? '+' : '-'}{formatCurrency(change.amount, expense.currencyCode)}
+                                <td className="py-2 px-3 border-b border-slate-100">
+                                  <StyledCurrencyAmount
+                                    signedAmount={change.type === "income" ? change.amount : -change.amount}
+                                    currencyCode={expense.currencyCode}
+                                    currencyByCode={currencyByCode}
+                                    formatAbsValue={formatAmount}
+                                    defaultClassName={`font-semibold ${change.type === "income" ? "text-emerald-600" : "text-rose-600"}`}
+                                  />
                                 </td>
                                 <td className="py-2 px-3 border-b border-slate-100 text-slate-600">
                                   {change.description || "-"}

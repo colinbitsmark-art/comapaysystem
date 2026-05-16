@@ -19,6 +19,7 @@ import ProfitCalculationPage from "../pages/ProfitCalculationPage";
 import SettingsPage from "../pages/SettingsPage";
 import NotificationsPage from "../pages/NotificationsPage";
 import NotificationPreferencesPage from "../pages/NotificationPreferencesPage";
+import PreferencesPage from "../pages/PreferencesPage";
 import WalletTrackerPage from "../pages/WalletTrackerPage";
 import { useAppSelector } from "../app/hooks";
 import { hasSectionAccess } from "../utils/permissions";
@@ -66,6 +67,7 @@ export default function AppRoutes() {
           <Route path="wallets" element={<RequireAuth section="wallets"><WalletTrackerPage /></RequireAuth>} />
           <Route path="notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
           <Route path="notification-preferences" element={<RequireAuth><NotificationPreferencesPage /></RequireAuth>} />
+          <Route path="preferences" element={<RequireAuth><PreferencesPage /></RequireAuth>} />
           <Route path="profit" element={<RequireAuth section="profit"><ProfitCalculationPage /></RequireAuth>} />
           <Route path="settings" element={<RequireAdmin><SettingsPage /></RequireAdmin>} />
         </Route>
