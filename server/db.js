@@ -102,6 +102,24 @@ const ensureSchema = () => {
   if (!userColumnNames.includes("sidebarBgColor")) {
     db.prepare("ALTER TABLE users ADD COLUMN sidebarBgColor TEXT;").run();
   }
+  if (!userColumnNames.includes("themeHeaderBg")) {
+    db.prepare("ALTER TABLE users ADD COLUMN themeHeaderBg TEXT;").run();
+  }
+  if (!userColumnNames.includes("themeCardBg")) {
+    db.prepare("ALTER TABLE users ADD COLUMN themeCardBg TEXT;").run();
+  }
+  if (!userColumnNames.includes("themeBorder")) {
+    db.prepare("ALTER TABLE users ADD COLUMN themeBorder TEXT;").run();
+  }
+  if (!userColumnNames.includes("themeTextPrimary")) {
+    db.prepare("ALTER TABLE users ADD COLUMN themeTextPrimary TEXT;").run();
+  }
+  if (!userColumnNames.includes("themeTextSecondary")) {
+    db.prepare("ALTER TABLE users ADD COLUMN themeTextSecondary TEXT;").run();
+  }
+  if (!userColumnNames.includes("themeSidebarNavText")) {
+    db.prepare("ALTER TABLE users ADD COLUMN themeSidebarNavText TEXT;").run();
+  }
 
   db.prepare(
     `CREATE TABLE IF NOT EXISTS customer_kyc_profiles (
