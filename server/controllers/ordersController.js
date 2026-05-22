@@ -2020,6 +2020,15 @@ export const updateOrderStatus = async (req, res, next) => {
 };
 
 /**
+ * When deleting a confirmed receipt/payment/profit/SC during order edit, undo the confirm's balance effect.
+ * Skip for cancelled orders — cancel already ran performOrderFinancialReversals.
+ */
+function shouldReverseConfirmedEntryOnDelete(orderId) {
+  const order = db.prepare("SELECT status FROM orders WHERE id = ?;").get(orderId);
+  return order?.status !== "cancelled";
+}
+
+/**
  * Reverses confirmed receipts/payments, direct completion balances, profit, and service charge.
  * Same rules as order deletion; used for delete and for cancel.
  */
@@ -3046,7 +3055,7 @@ export const deleteReceipt = (req, res, next) => {
         return res.status(400).json({ message: "Only draft receipts can be deleted" });
       }
       // Reverse the balance increase that was applied when this receipt was confirmed
-      if (receipt.accountId) {
+      if (receipt.accountId && shouldReverseConfirmedEntryOnDelete(receipt.orderId)) {
         db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(
           receipt.amount,
           receipt.accountId,
@@ -3296,7 +3305,7 @@ export const deletePayment = (req, res, next) => {
         return res.status(400).json({ message: "Only draft payments can be deleted" });
       }
       // Reverse the balance decrease that was applied when this payment was confirmed
-      if (payment.accountId) {
+      if (payment.accountId && shouldReverseConfirmedEntryOnDelete(payment.orderId)) {
         db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(
           payment.amount,
           payment.accountId,
@@ -3518,7 +3527,7 @@ export const deleteProfit = (req, res, next) => {
         return res.status(400).json({ message: "Only draft profits can be deleted" });
       }
       // Reverse the balance increase that was applied when this profit was confirmed
-      if (profit.accountId) {
+      if (profit.accountId && shouldReverseConfirmedEntryOnDelete(profit.orderId)) {
         db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(
           profit.amount,
           profit.accountId,
@@ -3717,7 +3726,7 @@ export const deleteServiceCharge = (req, res, next) => {
         return res.status(400).json({ message: "Only draft service charges can be deleted" });
       }
       // Reverse the balance change that was applied when this service charge was confirmed
-      if (serviceCharge.accountId) {
+      if (serviceCharge.accountId && shouldReverseConfirmedEntryOnDelete(serviceCharge.orderId)) {
         const amount = Number(serviceCharge.amount);
         if (amount > 0) {
           // Was added to account (positive SC), so subtract it back
