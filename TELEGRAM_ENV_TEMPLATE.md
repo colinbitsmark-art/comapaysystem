@@ -1,92 +1,67 @@
-# Telegram Bot Integration - .env Configuration
+# Telegram (in-app) — .env configuration
 
-Add these variables to your Order System's `.env` file to enable Telegram bot notifications.
+Telegram runs inside the order app. No separate `ordersystem-telegram-bot` service.
+
+## Required for Send to Telegram + notifications
 
 ```env
-# ============================================
-# TELEGRAM BOT INTEGRATION
-# ============================================
-
-# Enable notifications to Telegram bot
-# Set to 'true' to enable, 'false' to disable
 ENABLE_TELEGRAM_NOTIFICATIONS=true
-
-# Webhook URL of the Telegram bot
-# This is where the order system will send notifications
-# Default for local development:
-TELEGRAM_BOT_WEBHOOK_URL=http://localhost:3001/webhook/notification
-
-# Webhook secret for authentication
-# IMPORTANT: This must match WEBHOOK_SECRET in the Telegram bot's .env
-# Use a strong random secret (32+ characters)
-# Example: openssl rand -base64 32
-TELEGRAM_BOT_WEBHOOK_SECRET=your-secure-random-secret-key-change-this-in-production
-
-# Optional: dedicated URL for reference rate sheet (defaults to .../webhook/rate-sheet)
-# TELEGRAM_BOT_RATE_SHEET_WEBHOOK_URL=http://localhost:3001/webhook/rate-sheet
+TELEGRAM_BOT_TOKEN=123456789:ABC...          # @BotFather
+TELEGRAM_RATES_CHAT_ID=-100xxxxxxxxxx        # rates group chat id
 ```
 
-## Reference rate sheet (Send to Telegram + /command1)
+Get chat id: add bot to the group, send `/chatid` (after webhook is set) or use `getUpdates` while testing.
 
-The order app POSTs to your bot when an editor clicks **Send to Telegram** on the Reference rates page:
+## Required for `/command1` in group (Telegram webhook)
 
-```json
-POST /webhook/rate-sheet
-X-Webhook-Secret: <same as above>
-{ "type": "reference_rates", "message": "<formatted text>" }
+Telegram must POST to your app over **HTTPS**.
+
+```env
+TELEGRAM_WEBHOOK_URL=https://your-app.railway.app
+# or
+PUBLIC_APP_URL=https://your-app.railway.app
+
+TELEGRAM_WEBHOOK_SECRET=<openssl rand -base64 32>
 ```
 
-Your bot should call `sendMessage` to the rates group chat.
+On startup the app registers: `https://your-app.railway.app/api/telegram/webhook`
 
-For `/command1`, fetch from the order app:
+### Commands
 
-```http
-GET /api/bot/reference-rates
-X-Bot-Api-Key: <BOT_API_KEY>
+| Command | Action |
+|---------|--------|
+| `/command1` | Post saved reference rate sheet |
+| `/chatid` | Show chat id for `.env` |
+| `/help` | List commands |
+
+Optional restrict commands to specific chats:
+
+```env
+TELEGRAM_ALLOWED_CHAT_IDS=-100xxxxxxxxxx,-100yyyyyyyyyy
 ```
 
-See `docs/RAILWAY_POSTGRES_REFERENCE_RATES.md` for details.
+## Order notifications
 
-## Instructions
+Uses `TELEGRAM_NOTIFICATION_CHAT_ID` if set, otherwise `TELEGRAM_RATES_CHAT_ID`.
 
-1. Open your existing `.env` file in the ordersystem project
-2. Add the three variables above to the end of the file
-3. Replace `your-secure-random-secret-key-change-this-in-production` with a secure random secret
-4. Make sure the secret matches the `WEBHOOK_SECRET` in your Telegram bot's `.env` file
+Admin toggle in the web app (Notification settings) still applies.
 
-## Generate Secure Secret
+## Local development
 
-To generate a secure random secret, run:
+- **Send to Telegram** works with token + chat id only.
+- **Webhook commands** need a public HTTPS URL (e.g. ngrok → `TELEGRAM_WEBHOOK_URL=https://xxx.ngrok.io`).
+
+## Removed (legacy external bot)
+
+Do not set these for the in-app integration:
+
+- `TELEGRAM_BOT_WEBHOOK_URL` (order app → external bot)
+- `TELEGRAM_BOT_RATE_SHEET_WEBHOOK_URL`
+
+## Verify webhook (production)
 
 ```bash
-openssl rand -base64 32
+curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"
 ```
 
-Copy the output and use it for both:
-- Order System: `TELEGRAM_BOT_WEBHOOK_SECRET`
-- Telegram Bot: `WEBHOOK_SECRET`
-
-## Production Deployment
-
-For production:
-- Update `TELEGRAM_BOT_WEBHOOK_URL` to your bot's public URL
-- Ensure both services can communicate (check firewalls, network settings)
-- Use HTTPS for the webhook URL if possible
-
-## Testing
-
-After adding these variables:
-
-1. Restart your order system server
-2. Start the Telegram bot
-3. Create/update an order in the system
-4. You should receive a notification in Telegram
-
-## Troubleshooting
-
-If notifications aren't working:
-1. Check `ENABLE_TELEGRAM_NOTIFICATIONS=true` is set
-2. Verify `TELEGRAM_BOT_WEBHOOK_SECRET` matches bot's `WEBHOOK_SECRET`
-3. Ensure the webhook URL is correct and reachable
-4. Check both services are running
-5. Look at server logs for error messages
+Expected `url` ends with `/api/telegram/webhook`.

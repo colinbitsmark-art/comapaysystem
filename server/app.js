@@ -8,6 +8,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import apiRouter from "./routes/api.js";
 import botRouter from "./routes/botRoutes.js";
+import telegramRouter from "./routes/telegramRoutes.js";
 import { initDatabase } from "./db.js";
 import { getUploadsDir } from "./utils/fileStorage.js";
 import {
@@ -51,6 +52,7 @@ app.use((req, res, next) => {
 
 app.use("/api", apiRouter);
 app.use("/api/bot", botRouter);
+app.use("/api/telegram", telegramRouter);
 
 // Serve Vite build when present (Railway/Nixpacks runs `npm run build`; NODE_ENV may be unset at runtime).
 const distPath = path.join(__dirname, "../dist");

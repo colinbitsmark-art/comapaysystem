@@ -1,11 +1,20 @@
 import app from "./app.js";
 import { db } from "./db.js";
+import { registerTelegramWebhookIfConfigured } from "./services/telegram/telegramWebhookSetup.js";
+import { isTelegramBotConfigured } from "./services/telegram/telegramApi.js";
+import { isTelegramEnabled } from "./services/telegram/telegramConfig.js";
 
 const PORT = process.env.PORT || 4000;
 
 const server = app.listen(PORT, () => {
   console.log(`API ready on http://localhost:${PORT}`);
   console.log("Orders: DELETE /api/orders/:id uses direct delete (approval workflow removed). Restart this process after server code changes.");
+  if (isTelegramEnabled() && isTelegramBotConfigured()) {
+    console.log("Telegram: in-app Bot API enabled");
+    registerTelegramWebhookIfConfigured().catch((err) => {
+      console.error("Telegram webhook setup error:", err);
+    });
+  }
 });
 
 // Wallet Auto-Refresh Configuration
@@ -140,6 +149,10 @@ const gracefulShutdown = (signal) => {
     console.error('Forced shutdown due to timeout');
     process.exit(1);
   }, 10000); // 10 second timeout
+
+  if (typeof server.closeAllConnections === "function") {
+    server.closeAllConnections();
+  }
   
   server.close(() => {
     clearTimeout(shutdownTimeout);

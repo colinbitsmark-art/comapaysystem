@@ -18,45 +18,17 @@ Requires:
 
 ```env
 ENABLE_TELEGRAM_NOTIFICATIONS=true
-TELEGRAM_BOT_WEBHOOK_URL=...
-TELEGRAM_BOT_WEBHOOK_SECRET=...  # must match bot
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_RATES_CHAT_ID=-100...
 ```
 
-Optional override:
+## `/command1` in Telegram group
+
+In-app **Telegram webhook** (see `TELEGRAM_ENV_TEMPLATE.md`):
 
 ```env
-TELEGRAM_BOT_RATE_SHEET_WEBHOOK_URL=https://your-bot/webhook/rate-sheet
+TELEGRAM_WEBHOOK_URL=https://your-app.railway.app
+TELEGRAM_WEBHOOK_SECRET=...
 ```
 
-## Telegram bot (`@PRICE7GGBOT`) changes
-
-### Webhook handler
-
-Add a route (e.g. `POST /webhook/rate-sheet`) that accepts:
-
-```json
-{
-  "type": "reference_rates",
-  "message": "PRICE 7GG\n🔰 Hello! Team 🔰\n..."
-}
-```
-
-Verify `X-Webhook-Secret`, then `sendMessage` to your group chat.
-
-### `/command1` command
-
-```http
-GET https://YOUR-ORDER-APP/api/bot/reference-rates
-X-Bot-Api-Key: <BOT_API_KEY>
-```
-
-Response:
-
-```json
-{
-  "message": "...",
-  "updatedAt": "2026-..."
-}
-```
-
-Reply with `message` in the chat.
+Commands are handled at `POST /api/telegram/webhook`. No external bot service.

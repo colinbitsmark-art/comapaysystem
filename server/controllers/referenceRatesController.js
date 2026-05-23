@@ -15,7 +15,7 @@ import {
   loadBuiltReferenceRatesResponse,
   mergeReferenceRatesConfig,
 } from "../utils/referenceRatesTelegram.js";
-import { pushReferenceRatesToTelegramBot } from "../services/telegram/telegramRateSheetService.js";
+import { sendReferenceRatesToTelegram as sendRatesToTelegram } from "../services/telegram/telegramRateSheetService.js";
 
 export { REFERENCE_RATES_SETTING_KEY } from "../services/referenceRatesStore.js";
 
@@ -52,14 +52,14 @@ export const updateReferenceRates = async (req, res, next) => {
   }
 };
 
-/** Sends last saved rates to Telegram via bot webhook (does not save form). */
+/** Sends last saved rates to Telegram (does not save form). */
 export const sendReferenceRatesToTelegram = async (req, res, next) => {
   try {
     if (!userCanEditReferenceRates(req)) {
       return res.status(403).json({ message: "Not allowed to send reference rates" });
     }
     const message = await buildReferenceRatesTelegramMessage();
-    await pushReferenceRatesToTelegramBot(message);
+    await sendRatesToTelegram(message);
     res.json({ ok: true, message: "Reference rates sent to Telegram" });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Failed to send to Telegram";

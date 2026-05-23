@@ -1471,6 +1471,9 @@ export const createOrder = async (req, res, next) => {
     // Notify the assigned handler (if different from creator)
     const assignedHandlerId = orderData.handlerId ?? null;
     if (assignedHandlerId && Number(assignedHandlerId) !== Number(userId)) {
+      const assigneeName = db
+        .prepare("SELECT name FROM users WHERE id = ?")
+        .get(Number(assignedHandlerId))?.name;
       createNotification({
         userId: Number(assignedHandlerId),
         type: 'order_assigned',
@@ -1479,6 +1482,7 @@ export const createOrder = async (req, res, next) => {
         entityType: 'order',
         entityId: orderId,
         actionUrl: `/orders`,
+        metadata: { assigneeName: assigneeName || 'Unknown User' },
       }).catch(err => console.error('[createOrder] handler notification failed:', err));
     }
   } catch (error) {

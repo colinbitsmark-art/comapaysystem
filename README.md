@@ -5,7 +5,7 @@ React + Vite frontend, Express + SQLite backend.
 ## Reference rates
 
 - **Railway Postgres sync:** `docs/RAILWAY_POSTGRES_REFERENCE_RATES.md` — set `DATABASE_URL` on each web service.
-- **Telegram:** Save on the config page, then **Send to Telegram**; bot handles `reference_rates` webhook and `GET /api/bot/reference-rates` for `/command1`.
+- **Telegram:** In-app Bot API — **Send to Telegram** on the reference rates page; `/command1` via Telegram webhook (`TELEGRAM_ENV_TEMPLATE.md`).
 
 ---
 

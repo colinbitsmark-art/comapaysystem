@@ -1,8 +1,36 @@
 import {
   buildReferenceRatesResponse,
   defaultReferenceRatesConfig,
+  REFERENCE_RATE_PAIR_IDS,
 } from "./referenceRatesCalculator.js";
 import { loadReferenceRatesConfig } from "../services/referenceRatesStore.js";
+
+/** Direction label → flag emoji. Unknown labels get no flag. */
+const TELEGRAM_DIRECTION_FLAGS = {
+  "PKR>USDT": "🇵🇰",
+  "USDT>PKR": "🇵🇰",
+  "PKR>CNY": "🇵🇰",
+  "CNY>PKR": "🇵🇰",
+  "PKR>HKD": "🇵🇰",
+  "HKD>PKR": "🇵🇰",
+  "PKR>AED": "🇦🇪",
+  "AED>PKR": "🇦🇪",
+  "AED>USDT": "🇦🇪",
+  "USDT>AED": "🇦🇪",
+  "PKR>SWIFT": "🇭🇰",
+  "SWIFT>PKR": "🇭🇰",
+  "HKD>USDT": "🇭🇰",
+  "USDT>HKD": "🇭🇰",
+  "USD>USDT (HK)": "🇭🇰",
+  "USDT>USD (HK)": "🇭🇰",
+  "USD>USDT (INTL)": "🇭🇰",
+  "USDT>USD (INTL)": "🇭🇰",
+  "CNY>USDT": "🇨🇳",
+  "USDT>CNY": "🇨🇳",
+};
+
+export const emojiForTelegramDirection = (directionLabel) =>
+  TELEGRAM_DIRECTION_FLAGS[directionLabel] ?? "";
 
 const formatRate = (value, decimals = 3) => {
   if (value === null || value === undefined || !Number.isFinite(value)) return "NA";
@@ -19,20 +47,39 @@ const getBuySell = (pair) => {
   return { buy, sell };
 };
 
-/** Telegram desk sheet lines (direction → rate). */
-const TELEGRAM_LINES = [
-  { emoji: "🇵🇰", label: "PKR>USDT", pairId: "PKR_USDT", side: "sell" },
-  { emoji: "🇵🇰", label: "USDT>PKR", pairId: "PKR_USDT", side: "buy" },
-  { emoji: "🇵🇰", label: "PKR>RMB", pairId: "CNY_PKR", side: "sell" },
-  { emoji: "🇵🇰", label: "RMB>PKR", pairId: "CNY_PKR", side: "buy" },
-  { emoji: "🇭🇰", label: "USDT>RMB", pairId: "CNY_USDT", side: "sell" },
-  { emoji: "🇭🇰", label: "RMB>USDT", pairId: "CNY_USDT", side: "buy" },
-  { emoji: "🇵🇰", label: "PKR>AED", pairId: "PKR_AED", side: "sell" },
-  { emoji: "🇭🇰", label: "PKR>SWIFT", pairId: "PKR_SWIFT", side: "sell" },
-  { emoji: "🇭🇰", label: "SWIFT>PKR", pairId: "PKR_SWIFT", side: "buy" },
-  { emoji: "🇪🇺", label: "EU>USDT", pairId: "USD_USDT_INTL", side: "sell" },
-  { emoji: "🇪🇺", label: "USDT>EU", pairId: "USD_USDT_INTL", side: "buy" },
-];
+/**
+ * Parse UI pair label e.g. "USD/USDT (HK)" → { from: "USD", to: "USDT", tag: " (HK)" }.
+ */
+export const parseReferencePairLabel = (label) => {
+  if (!label || typeof label !== "string") return null;
+  const trimmed = label.trim();
+  const paren = trimmed.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+  const suffix = paren ? ` (${paren[2].trim()})` : "";
+  const core = paren ? paren[1].trim() : trimmed;
+  const slash = core.indexOf("/");
+  if (slash < 0) return null;
+  const from = core.slice(0, slash).trim();
+  const to = core.slice(slash + 1).trim();
+  if (!from || !to) return null;
+  return { from, to, tag: suffix };
+};
+
+/**
+ * Desk directions from pair buy/sell: FORWARD (from>to) uses sell, REVERSE (to>from) uses buy.
+ */
+export const buildDirectionLinesForPair = (pair) => {
+  const parsed = parseReferencePairLabel(pair.label);
+  if (!parsed) return [];
+
+  const { from, to, tag } = parsed;
+  const { buy, sell } = getBuySell(pair);
+  const decimals = pair.displayDecimals ?? 3;
+
+  return [
+    { label: `${from}>${to}${tag}`, value: sell, decimals },
+    { label: `${to}>${from}${tag}`, value: buy, decimals },
+  ];
+};
 
 export const mergeReferenceRatesConfig = (stored) => {
   const defaults = defaultReferenceRatesConfig();
@@ -58,17 +105,18 @@ export const loadBuiltReferenceRatesResponse = async () => {
  */
 export const formatReferenceRatesTelegramMessage = (response) => {
   const pairs = response.pairs;
-  const lines = TELEGRAM_LINES.map(({ emoji, label, pairId, side }) => {
+  const lines = [];
+
+  for (const pairId of REFERENCE_RATE_PAIR_IDS) {
     const pair = pairs[pairId];
-    if (!pair) return `${emoji}${label}: NA`;
-    const { buy, sell } = getBuySell(pair);
-    const value = side === "buy" ? buy : sell;
-    const decimals = pair.displayDecimals ?? 3;
-    return `${emoji}${label}: ${formatRate(value, decimals)}`;
-  });
+    if (!pair) continue;
+    for (const { label, value, decimals } of buildDirectionLinesForPair(pair)) {
+      const flag = emojiForTelegramDirection(label);
+      lines.push(`${flag}${label}: ${formatRate(value, decimals)}`);
+    }
+  }
 
   return [
-    "PRICE 7GG",
     "🔰 Hello! Team 🔰",
     "Price 💰 is",
     "------------------------",
