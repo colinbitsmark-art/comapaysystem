@@ -47,6 +47,8 @@ import type {
   KycSchemaVersion,
   KycV2Schema,
   CustomerType,
+  ReferenceRatesResponse,
+  ReferenceRatesUpdatePayload,
 } from "../types";
 import {
   APP_DOCUMENT_TITLE_EN_KEY,
@@ -87,7 +89,7 @@ const baseQuery = fetchBaseQuery({
 export const api = createApi({
   reducerPath: "api",
   baseQuery,
-  tagTypes: ["Currency", "Customer", "CustomerBeneficiary", "CustomerLedger", "CustomerKyc", "User", "Role", "Order", "Auth", "Account", "Transfer", "Expense", "ProfitCalculation", "Setting", "PublicBranding", "Tag", "Notification", "Wallet"],
+  tagTypes: ["Currency", "Customer", "CustomerBeneficiary", "CustomerLedger", "CustomerKyc", "User", "Role", "Order", "Auth", "Account", "Transfer", "Expense", "ProfitCalculation", "Setting", "PublicBranding", "Tag", "Notification", "Wallet", "ReferenceRates"],
   refetchOnReconnect: true,
   endpoints: (builder) => ({
     getCurrencies: builder.query<Currency[], void>({
@@ -2036,6 +2038,24 @@ export const api = createApi({
         method: "POST",
       }),
     }),
+    getReferenceRates: builder.query<ReferenceRatesResponse, void>({
+      query: () => "reference-rates",
+      providesTags: [{ type: "ReferenceRates", id: "CONFIG" }],
+    }),
+    updateReferenceRates: builder.mutation<ReferenceRatesResponse, ReferenceRatesUpdatePayload>({
+      query: (body) => ({
+        url: "reference-rates",
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: [{ type: "ReferenceRates", id: "CONFIG" }],
+    }),
+    sendReferenceRatesToTelegram: builder.mutation<{ ok: boolean; message: string }, void>({
+      query: () => ({
+        url: "reference-rates/send-telegram",
+        method: "POST",
+      }),
+    }),
   }),
 });
 
@@ -2180,6 +2200,9 @@ export const {
   useGetKycBuilderVersionsQuery,
   useGetKycBuilderSchemaVersionQuery,
   useDeleteKycBuilderSchemaVersionMutation,
+  useGetReferenceRatesQuery,
+  useUpdateReferenceRatesMutation,
+  useSendReferenceRatesToTelegramMutation,
 } = api;
 
 

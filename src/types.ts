@@ -28,6 +28,66 @@ export interface Currency {
 
 export type CurrencyAmountDisplayMode = "code" | "symbol";
 
+export type ReferenceRatePairId =
+  | "CNY_USDT"
+  | "PKR_AED"
+  | "AED_USDT"
+  | "HKD_USDT"
+  | "PKR_USDT"
+  | "USD_USDT_HK"
+  | "USD_USDT_INTL"
+  | "HKD_PKR"
+  | "CNY_PKR"
+  | "PKR_SWIFT";
+
+export type ReferenceRateBaseMode = "average" | "dual" | "chain" | "derived" | null;
+export type ReferenceRatePairKind = "standalone" | "benchmark" | "chain" | "derived";
+
+export interface ReferenceRatePairInput {
+  id: ReferenceRatePairId;
+  label: string;
+  kind: ReferenceRatePairKind;
+  baseMode: ReferenceRateBaseMode;
+  averageBase: number | null;
+  baseBuy: number | null;
+  baseSell: number | null;
+  markup: number;
+  markdown: number;
+  /** Decimal places for buy/sell on the floating panel (0–8). */
+  displayDecimals: number;
+}
+
+export interface ReferenceRatePair extends ReferenceRatePairInput {
+  computedBuy: number | null;
+  computedSell: number | null;
+  computeError: string | null;
+}
+
+export interface ReferenceRatesResponse {
+  version: number;
+  updatedAt: string | null;
+  pkrSwiftFactor: number;
+  pairs: Record<ReferenceRatePairId, ReferenceRatePair>;
+}
+
+export interface ReferenceRatesUpdatePayload {
+  pkrSwiftFactor?: number;
+  pairs: Partial<
+    Record<
+      ReferenceRatePairId,
+      {
+        averageBase?: number | null;
+        baseBuy?: number | null;
+        baseSell?: number | null;
+        markup?: number;
+        markdown?: number;
+        baseMode?: ReferenceRateBaseMode;
+        displayDecimals?: number;
+      }
+    >
+  >;
+}
+
 export type CustomerType = "individual" | "corporate";
 
 export interface Customer {

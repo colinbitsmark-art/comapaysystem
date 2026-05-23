@@ -1,3 +1,14 @@
+# Order management
+
+React + Vite frontend, Express + SQLite backend.
+
+## Reference rates
+
+- **Railway Postgres sync:** `docs/RAILWAY_POSTGRES_REFERENCE_RATES.md` — set `DATABASE_URL` on each web service.
+- **Telegram:** Save on the config page, then **Send to Telegram**; bot handles `reference_rates` webhook and `GET /api/bot/reference-rates` for `/command1`.
+
+---
+
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

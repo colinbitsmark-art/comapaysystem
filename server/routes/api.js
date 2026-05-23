@@ -7,6 +7,11 @@ import {
 } from "../controllers/currenciesController.js";
 import { getExchangeRates } from "../controllers/exchangeRatesController.js";
 import {
+  getReferenceRates,
+  updateReferenceRates,
+  sendReferenceRatesToTelegram,
+} from "../controllers/referenceRatesController.js";
+import {
   listCustomers,
   createCustomer,
   updateCustomer,
@@ -204,6 +209,10 @@ router.put("/currencies/:id", updateCurrency);
 router.delete("/currencies/:id", deleteCurrency);
 
 router.get("/exchange-rates/:currency", getExchangeRates);
+
+router.get("/reference-rates", getReferenceRates);
+router.put("/reference-rates", updateReferenceRates);
+router.post("/reference-rates/send-telegram", sendReferenceRatesToTelegram);
 
 router.get("/customers", listCustomers);
 router.post("/customers", createCustomer);

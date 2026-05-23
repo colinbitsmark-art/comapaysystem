@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db } from "../db.js";
+import { getBotReferenceRatesSheet } from "../controllers/referenceRatesController.js";
 
 const router = Router();
 
@@ -23,6 +24,10 @@ const verifyBotAuth = (req, res, next) => {
 
 // Apply auth middleware to all bot routes
 router.use(verifyBotAuth);
+
+// ============= REFERENCE RATES =============
+
+router.get("/reference-rates", getBotReferenceRatesSheet);
 
 // ============= ORDERS =============
 

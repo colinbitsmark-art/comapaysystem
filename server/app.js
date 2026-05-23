@@ -10,11 +10,21 @@ import apiRouter from "./routes/api.js";
 import botRouter from "./routes/botRoutes.js";
 import { initDatabase } from "./db.js";
 import { getUploadsDir } from "./utils/fileStorage.js";
+import {
+  getReferenceRatesSyncStatus,
+  isPostgresSyncEnabled,
+} from "./services/referenceRatesStore.js";
 
 // Wrap database initialization in try-catch
 try {
   initDatabase();
   console.log('Database initialized successfully');
+  if (isPostgresSyncEnabled()) {
+    const { configId } = getReferenceRatesSyncStatus();
+    console.log(`Reference rates: Railway Postgres sync enabled (config id: ${configId})`);
+  } else {
+    console.log('Reference rates: local SQLite only (set DATABASE_URL for shared sync)');
+  }
 } catch (error) {
   console.error('Failed to initialize database:', error);
   // Don't exit immediately - let the server start and log the error

@@ -21,7 +21,31 @@ TELEGRAM_BOT_WEBHOOK_URL=http://localhost:3001/webhook/notification
 # Use a strong random secret (32+ characters)
 # Example: openssl rand -base64 32
 TELEGRAM_BOT_WEBHOOK_SECRET=your-secure-random-secret-key-change-this-in-production
+
+# Optional: dedicated URL for reference rate sheet (defaults to .../webhook/rate-sheet)
+# TELEGRAM_BOT_RATE_SHEET_WEBHOOK_URL=http://localhost:3001/webhook/rate-sheet
 ```
+
+## Reference rate sheet (Send to Telegram + /command1)
+
+The order app POSTs to your bot when an editor clicks **Send to Telegram** on the Reference rates page:
+
+```json
+POST /webhook/rate-sheet
+X-Webhook-Secret: <same as above>
+{ "type": "reference_rates", "message": "<formatted text>" }
+```
+
+Your bot should call `sendMessage` to the rates group chat.
+
+For `/command1`, fetch from the order app:
+
+```http
+GET /api/bot/reference-rates
+X-Bot-Api-Key: <BOT_API_KEY>
+```
+
+See `docs/RAILWAY_POSTGRES_REFERENCE_RATES.md` for details.
 
 ## Instructions
 

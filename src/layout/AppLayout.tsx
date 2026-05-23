@@ -17,6 +17,7 @@ import {
 import { APP_DISPLAY_NAME_EN_KEY, APP_DISPLAY_NAME_ZH_KEY } from "../constants/appBrandSettings";
 import { tagsFromCacheSyncPayload } from "../utils/cacheSyncTags";
 import { useThemePreferences, isLightColor } from "../hooks/useThemePreferences";
+import ReferenceRatesFloatingPanel from "../components/referenceRates/ReferenceRatesFloatingPanel";
 
 type SidebarEntry =
   | { kind: "link"; to: string; labelKey: string; end?: boolean; section?: string; adminOnly?: boolean }
@@ -30,6 +31,7 @@ const sidebarEntries: SidebarEntry[] = [
   { kind: "customersSubmenu" },
   { kind: "link", to: "/accounts", labelKey: "nav.accounts", section: "accounts" },
   { kind: "link", to: "/currencies", labelKey: "nav.currencies", section: "currencies" },
+  { kind: "link", to: "/reference-rates", labelKey: "nav.referenceRates", section: "referenceRates" },
   { kind: "link", to: "/users", labelKey: "nav.users", section: "users" },
   { kind: "link", to: "/roles", labelKey: "nav.roles", section: "roles" },
   { kind: "link", to: "/tags", labelKey: "nav.tags", section: "tags" },
@@ -781,6 +783,7 @@ export default function AppLayout() {
           <Outlet />
         </main>
       </div>
+      {user ? <ReferenceRatesFloatingPanel /> : null}
     </div>
   );
 }

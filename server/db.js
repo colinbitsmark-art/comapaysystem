@@ -33,7 +33,7 @@ export const resetDbInstance = () => {
   return db;
 };
 
-const SECTIONS = ["dashboard", "currencies", "customers", "users", "roles", "orders", "transfers", "accounts", "expenses", "profit", "wallets"];
+const SECTIONS = ["dashboard", "currencies", "customers", "users", "roles", "orders", "transfers", "accounts", "expenses", "profit", "wallets", "referenceRates"];
 
 const ensureSchema = () => {
   db.prepare(
@@ -826,6 +826,8 @@ const seedData = () => {
             deleteOrder: true,
             deleteManyOrders: true,
             pinOrders: true,
+            editReferenceRates: true,
+            displayReferenceRatesPanel: true,
           },
         },
       },
@@ -1263,6 +1265,68 @@ const migrateDatabase = () => {
       } catch (e) {
         console.error("Error migrating admin pinOrders permission:", e);
       }
+    }
+
+    const referenceRatesMigration = db
+      .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
+      .get("reference_rates_permissions_v1");
+    if (!referenceRatesMigration) {
+      const rolesForRef = db.prepare("SELECT id, name, permissions FROM roles").all();
+      rolesForRef.forEach((role) => {
+        try {
+          const permissions = JSON.parse(role.permissions);
+          let updated = false;
+          if (permissions.sections && !permissions.sections.includes("referenceRates")) {
+            if (role.name === "admin") {
+              permissions.sections.push("referenceRates");
+              updated = true;
+            }
+          }
+          if (!permissions.actions) permissions.actions = {};
+          if (role.name === "admin" && permissions.actions.editReferenceRates !== true) {
+            permissions.actions.editReferenceRates = true;
+            updated = true;
+          }
+          if (role.name === "admin" && permissions.actions.displayReferenceRatesPanel !== true) {
+            permissions.actions.displayReferenceRatesPanel = true;
+            updated = true;
+          }
+          if (updated) {
+            db.prepare("UPDATE roles SET permissions = @permissions, updatedAt = @updatedAt WHERE id = @id").run({
+              id: role.id,
+              permissions: JSON.stringify(permissions),
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        } catch (error) {
+          console.error(`Error migrating reference rates permissions for role ${role.id}:`, error);
+        }
+      });
+      db.prepare("INSERT INTO _schema_migrations (key) VALUES ('reference_rates_permissions_v1')").run();
+    }
+
+    const referenceRatesPanelMigration = db
+      .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
+      .get("reference_rates_panel_display_v1");
+    if (!referenceRatesPanelMigration) {
+      const rolesForPanel = db.prepare("SELECT id, name, permissions FROM roles").all();
+      rolesForPanel.forEach((role) => {
+        try {
+          const permissions = JSON.parse(role.permissions);
+          if (!permissions.actions) permissions.actions = {};
+          if (permissions.actions.displayReferenceRatesPanel !== true) {
+            permissions.actions.displayReferenceRatesPanel = true;
+            db.prepare("UPDATE roles SET permissions = @permissions, updatedAt = @updatedAt WHERE id = @id").run({
+              id: role.id,
+              permissions: JSON.stringify(permissions),
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        } catch (error) {
+          console.error(`Error migrating reference rates panel permission for role ${role.id}:`, error);
+        }
+      });
+      db.prepare("INSERT INTO _schema_migrations (key) VALUES ('reference_rates_panel_display_v1')").run();
     }
   } catch (error) {
     console.error("Migration error:", error);

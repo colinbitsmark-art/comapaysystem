@@ -17,7 +17,7 @@ import { useAppSelector, useAppDispatch } from "../app/hooks";
 import { setUser } from "../app/authSlice";
 import type { Account, RoleAccountAccess, RolePermissions } from "../types";
 
-const SECTION_OPTIONS = ["dashboard", "currencies", "customers", "users", "roles", "orders", "transfers", "accounts", "expenses", "profit", "wallets", "tags"];
+const SECTION_OPTIONS = ["dashboard", "currencies", "customers", "users", "roles", "orders", "transfers", "accounts", "expenses", "profit", "wallets", "tags", "referenceRates"];
 
 // Group actions by their related pages/sections
 const ACTION_GROUPS = [
@@ -26,6 +26,13 @@ const ACTION_GROUPS = [
     actions: [
       { key: "createCurrency", labelKey: "roles.createCurrency" },
       { key: "updateCurrency", labelKey: "roles.updateCurrency" },
+    ],
+  },
+  {
+    section: "referenceRates",
+    actions: [
+      { key: "displayReferenceRatesPanel", labelKey: "roles.displayReferenceRatesPanel" },
+      { key: "editReferenceRates", labelKey: "roles.editReferenceRates" },
     ],
   },
   {
