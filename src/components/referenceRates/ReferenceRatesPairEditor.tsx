@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import type { ReferenceRatePair, ReferenceRatePairId } from "../../types";
 import { PAIR_KINDS, REFERENCE_RATE_PAIR_LABELS } from "../../constants/referenceRatePairs";
 import SectionCard from "../common/SectionCard";
+import { preventNumberInputWheel } from "../../utils/formInputs";
 
 export type PairFormState = {
   baseModeChoice: "average" | "dual";
@@ -72,6 +73,7 @@ export default function ReferenceRatesPairEditor({
                 className="w-full rounded-lg border px-3 py-2 text-sm"
                 value={form.averageBase}
                 onChange={(e) => onChange({ averageBase: e.target.value })}
+                onWheel={preventNumberInputWheel}
               />
             </div>
           )}
@@ -86,6 +88,7 @@ export default function ReferenceRatesPairEditor({
                   className="w-full rounded-lg border px-3 py-2 text-sm"
                   value={form.baseBuy}
                   onChange={(e) => onChange({ baseBuy: e.target.value })}
+                  onWheel={preventNumberInputWheel}
                 />
               </div>
               <div>
@@ -97,6 +100,7 @@ export default function ReferenceRatesPairEditor({
                   className="w-full rounded-lg border px-3 py-2 text-sm"
                   value={form.baseSell}
                   onChange={(e) => onChange({ baseSell: e.target.value })}
+                  onWheel={preventNumberInputWheel}
                 />
               </div>
             </>
@@ -112,6 +116,7 @@ export default function ReferenceRatesPairEditor({
                   className="w-full rounded-lg border px-3 py-2 text-sm"
                   value={form.baseBuy}
                   onChange={(e) => onChange({ baseBuy: e.target.value })}
+                  onWheel={preventNumberInputWheel}
                 />
               </div>
               <div>
@@ -123,6 +128,7 @@ export default function ReferenceRatesPairEditor({
                   className="w-full rounded-lg border px-3 py-2 text-sm"
                   value={form.baseSell}
                   onChange={(e) => onChange({ baseSell: e.target.value })}
+                  onWheel={preventNumberInputWheel}
                 />
               </div>
             </>
@@ -139,6 +145,7 @@ export default function ReferenceRatesPairEditor({
                   className="w-full rounded-lg border px-3 py-2 text-sm"
                   value={form.markupPercent}
                   onChange={(e) => onChange({ markupPercent: e.target.value })}
+                  onWheel={preventNumberInputWheel}
                 />
               </div>
               <div>
@@ -151,6 +158,7 @@ export default function ReferenceRatesPairEditor({
                   className="w-full rounded-lg border px-3 py-2 text-sm"
                   value={form.markdownPercent}
                   onChange={(e) => onChange({ markdownPercent: e.target.value })}
+                  onWheel={preventNumberInputWheel}
                 />
               </div>
             </>
@@ -166,6 +174,7 @@ export default function ReferenceRatesPairEditor({
               className="w-full rounded-lg border px-3 py-2 text-sm"
               value={form.displayDecimals}
               onChange={(e) => onChange({ displayDecimals: e.target.value })}
+              onWheel={preventNumberInputWheel}
             />
           </div>
         </div>

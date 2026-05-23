@@ -23,6 +23,7 @@ import {
   responseDerivedDecimals,
   responseToFormPairs,
 } from "../utils/referenceRates";
+import { preventNumberInputWheel } from "../utils/formInputs";
 
 const emptyFormPair = (pairId: ReferenceRatePairId): PairFormState => {
   const base: PairFormState = {
@@ -343,6 +344,7 @@ export default function ReferenceRatesPage() {
                     onChange={(e) =>
                       setDerivedDecimals((prev) => ({ ...prev, [id]: e.target.value }))
                     }
+                    onWheel={preventNumberInputWheel}
                   />
                 </div>
               </SectionCard>
@@ -361,6 +363,7 @@ export default function ReferenceRatesPage() {
               className="w-full rounded-lg border px-3 py-2 text-sm"
               value={pkrSwiftFactor}
               onChange={(e) => setPkrSwiftFactor(e.target.value)}
+              onWheel={preventNumberInputWheel}
             />
             <p className="mt-2 text-sm text-slate-600">
               {t("referenceRates.pkrSwiftPreview")}:{" "}
