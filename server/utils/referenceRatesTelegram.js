@@ -65,7 +65,9 @@ export const parseReferencePairLabel = (label) => {
 };
 
 /**
- * Desk directions from pair buy/sell: FORWARD (from>to) uses sell, REVERSE (to>from) uses buy.
+ * Map desk buy/sell to direction lines.
+ * - PKR-first pairs (e.g. PKR/AED): forward sells quote → forward=sell, reverse=buy.
+ * - PKR-quote cross-rates (e.g. HKD/PKR): forward buys base (HKD/CNY) → forward=buy, reverse=sell.
  */
 export const buildDirectionLinesForPair = (pair) => {
   const parsed = parseReferencePairLabel(pair.label);
@@ -74,10 +76,11 @@ export const buildDirectionLinesForPair = (pair) => {
   const { from, to, tag } = parsed;
   const { buy, sell } = getBuySell(pair);
   const decimals = pair.displayDecimals ?? 3;
+  const quoteIsPkr = to === "PKR";
 
   return [
-    { label: `${from}>${to}${tag}`, value: sell, decimals },
-    { label: `${to}>${from}${tag}`, value: buy, decimals },
+    { label: `${from}>${to}${tag}`, value: quoteIsPkr ? buy : sell, decimals },
+    { label: `${to}>${from}${tag}`, value: quoteIsPkr ? sell : buy, decimals },
   ];
 };
 
