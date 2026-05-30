@@ -1,8 +1,5 @@
 import { Resend } from "resend";
-
-function getAppName() {
-  return process.env.APP_NAME?.trim() || "Operations Console";
-}
+import { getAppDisplayName } from "../../utils/appBranding.js";
 
 function escapeHtml(value) {
   return String(value)
@@ -15,7 +12,7 @@ function escapeHtml(value) {
 export async function sendPasswordResetEmail({ to, code, expiresMinutes }) {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const from = process.env.MAIL_FROM?.trim() || "onboarding@resend.dev";
-  const appName = getAppName();
+  const appName = getAppDisplayName();
   const safeCode = escapeHtml(code);
 
   if (!apiKey) {

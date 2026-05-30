@@ -27,6 +27,7 @@ import {
   markPasswordResetTokenUsed,
 } from "../utils/passwordResetTokens.js";
 import { sendPasswordResetEmail } from "../services/email/sendPasswordResetEmail.js";
+import { getAppDisplayName } from "../utils/appBranding.js";
 
 const FORGOT_PASSWORD_MESSAGE =
   "If an account exists for that email, we sent a reset code.";
@@ -188,7 +189,7 @@ export const setup2fa = async (req, res, next) => {
     }
 
     const secret = speakeasy.generateSecret({
-      name: `Operations Console (${user.email})`,
+      name: `${getAppDisplayName()} (${user.email})`,
       length: 20,
     });
 
