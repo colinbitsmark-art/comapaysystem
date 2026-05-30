@@ -25,11 +25,11 @@ import WalletTrackerPage from "../pages/WalletTrackerPage";
 import ReferenceRatesPage from "../pages/ReferenceRatesPage";
 import { useAppSelector } from "../app/hooks";
 import { hasSectionAccess } from "../utils/permissions";
-import { getAuthToken } from "../utils/authToken";
+import { hasStoredSession } from "../utils/authToken";
 
 function RequireAuth({ children, section }: { children: ReactElement; section?: string }) {
   const user = useAppSelector((s) => s.auth.user);
-  if (!user || !getAuthToken()) {
+  if (!user || !hasStoredSession()) {
     return <Navigate to="/login" replace />;
   }
   if (section && !hasSectionAccess(user, section)) {
@@ -40,7 +40,7 @@ function RequireAuth({ children, section }: { children: ReactElement; section?: 
 
 function RequireAdmin({ children }: { children: ReactElement }) {
   const user = useAppSelector((s) => s.auth.user);
-  if (!user || !getAuthToken()) {
+  if (!user || !hasStoredSession()) {
     return <Navigate to="/login" replace />;
   }
   if (user.role !== "admin") {

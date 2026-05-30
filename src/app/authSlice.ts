@@ -1,12 +1,13 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import type { AuthResponse } from "../types";
-import { getAuthToken, setAuthToken } from "../utils/authToken";
 
 export interface AuthState {
   user: AuthResponse | null;
 }
 
 const saved = localStorage.getItem("auth_user");
+// Legacy client-side JWT storage (removed for security)
+localStorage.removeItem("auth_token");
 const initialState: AuthState = {
   user: saved ? (JSON.parse(saved) as AuthResponse) : null,
 };
@@ -18,13 +19,9 @@ const authSlice = createSlice({
     setUser(state, action: PayloadAction<AuthResponse | null>) {
       state.user = action.payload;
       if (action.payload) {
-        const { token, ...userWithoutToken } = action.payload;
-        if (token) {
-          setAuthToken(token);
-        }
+        const { token: _token, ...userWithoutToken } = action.payload;
         localStorage.setItem("auth_user", JSON.stringify(userWithoutToken));
       } else {
-        setAuthToken(null);
         localStorage.removeItem("auth_user");
       }
     },
@@ -34,15 +31,13 @@ const authSlice = createSlice({
     ) {
       if (state.user) {
         state.user = { ...state.user, ...action.payload };
-        const { token: _token, ...persistable } = state.user;
-        localStorage.setItem("auth_user", JSON.stringify(persistable));
+        localStorage.setItem("auth_user", JSON.stringify(state.user));
       }
     },
     updateUserEmail(state, action: PayloadAction<string>) {
       if (state.user) {
         state.user = { ...state.user, email: action.payload };
-        const { token: _token, ...persistable } = state.user;
-        localStorage.setItem("auth_user", JSON.stringify(persistable));
+        localStorage.setItem("auth_user", JSON.stringify(state.user));
       }
     },
   },
@@ -51,7 +46,4 @@ const authSlice = createSlice({
 export const { setUser, updateThemePreferences, updateUserEmail } = authSlice.actions;
 export default authSlice.reducer;
 
-/** Rehydrate token from storage on app load (token is not stored in auth_user JSON). */
-export function hasStoredSession(): boolean {
-  return Boolean(getAuthToken() && localStorage.getItem("auth_user"));
-}
+export { hasStoredSession } from "../utils/authToken";

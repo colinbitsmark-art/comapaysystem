@@ -34,11 +34,13 @@ On startup the app registers: `https://your-app.railway.app/api/telegram/webhook
 | `/chatid` | Show chat id for `.env` |
 | `/help` | List commands |
 
-Optional restrict commands to specific chats:
+Optional restrict commands to specific chats (recommended for production):
 
 ```env
 TELEGRAM_ALLOWED_CHAT_IDS=-100xxxxxxxxxx,-100yyyyyyyyyy
 ```
+
+**Behavior:** when this variable is set, bot commands are only accepted from those chat IDs. When it is **not** set, commands are accepted from **any** chat where the bot receives a message.
 
 ## Order notifications
 

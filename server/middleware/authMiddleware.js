@@ -12,6 +12,15 @@ function resolveUserIdFromToken(token) {
   return userId;
 }
 
+function isAdminRole(req) {
+  return req.user?.role === "admin";
+}
+
+function getPermissionsForRequest(req) {
+  if (!req.user?.role) return { sections: [], actions: {} };
+  return getUserPermissionsForRole(req.user.role).permissions || { sections: [], actions: {} };
+}
+
 export function authenticate(req, res, next) {
   try {
     const token = extractBearerToken(req);
@@ -52,17 +61,49 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
+export function requireSection(sectionKey) {
+  return (req, res, next) => {
+    if (!req.userId) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    if (isAdminRole(req)) {
+      return next();
+    }
+    const permissions = getPermissionsForRequest(req);
+    if (!permissions.sections?.includes(sectionKey)) {
+      return res.status(403).json({ message: "You do not have access to this section" });
+    }
+    next();
+  };
+}
+
+export function requireAnySection(...sectionKeys) {
+  return (req, res, next) => {
+    if (!req.userId) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    if (isAdminRole(req)) {
+      return next();
+    }
+    const permissions = getPermissionsForRequest(req);
+    const sections = permissions.sections || [];
+    if (sectionKeys.some((key) => sections.includes(key))) {
+      return next();
+    }
+    return res.status(403).json({ message: "You do not have access to this section" });
+  };
+}
+
 export function requireAction(actionKey) {
   return (req, res, next) => {
     if (!req.userId) {
       return res.status(401).json({ message: "Authentication required" });
     }
-    const user = db.prepare("SELECT role FROM users WHERE id = ?;").get(req.userId);
-    if (!user?.role) {
-      return res.status(403).json({ message: "Forbidden" });
+    if (isAdminRole(req)) {
+      return next();
     }
-    const { permissions } = getUserPermissionsForRole(user.role);
-    if (!permissions?.actions?.[actionKey]) {
+    const permissions = getPermissionsForRequest(req);
+    if (!permissions.actions?.[actionKey]) {
       return res.status(403).json({ message: "You do not have permission for this action" });
     }
     next();

@@ -24,6 +24,7 @@ export const getAllowedChatIds = () => {
   );
 };
 
+/** When TELEGRAM_ALLOWED_CHAT_IDS is set, only those chats may run bot commands; otherwise all chats are allowed. */
 export const isChatAllowed = (chatId) => {
   const allowed = getAllowedChatIds();
   if (!allowed) return true;

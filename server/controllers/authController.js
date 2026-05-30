@@ -37,7 +37,7 @@ function sendAuthSuccess(res, userRow) {
   const token = signAccessToken(userRow.id);
   setAuthCookie(res, token);
   const user = buildAuthUser(userRow);
-  res.json({ ...user, token });
+  res.json(user);
 }
 
 export const login = async (req, res, next) => {

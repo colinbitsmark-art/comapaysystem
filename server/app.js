@@ -16,6 +16,7 @@ import {
   getReferenceRatesSyncStatus,
   isPostgresSyncEnabled,
 } from "./services/referenceRatesStore.js";
+import { isProduction } from "./utils/env.js";
 
 // Wrap database initialization in try-catch
 try {
@@ -53,7 +54,7 @@ app.use(helmet({
 app.use(cookieParser());
 app.use(express.json({ limit: "10mb" }));
 
-if (process.env.NODE_ENV !== "production") {
+if (!isProduction()) {
   app.use((req, res, next) => {
     console.log(`${req.method} ${req.path}`);
     next();

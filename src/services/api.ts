@@ -55,7 +55,6 @@ import {
   APP_DOCUMENT_TITLE_ZH_KEY,
   APP_FAVICON_PATH_KEY,
 } from "../constants/appBrandSettings";
-import { getAuthToken, setAuthToken } from "../utils/authToken";
 
 export type LoginResponse =
   | AuthResponse
@@ -69,13 +68,6 @@ export interface TwoFactorSetupResponse {
 const rawBaseQuery = fetchBaseQuery({
   baseUrl: "/api",
   credentials: "include",
-  prepareHeaders: (headers) => {
-    const token = getAuthToken();
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
-    return headers;
-  },
 });
 
 const baseQuery: typeof rawBaseQuery = async (args, api, extraOptions) => {
@@ -88,7 +80,6 @@ const baseQuery: typeof rawBaseQuery = async (args, api, extraOptions) => {
       !url.includes("auth/forgot-password") &&
       !url.includes("auth/reset-password")
     ) {
-      setAuthToken(null);
       localStorage.removeItem("auth_user");
     }
   }

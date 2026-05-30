@@ -1849,6 +1849,14 @@ export const updateOrderStatus = async (req, res, next) => {
       return res.status(401).json({ message: "User ID is required" });
     }
 
+    if (status === "cancelled" && currentOrder.status !== "cancelled") {
+      const userPermissions = getUserPermissions(userId);
+      const userRow = db.prepare("SELECT role FROM users WHERE id = ?;").get(userId);
+      if (userRow?.role !== "admin" && !userPermissions?.actions?.cancelOrder) {
+        return res.status(403).json({ message: "You do not have permission to cancel orders" });
+      }
+    }
+
     let cancelAffectedAccountIds = null;
     if (status === "cancelled" && currentOrder.status !== "cancelled") {
       db.transaction(() => {

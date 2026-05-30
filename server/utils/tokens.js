@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { isProduction, isSecureCookieEnabled } from "./env.js";
 
 const ACCESS_TOKEN_TTL = process.env.JWT_ACCESS_TTL || "8h";
 const PENDING_2FA_TTL = "5m";
@@ -6,7 +7,7 @@ const PENDING_2FA_TTL = "5m";
 export function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
   if (secret) return secret;
-  if (process.env.NODE_ENV === "production") {
+  if (isProduction()) {
     throw new Error("JWT_SECRET environment variable is required in production");
   }
   console.warn("[auth] JWT_SECRET not set — using insecure development default");
@@ -37,16 +38,13 @@ export function extractBearerToken(req) {
   if (req.cookies?.auth_token) {
     return req.cookies.auth_token;
   }
-  if (req.query?.token && typeof req.query.token === "string") {
-    return req.query.token;
-  }
   return null;
 }
 
 export function setAuthCookie(res, token) {
   res.cookie("auth_token", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureCookieEnabled(),
     sameSite: "lax",
     maxAge: 8 * 60 * 60 * 1000,
     path: "/",
@@ -54,5 +52,10 @@ export function setAuthCookie(res, token) {
 }
 
 export function clearAuthCookie(res) {
-  res.clearCookie("auth_token", { path: "/" });
+  res.clearCookie("auth_token", {
+    path: "/",
+    httpOnly: true,
+    secure: isSecureCookieEnabled(),
+    sameSite: "lax",
+  });
 }

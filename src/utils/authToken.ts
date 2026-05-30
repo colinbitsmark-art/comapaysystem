@@ -1,20 +1,19 @@
-const AUTH_TOKEN_KEY = "auth_token";
-
-export function getAuthToken(): string | null {
-  return localStorage.getItem(AUTH_TOKEN_KEY);
+/** Session is stored in httpOnly cookie; user profile is cached in localStorage. */
+export function hasStoredSession(): boolean {
+  return Boolean(localStorage.getItem("auth_user"));
 }
 
-export function setAuthToken(token: string | null): void {
-  if (token) {
-    localStorage.setItem(AUTH_TOKEN_KEY, token);
-  } else {
-    localStorage.removeItem(AUTH_TOKEN_KEY);
-  }
-}
-
+/** SSE uses same-origin cookies — no token in the URL. */
 export function getSseUrl(path: string): string {
-  const token = getAuthToken();
-  if (!token) return path;
-  const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}token=${encodeURIComponent(token)}`;
+  return path;
+}
+
+/** @deprecated Auth token is no longer stored client-side. */
+export function getAuthToken(): string | null {
+  return null;
+}
+
+/** @deprecated Auth token is no longer stored client-side. */
+export function setAuthToken(_token: string | null): void {
+  // no-op: session lives in httpOnly cookie
 }
