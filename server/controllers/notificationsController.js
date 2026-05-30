@@ -52,10 +52,9 @@ export const broadcastCacheSyncToAllClients = (payload) => {
  */
 export const subscribeToNotifications = (req, res, next) => {
   try {
-    // Get userId from query parameter (EventSource doesn't support custom headers)
-    const userId = parseInt(req.query.userId, 10);
-    if (!userId || isNaN(userId)) {
-      return res.status(401).json({ message: 'User ID is required' });
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ message: 'Authentication required' });
     }
 
     // Set up SSE headers

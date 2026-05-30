@@ -124,6 +124,8 @@ export interface AuthResponse {
   name: string;
   email: string;
   role: string;
+  token?: string;
+  totpEnabled?: boolean;
   permissions?: RolePermissions;
   roleUpdatedAt?: string; // Timestamp when user's role was last updated (stored at login)
   /** User's preferred sidebar background color (hex, e.g. "#0f172a") */

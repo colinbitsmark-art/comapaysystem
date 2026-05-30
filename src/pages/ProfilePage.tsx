@@ -13,6 +13,9 @@ import {
   type Theme,
   type ThemeColorOverrides,
 } from "../hooks/useThemePreferences";
+import TwoFactorSettings from "../components/auth/TwoFactorSettings";
+import AccountSettings from "../components/auth/AccountSettings";
+import EmailSettings from "../components/auth/EmailSettings";
 
 // ─── Mini App Preview ─────────────────────────────────────────────────────────
 
@@ -263,7 +266,7 @@ function OverrideColorCell({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-const TABS = ["theme"] as const;
+const TABS = ["account", "theme", "security"] as const;
 type Tab = (typeof TABS)[number];
 
 // Maps override key → derived theme key
@@ -280,11 +283,11 @@ const OVERRIDE_FIELDS: Array<{
   { labelKey: "preferences.colorNavText", overrideKey: "themeSidebarNavText", derivedKey: "sidebarNavText" },
 ];
 
-export default function PreferencesPage() {
+export default function ProfilePage() {
   const { t } = useTranslation();
   const { sidebarBgColor, appBgColor, colorOverrides, savePreferences, isLoading } = useThemePreferences();
 
-  const [activeTab, setActiveTab] = useState<Tab>("theme");
+  const [activeTab, setActiveTab] = useState<Tab>("account");
   const [localSidebar, setLocalSidebar] = useState(sidebarBgColor);
   const [localApp, setLocalApp] = useState(appBgColor);
   const [localOverrides, setLocalOverrides] = useState<ThemeColorOverrides>(colorOverrides);
@@ -364,11 +367,18 @@ export default function PreferencesPage() {
                   : "border-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
-              {t(`preferences.tabs.${tab}`)}
+              {t(`profile.tabs.${tab}`)}
             </button>
           ))}
         </div>
       </div>
+
+      {activeTab === "account" && (
+        <div className="space-y-6">
+          <EmailSettings />
+          <AccountSettings />
+        </div>
+      )}
 
       {/* Theme tab */}
       {activeTab === "theme" && (
@@ -518,6 +528,12 @@ export default function PreferencesPage() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {activeTab === "security" && (
+        <div className="space-y-6">
+          <TwoFactorSettings />
         </div>
       )}
     </div>

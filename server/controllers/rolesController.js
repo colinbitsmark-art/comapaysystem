@@ -30,6 +30,12 @@ export const subscribeToRoleUpdates = (req, res, next) => {
     if (!roleName) {
       return res.status(400).json({ message: "Role name is required" });
     }
+    if (!req.userId) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    if (req.user?.role !== roleName) {
+      return res.status(403).json({ message: "Cannot subscribe to another role's updates" });
+    }
 
     // Set up SSE headers
     res.setHeader('Content-Type', 'text/event-stream');

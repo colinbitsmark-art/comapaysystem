@@ -53,7 +53,7 @@ import {
   deleteUser,
   updateUserPreferences,
 } from "../controllers/usersController.js";
-import { login } from "../controllers/authController.js";
+import { login, verify2fa, me, logout, get2faStatus, setup2fa, enable2fa, disable2fa, changePassword, changeEmail, forgotPassword, resetPassword } from "../controllers/authController.js";
 import {
   listRoles,
   createRole,
@@ -187,190 +187,221 @@ import {
   startPolling,
   getPollingStatus,
 } from "../controllers/walletsController.js";
+import { serveUpload } from "../controllers/uploadsController.js";
+import {
+  authenticate,
+  requireAdmin,
+} from "../middleware/authMiddleware.js";
+import { loginRateLimiter, twoFactorRateLimiter, forgotPasswordRateLimiter, resetPasswordRateLimiter } from "../middleware/rateLimit.js";
 
 const router = Router();
+const protectedRouter = Router();
+
+const walletRefreshAuth = (req, res, next) => {
+  const secret = process.env.INTERNAL_CRON_SECRET;
+  const provided = req.headers["x-internal-cron-secret"];
+  if (secret && provided === secret) {
+    req.isInternalCron = true;
+    return next();
+  }
+  return authenticate(req, res, next);
+};
 
 router.get("/health", (_req, res) => res.json({ ok: true }));
 
-router.get("/kyc/schema", getKycSchema);
-router.put("/kyc/schema", putKycSchema);
-
-// KYC schema builder v2
-router.get("/kyc/builder/schema/versions", getBuilderVersions);
-router.get("/kyc/builder/schema/version/:id", getBuilderSchemaVersion);
-router.delete("/kyc/builder/schema/version/:id", deleteBuilderSchemaVersion);
-router.get("/kyc/builder/schema", getBuilderSchema);
-router.put("/kyc/builder/schema", putBuilderSchema);
-router.post("/kyc/builder/schema/publish", publishBuilderSchema);
-
-router.get("/currencies", listCurrencies);
-router.post("/currencies", createCurrency);
-router.put("/currencies/:id", updateCurrency);
-router.delete("/currencies/:id", deleteCurrency);
-
-router.get("/exchange-rates/:currency", getExchangeRates);
-
-router.get("/reference-rates", getReferenceRates);
-router.put("/reference-rates", updateReferenceRates);
-router.post("/reference-rates/send-telegram", sendReferenceRatesToTelegram);
-
-router.get("/customers", listCustomers);
-router.post("/customers", createCustomer);
-router.put("/customers/:id", updateCustomer);
-router.delete("/customers/:id", deleteCustomer);
-router.get("/customers/:id/beneficiaries", listCustomerBeneficiaries);
-router.post("/customers/:id/beneficiaries", addCustomerBeneficiary);
-router.put("/customers/:id/beneficiaries/:beneficiaryId", updateCustomerBeneficiary);
-router.delete("/customers/:id/beneficiaries/:beneficiaryId", deleteCustomerBeneficiary);
-
-router.get("/customers/:id/kyc", getCustomerKyc);
-router.put("/customers/:id/kyc", updateCustomerKyc);
-router.post("/customers/:id/kyc/documents", upload.single("file"), uploadCustomerKycDocument);
-router.delete("/customers/:id/kyc/documents/:documentId", deleteCustomerKycDocument);
-
-// Customer ledger routes (static routes must come before /:id routes)
-router.get("/customers/ledger/converted-balances", getAllCustomersConvertedBalances);
-router.get("/customers/:id/ledger", listLedgerEntries);
-router.get("/customers/:id/ledger/summary", getLedgerSummary);
-router.post("/customers/:id/ledger", createLedgerEntry);
-router.get("/customers/ledger/:entryId/changes", getLedgerEntryChanges);
-router.put("/customers/:id/ledger/:entryId", updateLedgerEntry);
-router.delete("/customers/:id/ledger/:entryId", deleteLedgerEntry);
-
-router.get("/users", listUsers);
-router.post("/users", createUser);
-router.put("/users/:id", updateUser);
-router.delete("/users/:id", deleteUser);
-router.patch("/users/:id/preferences", updateUserPreferences);
-router.post("/auth/login", login);
-
-router.get("/roles", listRoles);
-router.get("/roles/subscribe", subscribeToRoleUpdates);
-router.post("/roles", createRole);
-router.put("/roles/:id", updateRole);
-router.post("/roles/:id/force-logout", forceLogoutUsersByRole);
-router.delete("/roles/:id", deleteRole);
-
-router.get("/orders", listOrders);
-router.get("/orders/export", exportOrders);
-router.get("/orders/pins", getPinnedOrderIds);
-router.put("/orders/pins/reorder", reorderPinnedOrders);
-router.post("/orders", createOrder);
-// More specific routes must come before less specific ones
-router.get("/orders/:id/changes", getOrderChanges);
-router.get("/orders/:id/details", getOrderDetails);
-router.post("/orders/:id/process", processOrder);
-router.post("/orders/:id/receipts", upload.single("file"), addReceipt);
-router.put("/orders/receipts/:receiptId", upload.single("file"), updateReceipt);
-router.delete("/orders/receipts/:receiptId", deleteReceipt);
-router.post("/orders/receipts/:receiptId/confirm", confirmReceipt);
-router.post("/orders/:id/beneficiaries", addBeneficiary);
-router.post("/orders/:id/payments", upload.single("file"), addPayment);
-router.put("/orders/payments/:paymentId", upload.single("file"), updatePayment);
-router.delete("/orders/payments/:paymentId", deletePayment);
-router.post("/orders/payments/:paymentId/confirm", confirmPayment);
-router.post("/orders/:id/profits", addProfitToOrder);
-router.put("/orders/profits/:profitId", updateProfit);
-router.delete("/orders/profits/:profitId", deleteProfit);
-router.post("/orders/profits/:profitId/confirm", confirmProfit);
-router.post("/orders/:id/service-charges", addServiceChargeToOrder);
-router.put("/orders/service-charges/:serviceChargeId", updateServiceCharge);
-router.delete("/orders/service-charges/:serviceChargeId", deleteServiceCharge);
-router.post("/orders/service-charges/:serviceChargeId/confirm", confirmServiceCharge);
-router.patch("/orders/:id/status", updateOrderStatus);
-router.post("/orders/:id/pin", pinOrder);
-router.delete("/orders/:id/pin", unpinOrder);
-router.put("/orders/:id", updateOrder);
-// DELETE must come last as it matches /orders/:id
-router.delete("/orders/:id", deleteOrder);
-
-router.get("/accounts", listAccounts);
-router.get("/accounts/summary", getAccountsSummary);
-router.get("/accounts/currency/:currencyCode", getAccountsByCurrency);
-router.get("/accounts/debug/references", getAllReferences);
-router.get("/accounts/:id/references", getAccountReferences);
-router.post("/accounts", createAccount);
-router.put("/accounts/:id", updateAccount);
-router.delete("/accounts/:id", deleteAccount);
-router.post("/accounts/:id/add-funds", addFunds);
-router.post("/accounts/:id/withdraw-funds", withdrawFunds);
-router.get("/accounts/:id/transactions", getAccountTransactions);
-router.delete("/accounts/transactions/clear-all", clearAllTransactionLogs);
-
-router.get("/transfers", listTransfers);
-router.get("/transfers/export", exportTransfers);
-router.post("/transfers", upload.single("file"), createTransfer);
-router.get("/transfers/:id/changes", getTransferChanges);
-router.put("/transfers/:id", upload.single("file"), updateTransfer);
-router.delete("/transfers/:id", deleteTransfer);
-
-router.get("/expenses", listExpenses);
-router.get("/expenses/export", exportExpenses);
-router.post("/expenses", upload.single("file"), createExpense);
-router.get("/expenses/:id/changes", getExpenseChanges);
-router.put("/expenses/:id", upload.single("file"), updateExpense);
-router.delete("/expenses/:id", deleteExpense);
-
-router.get("/profit-calculations", getProfitCalculations);
-router.get("/profit-calculations/:id", getProfitCalculation);
-router.post("/profit-calculations", createProfitCalculation);
-router.put("/profit-calculations/:id", updateProfitCalculation);
-router.delete("/profit-calculations/:id", deleteProfitCalculation);
-router.put("/profit-calculations/:id/multipliers/:accountId", updateAccountMultiplier);
-router.put("/profit-calculations/:id/exchange-rates", updateExchangeRate);
-router.delete("/profit-calculations/:id/groups", deleteGroup);
-router.put("/profit-calculations/:id/groups", renameGroup);
-router.put("/profit-calculations/:id/set-default", setDefaultCalculation);
-router.put("/profit-calculations/:id/unset-default", unsetDefaultCalculation);
-
 router.get("/settings/branding/public", getPublicBranding);
-router.post("/settings/branding/favicon", uploadBrandingFavicon.single("file"), uploadSiteFavicon);
-router.delete("/settings/branding/favicon", deleteSiteFavicon);
-router.get("/settings/:key", getSetting);
-router.put("/settings", setSetting);
-router.post("/settings/backup", createBackup);
-router.post("/settings/restore", backupUpload.single("file"), restoreBackup);
-router.get("/settings/restore/safety/list", listSafetyBackups);
-router.post("/settings/restore/safety", restoreSafetyBackup);
-router.get("/settings/restore/safety/download", downloadSafetyBackup);
-router.post("/settings/restore/safety/delete", deleteSafetyBackup);
-router.post("/settings/reset-ids", resetTableIds);
-router.post("/settings/clear-database", clearDatabase);
-router.get("/settings/debug/schema", getDbSchema);
-router.post("/settings/debug/query", executeQuery);
 
-router.get("/tags", listTags);
-router.post("/tags", createTag);
-router.put("/tags/:id", updateTag);
-router.delete("/tags/:id", deleteTag);
-router.post("/tags/batch-assign", batchAssignTags);
-router.post("/tags/batch-unassign", batchUnassignTags);
+router.post("/auth/login", loginRateLimiter, login);
+router.post("/auth/verify-2fa", twoFactorRateLimiter, verify2fa);
+router.post("/auth/forgot-password", forgotPasswordRateLimiter, forgotPassword);
+router.post("/auth/reset-password", resetPasswordRateLimiter, resetPassword);
 
-// Notification routes
-router.get("/notifications/subscribe", subscribeToNotifications);
-router.get("/notifications", getNotifications);
-router.get("/notifications/unread-count", getUnreadCount);
-router.patch("/notifications/:id/read", markAsRead);
-router.patch("/notifications/read-all", markAllAsRead);
-router.delete("/notifications/clear-all", clearAllNotifications); // Must come before :id route
-router.delete("/notifications/:id", deleteNotification);
-router.get("/notifications/preferences", getPreferences);
-router.put("/notifications/preferences", updatePreferences);
+protectedRouter.use(authenticate);
 
-// Wallet routes
-router.get("/wallets", listWallets);
-router.get("/wallets/summary", getWalletsSummary);
-router.post("/wallets", createWallet);
-router.put("/wallets/:id", updateWallet);
-router.delete("/wallets/:id", deleteWallet);
-router.post("/wallets/:id/refresh", refreshWalletBalance);
-router.get("/wallets/:id/transactions", getWalletTransactions);
-router.post("/wallets/refresh-all", refreshAllWallets);
+protectedRouter.get("/auth/me", me);
+protectedRouter.post("/auth/logout", logout);
+protectedRouter.get("/auth/2fa/status", get2faStatus);
+protectedRouter.post("/auth/2fa/setup", setup2fa);
+protectedRouter.post("/auth/2fa/enable", enable2fa);
+protectedRouter.post("/auth/2fa/disable", disable2fa);
+protectedRouter.post("/auth/change-password", changePassword);
+protectedRouter.post("/auth/change-email", changeEmail);
 
-// Wallet polling control routes
-router.get("/wallets/polling/status", getPollingStatus);
-router.post("/wallets/polling/stop", stopPolling);
-router.post("/wallets/polling/start", startPolling);
+protectedRouter.get("/uploads/*path", serveUpload);
+
+protectedRouter.get("/roles/subscribe", subscribeToRoleUpdates);
+protectedRouter.get("/notifications/subscribe", subscribeToNotifications);
+
+protectedRouter.get("/kyc/schema", getKycSchema);
+protectedRouter.put("/kyc/schema", putKycSchema);
+
+protectedRouter.get("/kyc/builder/schema/versions", getBuilderVersions);
+protectedRouter.get("/kyc/builder/schema/version/:id", getBuilderSchemaVersion);
+protectedRouter.delete("/kyc/builder/schema/version/:id", deleteBuilderSchemaVersion);
+protectedRouter.get("/kyc/builder/schema", getBuilderSchema);
+protectedRouter.put("/kyc/builder/schema", putBuilderSchema);
+protectedRouter.post("/kyc/builder/schema/publish", publishBuilderSchema);
+
+protectedRouter.get("/currencies", listCurrencies);
+protectedRouter.post("/currencies", createCurrency);
+protectedRouter.put("/currencies/:id", updateCurrency);
+protectedRouter.delete("/currencies/:id", deleteCurrency);
+
+protectedRouter.get("/exchange-rates/:currency", getExchangeRates);
+
+protectedRouter.get("/reference-rates", getReferenceRates);
+protectedRouter.put("/reference-rates", updateReferenceRates);
+protectedRouter.post("/reference-rates/send-telegram", sendReferenceRatesToTelegram);
+
+protectedRouter.get("/customers", listCustomers);
+protectedRouter.post("/customers", createCustomer);
+protectedRouter.put("/customers/:id", updateCustomer);
+protectedRouter.delete("/customers/:id", deleteCustomer);
+protectedRouter.get("/customers/:id/beneficiaries", listCustomerBeneficiaries);
+protectedRouter.post("/customers/:id/beneficiaries", addCustomerBeneficiary);
+protectedRouter.put("/customers/:id/beneficiaries/:beneficiaryId", updateCustomerBeneficiary);
+protectedRouter.delete("/customers/:id/beneficiaries/:beneficiaryId", deleteCustomerBeneficiary);
+
+protectedRouter.get("/customers/:id/kyc", getCustomerKyc);
+protectedRouter.put("/customers/:id/kyc", updateCustomerKyc);
+protectedRouter.post("/customers/:id/kyc/documents", upload.single("file"), uploadCustomerKycDocument);
+protectedRouter.delete("/customers/:id/kyc/documents/:documentId", deleteCustomerKycDocument);
+
+protectedRouter.get("/customers/ledger/converted-balances", getAllCustomersConvertedBalances);
+protectedRouter.get("/customers/:id/ledger", listLedgerEntries);
+protectedRouter.get("/customers/:id/ledger/summary", getLedgerSummary);
+protectedRouter.post("/customers/:id/ledger", createLedgerEntry);
+protectedRouter.get("/customers/ledger/:entryId/changes", getLedgerEntryChanges);
+protectedRouter.put("/customers/:id/ledger/:entryId", updateLedgerEntry);
+protectedRouter.delete("/customers/:id/ledger/:entryId", deleteLedgerEntry);
+
+protectedRouter.get("/users", requireAdmin, listUsers);
+protectedRouter.post("/users", requireAdmin, createUser);
+protectedRouter.put("/users/:id", requireAdmin, updateUser);
+protectedRouter.delete("/users/:id", requireAdmin, deleteUser);
+protectedRouter.patch("/users/:id/preferences", updateUserPreferences);
+
+protectedRouter.get("/roles", requireAdmin, listRoles);
+protectedRouter.post("/roles", requireAdmin, createRole);
+protectedRouter.put("/roles/:id", requireAdmin, updateRole);
+protectedRouter.post("/roles/:id/force-logout", requireAdmin, forceLogoutUsersByRole);
+protectedRouter.delete("/roles/:id", requireAdmin, deleteRole);
+
+protectedRouter.get("/orders", listOrders);
+protectedRouter.get("/orders/export", exportOrders);
+protectedRouter.get("/orders/pins", getPinnedOrderIds);
+protectedRouter.put("/orders/pins/reorder", reorderPinnedOrders);
+protectedRouter.post("/orders", createOrder);
+protectedRouter.get("/orders/:id/changes", getOrderChanges);
+protectedRouter.get("/orders/:id/details", getOrderDetails);
+protectedRouter.post("/orders/:id/process", processOrder);
+protectedRouter.post("/orders/:id/receipts", upload.single("file"), addReceipt);
+protectedRouter.put("/orders/receipts/:receiptId", upload.single("file"), updateReceipt);
+protectedRouter.delete("/orders/receipts/:receiptId", deleteReceipt);
+protectedRouter.post("/orders/receipts/:receiptId/confirm", confirmReceipt);
+protectedRouter.post("/orders/:id/beneficiaries", addBeneficiary);
+protectedRouter.post("/orders/:id/payments", upload.single("file"), addPayment);
+protectedRouter.put("/orders/payments/:paymentId", upload.single("file"), updatePayment);
+protectedRouter.delete("/orders/payments/:paymentId", deletePayment);
+protectedRouter.post("/orders/payments/:paymentId/confirm", confirmPayment);
+protectedRouter.post("/orders/:id/profits", addProfitToOrder);
+protectedRouter.put("/orders/profits/:profitId", updateProfit);
+protectedRouter.delete("/orders/profits/:profitId", deleteProfit);
+protectedRouter.post("/orders/profits/:profitId/confirm", confirmProfit);
+protectedRouter.post("/orders/:id/service-charges", addServiceChargeToOrder);
+protectedRouter.put("/orders/service-charges/:serviceChargeId", updateServiceCharge);
+protectedRouter.delete("/orders/service-charges/:serviceChargeId", deleteServiceCharge);
+protectedRouter.post("/orders/service-charges/:serviceChargeId/confirm", confirmServiceCharge);
+protectedRouter.patch("/orders/:id/status", updateOrderStatus);
+protectedRouter.post("/orders/:id/pin", pinOrder);
+protectedRouter.delete("/orders/:id/pin", unpinOrder);
+protectedRouter.put("/orders/:id", updateOrder);
+protectedRouter.delete("/orders/:id", deleteOrder);
+
+protectedRouter.get("/accounts", listAccounts);
+protectedRouter.get("/accounts/summary", getAccountsSummary);
+protectedRouter.get("/accounts/currency/:currencyCode", getAccountsByCurrency);
+protectedRouter.get("/accounts/debug/references", requireAdmin, getAllReferences);
+protectedRouter.get("/accounts/:id/references", getAccountReferences);
+protectedRouter.post("/accounts", createAccount);
+protectedRouter.put("/accounts/:id", updateAccount);
+protectedRouter.delete("/accounts/:id", deleteAccount);
+protectedRouter.post("/accounts/:id/add-funds", addFunds);
+protectedRouter.post("/accounts/:id/withdraw-funds", withdrawFunds);
+protectedRouter.get("/accounts/:id/transactions", getAccountTransactions);
+protectedRouter.delete("/accounts/transactions/clear-all", requireAdmin, clearAllTransactionLogs);
+
+protectedRouter.get("/transfers", listTransfers);
+protectedRouter.get("/transfers/export", exportTransfers);
+protectedRouter.post("/transfers", upload.single("file"), createTransfer);
+protectedRouter.get("/transfers/:id/changes", getTransferChanges);
+protectedRouter.put("/transfers/:id", upload.single("file"), updateTransfer);
+protectedRouter.delete("/transfers/:id", deleteTransfer);
+
+protectedRouter.get("/expenses", listExpenses);
+protectedRouter.get("/expenses/export", exportExpenses);
+protectedRouter.post("/expenses", upload.single("file"), createExpense);
+protectedRouter.get("/expenses/:id/changes", getExpenseChanges);
+protectedRouter.put("/expenses/:id", upload.single("file"), updateExpense);
+protectedRouter.delete("/expenses/:id", deleteExpense);
+
+protectedRouter.get("/profit-calculations", getProfitCalculations);
+protectedRouter.get("/profit-calculations/:id", getProfitCalculation);
+protectedRouter.post("/profit-calculations", createProfitCalculation);
+protectedRouter.put("/profit-calculations/:id", updateProfitCalculation);
+protectedRouter.delete("/profit-calculations/:id", deleteProfitCalculation);
+protectedRouter.put("/profit-calculations/:id/multipliers/:accountId", updateAccountMultiplier);
+protectedRouter.put("/profit-calculations/:id/exchange-rates", updateExchangeRate);
+protectedRouter.delete("/profit-calculations/:id/groups", deleteGroup);
+protectedRouter.put("/profit-calculations/:id/groups", renameGroup);
+protectedRouter.put("/profit-calculations/:id/set-default", setDefaultCalculation);
+protectedRouter.put("/profit-calculations/:id/unset-default", unsetDefaultCalculation);
+
+protectedRouter.post("/settings/branding/favicon", requireAdmin, uploadBrandingFavicon.single("file"), uploadSiteFavicon);
+protectedRouter.delete("/settings/branding/favicon", requireAdmin, deleteSiteFavicon);
+protectedRouter.get("/settings/:key", requireAdmin, getSetting);
+protectedRouter.put("/settings", requireAdmin, setSetting);
+protectedRouter.post("/settings/backup", requireAdmin, createBackup);
+protectedRouter.post("/settings/restore", requireAdmin, backupUpload.single("file"), restoreBackup);
+protectedRouter.get("/settings/restore/safety/list", requireAdmin, listSafetyBackups);
+protectedRouter.post("/settings/restore/safety", requireAdmin, restoreSafetyBackup);
+protectedRouter.get("/settings/restore/safety/download", requireAdmin, downloadSafetyBackup);
+protectedRouter.post("/settings/restore/safety/delete", requireAdmin, deleteSafetyBackup);
+protectedRouter.post("/settings/reset-ids", requireAdmin, resetTableIds);
+protectedRouter.post("/settings/clear-database", requireAdmin, clearDatabase);
+protectedRouter.get("/settings/debug/schema", requireAdmin, getDbSchema);
+protectedRouter.post("/settings/debug/query", requireAdmin, executeQuery);
+
+protectedRouter.get("/tags", listTags);
+protectedRouter.post("/tags", createTag);
+protectedRouter.put("/tags/:id", updateTag);
+protectedRouter.delete("/tags/:id", deleteTag);
+protectedRouter.post("/tags/batch-assign", batchAssignTags);
+protectedRouter.post("/tags/batch-unassign", batchUnassignTags);
+
+protectedRouter.get("/notifications", getNotifications);
+protectedRouter.get("/notifications/unread-count", getUnreadCount);
+protectedRouter.patch("/notifications/:id/read", markAsRead);
+protectedRouter.patch("/notifications/read-all", markAllAsRead);
+protectedRouter.delete("/notifications/clear-all", clearAllNotifications);
+protectedRouter.delete("/notifications/:id", deleteNotification);
+protectedRouter.get("/notifications/preferences", getPreferences);
+protectedRouter.put("/notifications/preferences", updatePreferences);
+
+protectedRouter.get("/wallets", listWallets);
+protectedRouter.get("/wallets/summary", getWalletsSummary);
+protectedRouter.post("/wallets", createWallet);
+protectedRouter.put("/wallets/:id", updateWallet);
+protectedRouter.delete("/wallets/:id", deleteWallet);
+protectedRouter.post("/wallets/:id/refresh", refreshWalletBalance);
+protectedRouter.get("/wallets/:id/transactions", getWalletTransactions);
+protectedRouter.post("/wallets/refresh-all", walletRefreshAuth, refreshAllWallets);
+
+protectedRouter.get("/wallets/polling/status", getPollingStatus);
+protectedRouter.post("/wallets/polling/stop", stopPolling);
+protectedRouter.post("/wallets/polling/start", startPolling);
+
+router.use(protectedRouter);
 
 export default router;
 

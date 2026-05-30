@@ -1,7 +1,24 @@
 import bcrypt from "bcryptjs";
 import { db } from "../db.js";
 
-const USER_SELECT_FIELDS = "id, name, email, role, displayBgColor, displayTextColor, sidebarBgColor, themeHeaderBg, themeCardBg, themeBorder, themeTextPrimary, themeTextSecondary, themeSidebarNavText";
+const USER_SELECT_FIELDS = "id, name, email, role, displayBgColor, displayTextColor, sidebarBgColor, themeHeaderBg, themeCardBg, themeBorder, themeTextPrimary, themeTextSecondary, themeSidebarNavText, isSuspended";
+
+const UPDATABLE_USER_FIELDS = new Set([
+  "name",
+  "email",
+  "role",
+  "password",
+  "displayBgColor",
+  "displayTextColor",
+  "sidebarBgColor",
+  "themeHeaderBg",
+  "themeCardBg",
+  "themeBorder",
+  "themeTextPrimary",
+  "themeTextSecondary",
+  "themeSidebarNavText",
+  "isSuspended",
+]);
 
 export const listUsers = (_req, res) => {
   const rows = db.prepare(`SELECT ${USER_SELECT_FIELDS} FROM users ORDER BY name ASC;`).all();
@@ -32,19 +49,32 @@ export const updateUser = (req, res, next) => {
   try {
     const { id } = req.params;
     const updates = req.body || {};
-    const fields = Object.keys(updates);
+    const fields = Object.keys(updates).filter((field) => UPDATABLE_USER_FIELDS.has(field));
     if (!fields.length) {
-      return res.status(400).json({ message: "No updates provided" });
+      return res.status(400).json({ message: "No valid updates provided" });
     }
-    const normalized = { ...updates };
+    const normalized = {};
+    for (const field of fields) {
+      normalized[field] = updates[field];
+    }
     if (normalized.password !== undefined) {
       normalized.password = normalized.password ? bcrypt.hashSync(normalized.password, 10) : null;
+    }
+    if (normalized.isSuspended === false || normalized.isSuspended === 0) {
+      normalized.isSuspended = 0;
+    } else if (normalized.isSuspended === true || normalized.isSuspended === 1) {
+      normalized.isSuspended = 1;
     }
     const assignments = fields.map((field) => `${field} = @${field}`).join(", ");
     db.prepare(`UPDATE users SET ${assignments} WHERE id = @id;`).run({
       ...normalized,
       id,
     });
+    if (normalized.isSuspended === 0) {
+      db.prepare(
+        `UPDATE users SET failedLoginAttempts = 0, loginLockPhase = 0, loginLockedUntil = NULL WHERE id = ?;`,
+      ).run(id);
+    }
     const row = db.prepare(`SELECT ${USER_SELECT_FIELDS} FROM users WHERE id = ?;`).get(id);
     res.json(row);
   } catch (error) {
@@ -55,8 +85,7 @@ export const updateUser = (req, res, next) => {
 export const updateUserPreferences = (req, res, next) => {
   try {
     const { id } = req.params;
-    const requestingUserId = req.headers["x-user-id"];
-    if (String(requestingUserId) !== String(id)) {
+    if (String(req.userId) !== String(id)) {
       return res.status(403).json({ message: "You can only update your own preferences" });
     }
     const { sidebarBgColor, displayBgColor, themeHeaderBg, themeCardBg, themeBorder, themeTextPrimary, themeTextSecondary, themeSidebarNavText } = req.body || {};
@@ -75,7 +104,6 @@ export const updateUserPreferences = (req, res, next) => {
 export const deleteUser = (req, res, next) => {
   try {
     const { id } = req.params;
-    // Prevent deleting users that are referenced as handlers on orders
     const { count } = db
       .prepare("SELECT COUNT(*) as count FROM orders WHERE handlerId = ?;")
       .get(id);
@@ -95,5 +123,3 @@ export const deleteUser = (req, res, next) => {
     next(error);
   }
 };
-
-

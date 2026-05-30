@@ -55,36 +55,45 @@ import {
   APP_DOCUMENT_TITLE_ZH_KEY,
   APP_FAVICON_PATH_KEY,
 } from "../constants/appBrandSettings";
+import { getAuthToken, setAuthToken } from "../utils/authToken";
 
-const baseQuery = fetchBaseQuery({
+export type LoginResponse =
+  | AuthResponse
+  | { requiresTwoFactor: true; pendingToken: string; email: string };
+
+export interface TwoFactorSetupResponse {
+  qrCodeDataUrl: string;
+  manualEntryKey: string;
+}
+
+const rawBaseQuery = fetchBaseQuery({
   baseUrl: "/api",
-  prepareHeaders: (headers, { getState }) => {
-    // Don't set Content-Type for FormData - browser will set it with boundary
-    // RTK Query will automatically handle FormData and not set Content-Type
-    
-    // Add X-User-Id header from Redux store or localStorage
-    const state = getState() as any;
-    const user = state?.auth?.user;
-    if (user?.id) {
-      headers.set('X-User-Id', user.id.toString());
-    } else {
-      // Fallback to localStorage if Redux store doesn't have user
-      const savedUser = localStorage.getItem("auth_user");
-      if (savedUser) {
-        try {
-          const parsedUser = JSON.parse(savedUser);
-          if (parsedUser?.id) {
-            headers.set('X-User-Id', parsedUser.id.toString());
-          }
-        } catch (e) {
-          // Ignore parse errors
-        }
-      }
+  credentials: "include",
+  prepareHeaders: (headers) => {
+    const token = getAuthToken();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
     }
-    
     return headers;
   },
 });
+
+const baseQuery: typeof rawBaseQuery = async (args, api, extraOptions) => {
+  const result = await rawBaseQuery(args, api, extraOptions);
+  if (result.error && result.error.status === 401) {
+    const url = typeof args === "string" ? args : args.url;
+    if (
+      !url.includes("auth/login") &&
+      !url.includes("auth/verify-2fa") &&
+      !url.includes("auth/forgot-password") &&
+      !url.includes("auth/reset-password")
+    ) {
+      setAuthToken(null);
+      localStorage.removeItem("auth_user");
+    }
+  }
+  return result;
+};
 
 export const api = createApi({
   reducerPath: "api",
@@ -471,13 +480,87 @@ export const api = createApi({
       ],
     }),
 
-    login: builder.mutation<AuthResponse, { email: string; password: string }>({
+    login: builder.mutation<LoginResponse, { email: string; password: string }>({
       query: (body) => ({
         url: "auth/login",
         method: "POST",
         body,
       }),
       invalidatesTags: [{ type: "Auth", id: "CURRENT" }],
+    }),
+    verify2fa: builder.mutation<AuthResponse, { pendingToken: string; code: string }>({
+      query: (body) => ({
+        url: "auth/verify-2fa",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: [{ type: "Auth", id: "CURRENT" }],
+    }),
+    forgotPassword: builder.mutation<{ success: boolean; message: string }, { email: string }>({
+      query: (body) => ({
+        url: "auth/forgot-password",
+        method: "POST",
+        body,
+      }),
+    }),
+    resetPassword: builder.mutation<
+      { success: boolean; message: string },
+      { email: string; code: string; newPassword: string }
+    >({
+      query: (body) => ({
+        url: "auth/reset-password",
+        method: "POST",
+        body,
+      }),
+    }),
+    logout: builder.mutation<{ success: boolean }, void>({
+      query: () => ({
+        url: "auth/logout",
+        method: "POST",
+      }),
+    }),
+    get2faStatus: builder.query<{ enabled: boolean }, void>({
+      query: () => "auth/2fa/status",
+    }),
+    setup2fa: builder.mutation<TwoFactorSetupResponse, void>({
+      query: () => ({
+        url: "auth/2fa/setup",
+        method: "POST",
+      }),
+    }),
+    enable2fa: builder.mutation<{ success: boolean; enabled: boolean }, { code: string }>({
+      query: (body) => ({
+        url: "auth/2fa/enable",
+        method: "POST",
+        body,
+      }),
+    }),
+    disable2fa: builder.mutation<{ success: boolean; enabled: boolean }, { code: string; password: string }>({
+      query: (body) => ({
+        url: "auth/2fa/disable",
+        method: "POST",
+        body,
+      }),
+    }),
+    changePassword: builder.mutation<
+      { success: boolean; message: string },
+      { currentPassword: string; newPassword: string; code?: string }
+    >({
+      query: (body) => ({
+        url: "auth/change-password",
+        method: "POST",
+        body,
+      }),
+    }),
+    changeEmail: builder.mutation<
+      { success: boolean; email: string; message: string },
+      { newEmail: string; password: string; code?: string }
+    >({
+      query: (body) => ({
+        url: "auth/change-email",
+        method: "POST",
+        body,
+      }),
     }),
     getUsers: builder.query<User[], void>({
       query: () => "users",
@@ -2071,6 +2154,16 @@ export const {
   useUpdateCustomerBeneficiaryMutation,
   useDeleteCustomerBeneficiaryMutation,
   useLoginMutation,
+  useVerify2faMutation,
+  useForgotPasswordMutation,
+  useResetPasswordMutation,
+  useLogoutMutation,
+  useGet2faStatusQuery,
+  useSetup2faMutation,
+  useEnable2faMutation,
+  useDisable2faMutation,
+  useChangePasswordMutation,
+  useChangeEmailMutation,
   useUpdateCustomerMutation,
   useDeleteCustomerMutation,
   useGetUsersQuery,

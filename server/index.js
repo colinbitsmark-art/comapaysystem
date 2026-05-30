@@ -40,8 +40,11 @@ async function refreshAllWalletsBackground() {
     const response = await fetch(`http://localhost:${PORT}/api/wallets/refresh-all`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
-      }
+        'Content-Type': 'application/json',
+        ...(process.env.INTERNAL_CRON_SECRET
+          ? { 'x-internal-cron-secret': process.env.INTERNAL_CRON_SECRET }
+          : {}),
+      },
     });
 
     if (response.ok) {

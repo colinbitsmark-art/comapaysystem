@@ -188,7 +188,7 @@ export function isAccountAllowedForUser(userId, scope, accountId) {
 }
 
 export function requireAccountAccess(req, res, scope, accountId, message = "You do not have access to this account") {
-  const userId = req.userId || Number(req.get?.("X-User-Id"));
+  const userId = req.userId ?? null;
   if (isAccountAllowedForUser(userId, scope, accountId)) return true;
 
   res.status(403).json({ message });

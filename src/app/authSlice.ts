@@ -1,5 +1,6 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import type { AuthResponse } from "../types";
+import { getAuthToken, setAuthToken } from "../utils/authToken";
 
 export interface AuthState {
   user: AuthResponse | null;
@@ -17,8 +18,13 @@ const authSlice = createSlice({
     setUser(state, action: PayloadAction<AuthResponse | null>) {
       state.user = action.payload;
       if (action.payload) {
-        localStorage.setItem("auth_user", JSON.stringify(action.payload));
+        const { token, ...userWithoutToken } = action.payload;
+        if (token) {
+          setAuthToken(token);
+        }
+        localStorage.setItem("auth_user", JSON.stringify(userWithoutToken));
       } else {
+        setAuthToken(null);
         localStorage.removeItem("auth_user");
       }
     },
@@ -28,12 +34,24 @@ const authSlice = createSlice({
     ) {
       if (state.user) {
         state.user = { ...state.user, ...action.payload };
-        localStorage.setItem("auth_user", JSON.stringify(state.user));
+        const { token: _token, ...persistable } = state.user;
+        localStorage.setItem("auth_user", JSON.stringify(persistable));
+      }
+    },
+    updateUserEmail(state, action: PayloadAction<string>) {
+      if (state.user) {
+        state.user = { ...state.user, email: action.payload };
+        const { token: _token, ...persistable } = state.user;
+        localStorage.setItem("auth_user", JSON.stringify(persistable));
       }
     },
   },
 });
 
-export const { setUser, updateThemePreferences } = authSlice.actions;
+export const { setUser, updateThemePreferences, updateUserEmail } = authSlice.actions;
 export default authSlice.reducer;
 
+/** Rehydrate token from storage on app load (token is not stored in auth_user JSON). */
+export function hasStoredSession(): boolean {
+  return Boolean(getAuthToken() && localStorage.getItem("auth_user"));
+}

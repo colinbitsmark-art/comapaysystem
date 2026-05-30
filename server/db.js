@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
+import { ensureBootstrapAdmin } from "./utils/bootstrapAdmin.js";
 
 // Use Railway's persistent volume path, or fallback to local path
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), "server", "data");
@@ -120,6 +121,45 @@ const ensureSchema = () => {
   if (!userColumnNames.includes("themeSidebarNavText")) {
     db.prepare("ALTER TABLE users ADD COLUMN themeSidebarNavText TEXT;").run();
   }
+  if (!userColumnNames.includes("totpSecret")) {
+    db.prepare("ALTER TABLE users ADD COLUMN totpSecret TEXT;").run();
+  }
+  if (!userColumnNames.includes("totpPendingSecret")) {
+    db.prepare("ALTER TABLE users ADD COLUMN totpPendingSecret TEXT;").run();
+  }
+  if (!userColumnNames.includes("totpEnabled")) {
+    db.prepare("ALTER TABLE users ADD COLUMN totpEnabled INTEGER NOT NULL DEFAULT 0;").run();
+  }
+  if (!userColumnNames.includes("failedLoginAttempts")) {
+    db.prepare("ALTER TABLE users ADD COLUMN failedLoginAttempts INTEGER NOT NULL DEFAULT 0;").run();
+  }
+  if (!userColumnNames.includes("loginLockPhase")) {
+    db.prepare("ALTER TABLE users ADD COLUMN loginLockPhase INTEGER NOT NULL DEFAULT 0;").run();
+  }
+  if (!userColumnNames.includes("loginLockedUntil")) {
+    db.prepare("ALTER TABLE users ADD COLUMN loginLockedUntil TEXT;").run();
+  }
+  if (!userColumnNames.includes("isSuspended")) {
+    db.prepare("ALTER TABLE users ADD COLUMN isSuspended INTEGER NOT NULL DEFAULT 0;").run();
+  }
+
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS auth_email_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId INTEGER NOT NULL,
+      purpose TEXT NOT NULL,
+      codeHash TEXT NOT NULL,
+      expiresAt TEXT NOT NULL,
+      usedAt TEXT,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
+    );`,
+  ).run();
+
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_auth_email_tokens_user_purpose
+     ON auth_email_tokens(userId, purpose, usedAt, expiresAt);`,
+  ).run();
 
   db.prepare(
     `CREATE TABLE IF NOT EXISTS customer_kyc_profiles (
@@ -1338,6 +1378,7 @@ export const initDatabase = () => {
     ensureSchema();
     migrateDatabase();
     seedData();
+    ensureBootstrapAdmin();
     console.log('Database initialization completed');
   } catch (error) {
     console.error('Database initialization error:', error);

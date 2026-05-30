@@ -1,5 +1,6 @@
 import { db } from "../db.js";
 import { appendAccountAccessFilter } from "../utils/accountAccess.js";
+import { getUserIdFromHeader } from "../utils/auth.js";
 import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 
 export const getAccountReferences = (req, res, next) => {
@@ -191,7 +192,7 @@ export const getAllReferences = (_req, res, next) => {
 export const listAccounts = (req, res) => {
   const conditions = [];
   const params = {};
-  const userId = Number(req.get?.("X-User-Id"));
+  const userId = getUserIdFromHeader(req);
   const scope = req.query?.scope ? String(req.query.scope) : "account.view";
 
   appendAccountAccessFilter({
@@ -218,7 +219,7 @@ export const listAccounts = (req, res) => {
 export const getAccountsSummary = (req, res) => {
   const conditions = [];
   const params = {};
-  const userId = Number(req.get?.("X-User-Id"));
+  const userId = getUserIdFromHeader(req);
 
   appendAccountAccessFilter({
     userId,
@@ -252,7 +253,7 @@ export const getAccountsByCurrency = (req, res, next) => {
     const { currencyCode } = req.params;
     const conditions = ["a.currencyCode = @currencyCode"];
     const params = { currencyCode };
-    const userId = Number(req.get?.("X-User-Id"));
+    const userId = getUserIdFromHeader(req);
     const scope = req.query?.scope ? String(req.query.scope) : "account.view";
 
     appendAccountAccessFilter({

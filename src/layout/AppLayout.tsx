@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, type MouseEvent as ReactMouseEvent } from "react";
 import Badge from "../components/common/Badge";
 import { useAppDispatch, useAppSelector } from "../app/hooks";
 import { setUser } from "../app/authSlice";
@@ -18,6 +18,8 @@ import { APP_DISPLAY_NAME_EN_KEY, APP_DISPLAY_NAME_ZH_KEY } from "../constants/a
 import { tagsFromCacheSyncPayload } from "../utils/cacheSyncTags";
 import { useThemePreferences, isLightColor } from "../hooks/useThemePreferences";
 import ReferenceRatesFloatingPanel from "../components/referenceRates/ReferenceRatesFloatingPanel";
+import { getSseUrl } from "../utils/authToken";
+import { useLogoutMutation } from "../services/api";
 
 type SidebarEntry =
   | { kind: "link"; to: string; labelKey: string; end?: boolean; section?: string; adminOnly?: boolean }
@@ -131,6 +133,21 @@ export default function AppLayout() {
   );
   const [markAsRead] = useMarkNotificationAsReadMutation();
   const [markAllAsRead] = useMarkAllNotificationsAsReadMutation();
+  const [logoutApi] = useLogoutMutation();
+
+  const handleSignOut = useCallback(async () => {
+    try {
+      await logoutApi().unwrap();
+    } catch {
+      // Clear local session even if the server call fails
+    }
+    dispatch(setUser(null));
+    navigate("/login", { replace: true });
+  }, [dispatch, logoutApi, navigate]);
+
+  const logout = () => {
+    void handleSignOut();
+  };
 
   const { data: appNameEn } = useGetSettingQuery(APP_DISPLAY_NAME_EN_KEY, { skip: !user });
   const { data: appNameZh } = useGetSettingQuery(APP_DISPLAY_NAME_ZH_KEY, { skip: !user });
@@ -166,7 +183,7 @@ export default function AppLayout() {
     }
 
     // Connect to notification SSE endpoint with userId as query param
-    const notificationEventSource = new EventSource(`/api/notifications/subscribe?userId=${user.id}`);
+    const notificationEventSource = new EventSource(getSseUrl("/api/notifications/subscribe"));
 
     notificationEventSource.onopen = () => {
       console.log('Notification SSE: Connection opened');
@@ -271,7 +288,7 @@ export default function AppLayout() {
 
       // Subscribe to role updates via SSE
       const eventSource = new EventSource(
-        `/api/roles/subscribe?roleName=${encodeURIComponent(user.role)}`
+        getSseUrl(`/api/roles/subscribe?roleName=${encodeURIComponent(user.role)}`),
       );
 
       eventSource.onopen = () => {
@@ -283,9 +300,7 @@ export default function AppLayout() {
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'forceLogout') {
-            // Force logout immediately when server sends logout signal
-            dispatch(setUser(null));
-            navigate("/login", { replace: true });
+            void handleSignOut();
           }
         } catch (error) {
           console.error("Error parsing SSE message:", error);
@@ -334,13 +349,12 @@ export default function AppLayout() {
       }
       reconnectAttemptsRef.current = 0;
     };
-  }, [user?.role, dispatch, navigate]);
+  }, [user?.role, dispatch, navigate, handleSignOut]);
 
   // Handle idle timeout - auto logout after 3 hours of inactivity
-  const handleIdleTimeout = () => {
-    dispatch(setUser(null));
-    navigate("/login", { replace: true });
-  };
+  const handleIdleTimeout = useCallback(() => {
+    void handleSignOut();
+  }, [handleSignOut]);
 
   useIdleTimeout(handleIdleTimeout, !!user);
 
@@ -393,7 +407,7 @@ export default function AppLayout() {
 
   const headerTitle = useMemo(() => {
     if (pathname === "/" || pathname === "") return t("nav.dashboard");
-    if (pathname === "/preferences") return t("nav.preferences");
+    if (pathname === "/profile" || pathname === "/preferences") return t("nav.profile");
     if (pathname.startsWith("/customers/settings")) return t("customerSettings.pageTitle");
     if (pathname === "/customers") return t("nav.customerList");
     if (pathname.startsWith("/customers/")) return t("customers.title");
@@ -419,10 +433,6 @@ export default function AppLayout() {
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
     localStorage.setItem('language', lng);
-  };
-
-  const logout = () => {
-    dispatch(setUser(null));
   };
 
   const getNotificationIcon = (type: string) => {
@@ -604,23 +614,22 @@ export default function AppLayout() {
           </nav>
         </div>
 
-        {/* Preferences button — pinned to the bottom of the sidebar */}
+        {/* Profile link — pinned to the bottom of the sidebar */}
         <div className={`mt-auto pt-4 transition-opacity duration-300 ${isSidebarCollapsed ? 'opacity-0 lg:w-0 lg:overflow-hidden' : 'opacity-100'}`}>
           <NavLink
-            to="/preferences"
+            to="/profile"
             onClick={() => setIsMobileMenuOpen(false)}
             className={({ isActive }) =>
               `flex items-center gap-2 w-full rounded-xl px-4 py-3 text-sm font-semibold transition ${
                 isActive ? "sidebar-nav-active shadow-sm" : "sidebar-nav-item"
               }`
             }
-            title={t("preferences.title")}
+            title={t("profile.title")}
           >
             <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
             </svg>
-            {t("preferences.title")}
+            {t("profile.title")}
           </NavLink>
         </div>
       </aside>

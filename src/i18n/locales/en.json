@@ -52,7 +52,8 @@
     "tags": "Tags",
     "approvalRequests": "Approval Requests",
     "settings": "Settings",
-    "preferences": "Preferences"
+    "preferences": "Preferences",
+    "profile": "Profile"
   },
   "sections": {
     "dashboard": "Dashboard",
@@ -338,7 +339,49 @@
     "cannotDeleteWithOrders": "Cannot delete user while they are assigned to existing orders. Please delete or reassign the orders first.",
     "cannotDeleteReferenced": "Cannot delete user because it is referenced by other records.",
     "viewer": "Viewer",
-    "invalidCredentials": "Invalid credentials"
+    "invalidCredentials": "Invalid credentials",
+    "accountSuspended": "Suspended",
+    "accountSuspendedLabel": "Account suspended (login blocked)",
+    "accountSuspendedHint": "Uncheck to restore login access and clear lockout counters."
+  },
+  "auth": {
+    "twoFactorTitle": "Two-factor authentication",
+    "twoFactorPrompt": "Enter the 6-digit code from your authenticator app for {{email}}.",
+    "twoFactorCodePlaceholder": "6-digit code",
+    "twoFactorInvalid": "Invalid verification code",
+    "verify": "Verify",
+    "backToLogin": "Back to login",
+    "twoFactorSettingsTitle": "Two-factor authentication (Google Authenticator)",
+    "twoFactorSettingsDesc": "Add an extra layer of security. You'll enter a code from your authenticator app each time you sign in.",
+    "enableTwoFactor": "Set up authenticator",
+    "disableTwoFactor": "Disable two-factor authentication",
+    "confirmEnableTwoFactor": "Enable 2FA",
+    "twoFactorEnabled": "Two-factor authentication is enabled on your account.",
+    "twoFactorEnabledSuccess": "Two-factor authentication enabled.",
+    "twoFactorDisabledSuccess": "Two-factor authentication disabled.",
+    "twoFactorDisableError": "Could not disable 2FA. Check your password and code.",
+    "twoFactorSetupError": "Could not start 2FA setup. Try again.",
+    "twoFactorScanQr": "Scan this QR code with Google Authenticator (or any TOTP app), then enter the 6-digit code to confirm.",
+    "twoFactorQrAlt": "Authenticator QR code",
+    "manualEntryKey": "Manual entry key",
+    "invalidCredentialsWithRemaining": "Invalid credentials. You can try {{count}} more time(s).",
+    "accountLocked": "Too many failed attempts. Please try again in {{minutes}} minutes.",
+    "accountSuspended": "This account has been suspended due to too many failed login attempts. Please contact an administrator.",
+    "forgotPasswordLink": "Forgot password?",
+    "forgotPasswordTitle": "Forgot password",
+    "forgotPasswordDesc": "Enter your account email and we'll send you a 6-digit reset code.",
+    "sendResetCode": "Send reset code",
+    "forgotPasswordError": "Could not send reset code. Please try again later.",
+    "resetPasswordTitle": "Reset password",
+    "resetPasswordDesc": "Enter the code from your email and choose a new password.",
+    "resetCodePlaceholder": "6-digit code",
+    "newPasswordPlaceholder": "New password (min. 8 characters)",
+    "confirmPasswordPlaceholder": "Confirm new password",
+    "resetPassword": "Reset password",
+    "resetPasswordError": "Invalid or expired reset code.",
+    "resetPasswordSuccess": "Password updated. You can sign in with your new password.",
+    "passwordMismatch": "Passwords do not match.",
+    "resendResetCode": "Request a new code"
   },
   "roles": {
     "title": "Roles & permissions",
@@ -1438,12 +1481,43 @@
     "title": "Notification Preferences",
     "description": "Manage your notification preferences and choose which alerts you want to receive"
   },
-  "preferences": {
-    "title": "Preferences",
-    "description": "Customize your personal app experience. Changes are saved to your account.",
+  "profile": {
+    "title": "Profile",
+    "description": "Manage your account, appearance, and security settings.",
     "tabs": {
-      "theme": "Theme"
+      "account": "Account",
+      "theme": "Theme",
+      "security": "Security"
     },
+    "account": {
+      "title": "Change password",
+      "description": "Update your login password. If two-factor authentication is enabled, you'll also need a code from your authenticator app.",
+      "emailTitle": "Change email",
+      "emailDescription": "Update the email used to sign in and receive password reset codes.",
+      "currentEmail": "Email",
+      "editEmail": "Edit email",
+      "newEmail": "New email",
+      "passwordConfirm": "Password",
+      "changeEmail": "Update email",
+      "emailChanged": "Email updated successfully.",
+      "emailInUse": "That email is already in use.",
+      "emailInvalid": "Enter a valid email address.",
+      "emailSameAsCurrent": "New email must be different from your current email.",
+      "emailChangeError": "Could not update email. Please try again.",
+      "passwordWrong": "Password is incorrect.",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm new password",
+      "authenticatorCode": "Authenticator code",
+      "changePassword": "Update password",
+      "passwordChanged": "Password updated successfully.",
+      "passwordMismatch": "New passwords do not match.",
+      "passwordTooShort": "New password must be at least 8 characters.",
+      "currentPasswordWrong": "Current password is incorrect.",
+      "passwordChangeError": "Could not update password. Please try again."
+    }
+  },
+  "preferences": {
     "preview": "Live Preview",
     "previewDesc": "See how your color choices look before saving.",
     "currentTheme": "Theme: {{name}}",

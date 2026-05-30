@@ -15,19 +15,21 @@ import RolesPage from "../pages/RolesPage";
 import TagsPage from "../pages/TagsPage";
 import OrdersPage from "../pages/OrdersPage";
 import LoginPage from "../pages/LoginPage";
+import ForgotPasswordPage from "../pages/ForgotPasswordPage";
 import ProfitCalculationPage from "../pages/ProfitCalculationPage";
 import SettingsPage from "../pages/SettingsPage";
 import NotificationsPage from "../pages/NotificationsPage";
 import NotificationPreferencesPage from "../pages/NotificationPreferencesPage";
-import PreferencesPage from "../pages/PreferencesPage";
+import ProfilePage from "../pages/ProfilePage";
 import WalletTrackerPage from "../pages/WalletTrackerPage";
 import ReferenceRatesPage from "../pages/ReferenceRatesPage";
 import { useAppSelector } from "../app/hooks";
 import { hasSectionAccess } from "../utils/permissions";
+import { getAuthToken } from "../utils/authToken";
 
 function RequireAuth({ children, section }: { children: ReactElement; section?: string }) {
   const user = useAppSelector((s) => s.auth.user);
-  if (!user) {
+  if (!user || !getAuthToken()) {
     return <Navigate to="/login" replace />;
   }
   if (section && !hasSectionAccess(user, section)) {
@@ -38,7 +40,7 @@ function RequireAuth({ children, section }: { children: ReactElement; section?: 
 
 function RequireAdmin({ children }: { children: ReactElement }) {
   const user = useAppSelector((s) => s.auth.user);
-  if (!user) {
+  if (!user || !getAuthToken()) {
     return <Navigate to="/login" replace />;
   }
   if (user.role !== "admin") {
@@ -68,7 +70,8 @@ export default function AppRoutes() {
           <Route path="wallets" element={<RequireAuth section="wallets"><WalletTrackerPage /></RequireAuth>} />
           <Route path="notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
           <Route path="notification-preferences" element={<RequireAuth><NotificationPreferencesPage /></RequireAuth>} />
-          <Route path="preferences" element={<RequireAuth><PreferencesPage /></RequireAuth>} />
+          <Route path="profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
+          <Route path="preferences" element={<Navigate to="/profile" replace />} />
           <Route path="profit" element={<RequireAuth section="profit"><ProfitCalculationPage /></RequireAuth>} />
           <Route
             path="reference-rates"
@@ -81,6 +84,7 @@ export default function AppRoutes() {
           <Route path="settings" element={<RequireAdmin><SettingsPage /></RequireAdmin>} />
         </Route>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

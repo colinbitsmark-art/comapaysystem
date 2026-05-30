@@ -3,6 +3,8 @@ dotenv.config(); // Load environment variables from .env file
 
 import fs from "fs";
 import cors from "cors";
+import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -10,7 +12,6 @@ import apiRouter from "./routes/api.js";
 import botRouter from "./routes/botRoutes.js";
 import telegramRouter from "./routes/telegramRoutes.js";
 import { initDatabase } from "./db.js";
-import { getUploadsDir } from "./utils/fileStorage.js";
 import {
   getReferenceRatesSyncStatus,
   isPostgresSyncEnabled,
@@ -28,8 +29,6 @@ try {
   }
 } catch (error) {
   console.error('Failed to initialize database:', error);
-  // Don't exit immediately - let the server start and log the error
-  // Railway will restart if needed
   process.exit(1);
 }
 
@@ -37,18 +36,29 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Keep limit for backward compatibility during migration
-// Note: express.urlencoded is NOT needed here - multer handles FormData parsing automatically
 
-// Serve uploaded files statically
-app.use("/api/uploads", express.static(getUploadsDir()));
+const corsOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
+  : undefined;
 
-// Log all requests for debugging
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path}`);
-  next();
-});
+app.use(
+  cors({
+    origin: corsOrigins ?? true,
+    credentials: true,
+  }),
+);
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
+app.use(cookieParser());
+app.use(express.json({ limit: "10mb" }));
+
+if (process.env.NODE_ENV !== "production") {
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`);
+    next();
+  });
+}
 
 app.use("/api", apiRouter);
 app.use("/api/bot", botRouter);
@@ -122,5 +132,3 @@ app.use((err, req, res, _next) => {
 });
 
 export default app;
-
-
