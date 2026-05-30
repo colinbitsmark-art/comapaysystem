@@ -617,7 +617,7 @@
     "insufficientBalanceWarning": "⚠️ Insufficient Balance Warning\n\nAccount: {{accountName}}\nCurrent Balance: {{currentBalance}} {{currency}}\nRequired Amount: {{requiredAmount}} {{currency}}\n\nYour account balance is insufficient. Are you sure you want to proceed with this payment?\n\nIf you confirm, your balance will become: {{newBalance}} {{currency}}\n\n(Click OK to proceed, Cancel to go back)",
     "profit": "Profit",
     "serviceCharges": "Service Charges",
-    "trxFee": "+ TRX Fee (-1)",
+    "trxFee": "+ TRX Fee (-1.5)",
     "trxFeeTooltip": "Add a TRC-20 network fee of -1 as a service charge",
     "scFixed": "Fixed",
     "scSelectAcctForPreview": "Select account to preview",
@@ -849,7 +849,18 @@
     "errorClearingLogs": "Error clearing transaction logs",
     "batchDelete": "Batch Delete",
     "deleteSelected": "Delete Selected",
-    "confirmDeleteSelected": "Are you sure you want to delete the selected accounts?"
+    "confirmDeleteSelected": "Are you sure you want to delete the selected accounts?",
+    "exportTransactionLogs": "Export Transaction Logs",
+    "exportToExcel": "Export to Excel",
+    "selectAllVisible": "Select All",
+    "deselectAllVisible": "Deselect All",
+    "currencyPoolFilter": "Currency Pool",
+    "allPools": "All Pools",
+    "selectedAccountsCount": "Selected: {{count}} of {{total}}",
+    "selectAccountsToExportTransactions": "Please select at least one account to export transaction logs",
+    "exportingTransactionLogs": "Exporting...",
+    "exportTransactionLogsSuccess": "Transaction logs exported successfully",
+    "exportTransactionLogsError": "Failed to export transaction logs"
   },
   "transfers": {
     "title": "Internal Transfers",

@@ -31,6 +31,12 @@ import { useProfitSummary } from "../hooks/useProfitSummary";
 import { useBatchDelete } from "../hooks/useBatchDelete";
 import { ColorInput } from "../components/common/CurrencyDisplayColorFields";
 import * as XLSX from "xlsx";
+import { store } from "../app/store";
+import { api } from "../services/api";
+import {
+  exportAccountTransactionsToExcel,
+  exportMultipleAccountTransactionsToExcel,
+} from "../utils/accounts/accountTransactionExport";
 
 // Helper function to format currency with proper number formatting
 const formatCurrency = (amount: number, currencyCode: string) => {
@@ -83,6 +89,10 @@ export default function AccountsPage() {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
+  const [transactionExportModalOpen, setTransactionExportModalOpen] = useState(false);
+  const [transactionExportCurrencyFilter, setTransactionExportCurrencyFilter] = useState("all");
+  const [selectedTransactionExportAccountIds, setSelectedTransactionExportAccountIds] = useState<Set<number>>(new Set());
+  const [isExportingTransactionLogs, setIsExportingTransactionLogs] = useState(false);
   const [clearLogsConfirmModal, setClearLogsConfirmModal] = useState(false);
   const [clearTransactionLogs] = useClearAllTransactionLogsMutation();
 
@@ -521,6 +531,98 @@ export default function AccountsPage() {
     setSelectedAccountIds(newSelection);
   };
 
+  const handleTransactionExportClick = () => {
+    setTransactionExportModalOpen(true);
+    setTransactionExportCurrencyFilter("all");
+    setSelectedTransactionExportAccountIds(new Set());
+  };
+
+  const closeTransactionExportModal = () => {
+    setTransactionExportModalOpen(false);
+    setTransactionExportCurrencyFilter("all");
+    setSelectedTransactionExportAccountIds(new Set());
+  };
+
+  const filteredAccountsForTransactionExport =
+    transactionExportCurrencyFilter === "all"
+      ? accounts
+      : accounts.filter((a) => a.currencyCode === transactionExportCurrencyFilter);
+
+  const handleToggleTransactionExportSelection = (accountId: number) => {
+    const next = new Set(selectedTransactionExportAccountIds);
+    if (next.has(accountId)) {
+      next.delete(accountId);
+    } else {
+      next.add(accountId);
+    }
+    setSelectedTransactionExportAccountIds(next);
+  };
+
+  const handleSelectAllVisibleForTransactionExport = () => {
+    const visibleIds = filteredAccountsForTransactionExport.map((a) => a.id);
+    const allVisibleSelected = visibleIds.every((id) =>
+      selectedTransactionExportAccountIds.has(id)
+    );
+    const next = new Set(selectedTransactionExportAccountIds);
+    if (allVisibleSelected) {
+      visibleIds.forEach((id) => next.delete(id));
+    } else {
+      visibleIds.forEach((id) => next.add(id));
+    }
+    setSelectedTransactionExportAccountIds(next);
+  };
+
+  const handleExportSingleAccountTransactions = () => {
+    if (!selectedAccount) return;
+    exportAccountTransactionsToExcel(selectedAccount, transactions);
+  };
+
+  const handleExportSelectedTransactionLogs = async () => {
+    if (selectedTransactionExportAccountIds.size === 0) {
+      setAlertModal({
+        isOpen: true,
+        message: t("accounts.selectAccountsToExportTransactions") || "Please select at least one account to export transaction logs",
+        type: "warning",
+      });
+      return;
+    }
+
+    setIsExportingTransactionLogs(true);
+    try {
+      const selectedAccounts = accounts.filter((a) =>
+        selectedTransactionExportAccountIds.has(a.id)
+      );
+
+      const accountsWithTransactions = await Promise.all(
+        selectedAccounts.map(async (account) => {
+          const result = await store.dispatch(
+            api.endpoints.getAccountTransactions.initiate(account.id)
+          );
+          return {
+            account,
+            transactions: result.data ?? [],
+          };
+        })
+      );
+
+      exportMultipleAccountTransactionsToExcel(accountsWithTransactions);
+      closeTransactionExportModal();
+      setAlertModal({
+        isOpen: true,
+        message: t("accounts.exportTransactionLogsSuccess") || "Transaction logs exported successfully",
+        type: "success",
+      });
+    } catch {
+      setAlertModal({
+        isOpen: true,
+        message: t("accounts.exportTransactionLogsError") || "Failed to export transaction logs",
+        type: "error",
+      });
+    } finally {
+      setIsExportingTransactionLogs(false);
+    }
+  };
+
   const handleExportAccounts = () => {
     if (selectedAccountIds.size === 0) {
       setAlertModal({
@@ -811,6 +913,14 @@ export default function AccountsPage() {
         // description={t("accounts.currencyPoolsDescription")}
         actions={
           <div className="flex items-center gap-2">
+            {hasActionPermission(authUser, "viewAccountTransaction") && (
+              <button
+                onClick={handleTransactionExportClick}
+                className="px-3 py-1 text-sm rounded bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors"
+              >
+                {t("accounts.exportTransactionLogs") || "Export Transaction Logs"}
+              </button>
+            )}
             {hasActionPermission(authUser, "importAccount") && (
               <button
                 onClick={handleImportClick}
@@ -1420,36 +1530,53 @@ export default function AccountsPage() {
       {transactionsModalAccountId && selectedAccount && (
         <div className="fixed top-0 left-0 right-0 bottom-0 w-full h-full z-[9999] flex items-center justify-center bg-black bg-opacity-50" style={{ margin: 0, padding: 0 }}>
           <div
-            className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-h-[90vh] overflow-y-auto"
+            className="flex w-full max-w-2xl flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-h-[90vh] overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-4 flex items-center justify-between">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-200 pb-4">
               <h2 className="text-xl font-semibold text-slate-900">
                 {t("accounts.transactionsTitle")} - {selectedAccount.name}
               </h2>
-              <button
-                onClick={() => setTransactionsModalAccountId(null)}
-                className="text-slate-400 hover:text-slate-600 transition-colors"
-                aria-label={t("common.close")}
-              >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleExportSingleAccountTransactions}
+                  className="text-slate-400 hover:text-slate-600 transition-colors"
+                  aria-label={t("accounts.exportToExcel") || "Export to Excel"}
+                  title={t("accounts.exportToExcel") || "Export to Excel"}
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                    />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => setTransactionsModalAccountId(null)}
+                  className="text-slate-400 hover:text-slate-600 transition-colors"
+                  aria-label={t("common.close")}
+                >
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
-            <div className="overflow-x-auto">
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto pt-4">
               <table className="w-full text-left text-sm">
-                <thead>
+                <thead className="sticky top-0 bg-white z-[1]">
                   <tr className="border-b border-slate-200 text-slate-600">
                     <th className="py-2">{t("accounts.date")}</th>
                     <th className="py-2">{t("accounts.type")}</th>
@@ -1600,6 +1727,143 @@ export default function AccountsPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Transaction Logs Modal */}
+      {transactionExportModalOpen && (
+        <div className="fixed top-0 left-0 right-0 bottom-0 w-full h-full z-[9999] flex items-center justify-center bg-black bg-opacity-50" style={{ margin: 0, padding: 0 }}>
+          <div
+            className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-slate-900">
+                {t("accounts.exportTransactionLogs") || "Export Transaction Logs"}
+              </h2>
+              <button
+                onClick={closeTransactionExportModal}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+                aria-label={t("common.close")}
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                {t("accounts.currencyPoolFilter") || "Currency Pool"}
+              </label>
+              <select
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={transactionExportCurrencyFilter}
+                onChange={(e) => setTransactionExportCurrencyFilter(e.target.value)}
+              >
+                <option value="all">{t("accounts.allPools") || "All Pools"}</option>
+                {Object.keys(accountsByCurrencyMap).map((currencyCode) => (
+                  <option key={currencyCode} value={currencyCode}>
+                    {currencyCode} {t("accounts.currencyPool")}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleSelectAllVisibleForTransactionExport}
+                className="text-sm text-blue-600 hover:text-blue-700"
+              >
+                {filteredAccountsForTransactionExport.every((a) =>
+                  selectedTransactionExportAccountIds.has(a.id)
+                ) && filteredAccountsForTransactionExport.length > 0
+                  ? t("accounts.deselectAllVisible") || "Deselect All Visible"
+                  : t("accounts.selectAllVisible") || "Select All Visible"}
+              </button>
+              <span className="text-sm text-slate-500">
+                {t("accounts.selectedAccountsCount", {
+                  count: selectedTransactionExportAccountIds.size,
+                  total: accounts.length,
+                }) || `Selected: ${selectedTransactionExportAccountIds.size} of ${accounts.length}`}
+              </span>
+            </div>
+
+            <div className="mb-4 max-h-96 overflow-y-auto border border-slate-200 rounded-lg">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-2 w-12">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredAccountsForTransactionExport.length > 0 &&
+                          filteredAccountsForTransactionExport.every((a) =>
+                            selectedTransactionExportAccountIds.has(a.id)
+                          )
+                        }
+                        onChange={handleSelectAllVisibleForTransactionExport}
+                        className="rounded border-slate-300"
+                      />
+                    </th>
+                    <th className="px-4 py-2">{t("accounts.accountName")}</th>
+                    <th className="px-4 py-2">{t("accounts.currencyCode") || "Currency"}</th>
+                    <th className="px-4 py-2">{t("accounts.balance")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAccountsForTransactionExport.map((account) => (
+                    <tr
+                      key={account.id}
+                      className="border-b border-slate-100 hover:bg-slate-50"
+                    >
+                      <td className="px-4 py-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedTransactionExportAccountIds.has(account.id)}
+                          onChange={() => handleToggleTransactionExportSelection(account.id)}
+                          className="rounded border-slate-300"
+                        />
+                      </td>
+                      <td className="px-4 py-2 font-semibold">{account.name}</td>
+                      <td className="px-4 py-2">{account.currencyCode}</td>
+                      <td className="px-4 py-2">
+                        {formatCurrency(account.balance, account.currencyCode)}
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredAccountsForTransactionExport.length === 0 && (
+                    <tr>
+                      <td className="px-4 py-4 text-sm text-slate-500 text-center" colSpan={4}>
+                        {t("accounts.noAccounts")}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={closeTransactionExportModal}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={handleExportSelectedTransactionLogs}
+                disabled={isExportingTransactionLogs}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 transition-colors disabled:opacity-60"
+              >
+                {isExportingTransactionLogs
+                  ? t("accounts.exportingTransactionLogs") || "Exporting..."
+                  : t("accounts.export") || "Export"}
+              </button>
             </div>
           </div>
         </div>

@@ -833,7 +833,7 @@ export default function NewOrderModal({
                 type="button"
                 title={t("orders.trxFeeTooltip")}
                 className="text-xs font-medium text-orange-600 hover:underline"
-                onClick={() => addPresetServiceCharge("-1")}
+                onClick={() => addPresetServiceCharge("-1.5")}
               >
                 {t("orders.trxFee")}
               </button>

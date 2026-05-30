@@ -602,7 +602,7 @@
     "insufficientBalanceWarning": "⚠️ 余额不足警告\n\n账户：{{accountName}}\n当前余额：{{currentBalance}} {{currency}}\n所需金额：{{requiredAmount}} {{currency}}\n\n您的账户余额不足。您确定要继续进行此付款吗？\n\n如果您确认，您的余额将变为：{{newBalance}} {{currency}}\n\n（点击确定继续，取消返回）",
     "profit": "利润",
     "serviceCharges": "手续费",
-    "trxFee": "+ TRX 手续费 (-1)",
+    "trxFee": "+ TRX 手续费 (-1.5)",
     "trxFeeTooltip": "添加 TRC-20 网络手续费 -1 作为服务费",
     "scFixed": "固定",
     "scSelectAcctForPreview": "选择账户以预览金额",
@@ -834,7 +834,18 @@
     "errorClearingLogs": "清除交易记录时出错",
     "batchDelete": "批量删除",
     "deleteSelected": "删除所选",
-    "confirmDeleteSelected": "您确定要删除选中的账户吗？"
+    "confirmDeleteSelected": "您确定要删除选中的账户吗？",
+    "exportTransactionLogs": "导出交易记录",
+    "exportToExcel": "导出为 Excel",
+    "selectAllVisible": "全选",
+    "deselectAllVisible": "取消全选",
+    "currencyPoolFilter": "货币池",
+    "allPools": "全部货币池",
+    "selectedAccountsCount": "已选：{{count}} / {{total}}",
+    "selectAccountsToExportTransactions": "请选择至少一个要导出交易记录的账户",
+    "exportingTransactionLogs": "正在导出...",
+    "exportTransactionLogsSuccess": "交易记录导出成功",
+    "exportTransactionLogsError": "导出交易记录失败"
   },
   "transfers": {
     "title": "内部转账",
