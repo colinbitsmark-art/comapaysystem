@@ -252,7 +252,11 @@ protectedRouter.get("/kyc/builder/schema", section("customers"), getBuilderSchem
 protectedRouter.put("/kyc/builder/schema", section("customers"), putBuilderSchema);
 protectedRouter.post("/kyc/builder/schema/publish", section("customers"), publishBuilderSchema);
 
-protectedRouter.get("/currencies", section("currencies"), listCurrencies);
+protectedRouter.get(
+  "/currencies",
+  anySection("currencies", "orders", "accounts", "transfers", "expenses", "profit", "customers", "dashboard"),
+  listCurrencies,
+);
 protectedRouter.post("/currencies", section("currencies"), action("createCurrency"), createCurrency);
 protectedRouter.put("/currencies/:id", section("currencies"), action("updateCurrency"), updateCurrency);
 protectedRouter.delete("/currencies/:id", section("currencies"), action("updateCurrency"), deleteCurrency);

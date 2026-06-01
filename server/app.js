@@ -61,9 +61,11 @@ if (!isProduction()) {
   });
 }
 
-app.use("/api", apiRouter);
-app.use("/api/bot", botRouter);
+// External callers (Telegram, bot API) have no session cookie — mount before /api so
+// protectedRouter does not treat /api/telegram/* or /api/bot/* as authenticated routes.
 app.use("/api/telegram", telegramRouter);
+app.use("/api/bot", botRouter);
+app.use("/api", apiRouter);
 
 // Serve Vite build when present (Railway/Nixpacks runs `npm run build`; NODE_ENV may be unset at runtime).
 const distPath = path.join(__dirname, "../dist");
