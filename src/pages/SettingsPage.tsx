@@ -31,6 +31,7 @@ export default function SettingsPage() {
 
   // Backup/Restore state
   const [backupType, setBackupType] = useState<"db" | "full">("db");
+  const [restoreType, setRestoreType] = useState<"db" | "full">("db");
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
   const [showSafetyRestoreConfirm, setShowSafetyRestoreConfirm] = useState(false);
   const [showSafetyModal, setShowSafetyModal] = useState(false);
@@ -186,10 +187,23 @@ export default function SettingsPage() {
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      setShowRestoreConfirm(true);
+    if (!file) return;
+
+    const name = file.name.toLowerCase();
+    if (restoreType === "db") {
+      if (!name.endsWith(".db")) {
+        alert(t("settings.backupRestore.invalidDbFile"));
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+    } else if (!name.endsWith(".zip")) {
+      alert(t("settings.backupRestore.invalidZipFile"));
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
     }
+
+    setSelectedFile(file);
+    setShowRestoreConfirm(true);
   };
 
   const handleRestoreConfirm = async () => {
@@ -206,6 +220,7 @@ export default function SettingsPage() {
     try {
       const formData = new FormData();
       formData.append("file", fileToRestore);
+      formData.append("includeFiles", restoreType === "full" ? "true" : "false");
 
       const result = await restoreBackup(formData).unwrap();
       setRestoreSuccessMessage(
@@ -559,12 +574,59 @@ export default function SettingsPage() {
           </button>
 
           <div className="border-t border-slate-200 pt-4">
-            {/* Restore Section */}
-            <div className="mb-2 text-sm font-medium text-slate-700">
-              {t("settings.backupRestore.restore")}
+            <div className="mb-3 text-sm font-medium text-slate-700">
+              {t("settings.backupRestore.restoreOptions")}
+            </div>
+            <div className="mb-4 space-y-3">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="radio"
+                  name="restoreType"
+                  value="db"
+                  checked={restoreType === "db"}
+                  onChange={() => {
+                    setRestoreType("db");
+                    setSelectedFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                  className="mt-1"
+                />
+                <div>
+                  <div className="font-medium text-slate-900">
+                    {t("settings.backupRestore.restoreDatabaseOnly")}
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    {t("settings.backupRestore.restoreDatabaseOnlyDesc")}
+                  </div>
+                </div>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="radio"
+                  name="restoreType"
+                  value="full"
+                  checked={restoreType === "full"}
+                  onChange={() => {
+                    setRestoreType("full");
+                    setSelectedFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                  className="mt-1"
+                />
+                <div>
+                  <div className="font-medium text-slate-900">
+                    {t("settings.backupRestore.restoreDatabaseAndFiles")}
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    {t("settings.backupRestore.restoreDatabaseAndFilesDesc")}
+                  </div>
+                </div>
+              </label>
             </div>
             <div className="mb-2 text-sm text-orange-600">
-              {t("settings.backupRestore.restoreWarning")}
+              {restoreType === "full"
+                ? t("settings.backupRestore.restoreWarningFull")
+                : t("settings.backupRestore.restoreWarningDb")}
             </div>
             {isRestoring ? (
               <div className="flex items-center gap-2 py-2 text-sm text-slate-600">
@@ -572,13 +634,16 @@ export default function SettingsPage() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                {t("settings.backupRestore.restoringDB")}
+                {restoreType === "full"
+                  ? t("settings.backupRestore.restoringFull")
+                  : t("settings.backupRestore.restoringDB")}
               </div>
             ) : (
               <input
+                key={restoreType}
                 ref={fileInputRef}
                 type="file"
-                accept=".db,.zip"
+                accept={restoreType === "db" ? ".db" : ".zip"}
                 onChange={handleFileSelect}
                 className="block w-full text-sm text-slate-500 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-100 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-slate-200"
               />
@@ -919,7 +984,11 @@ export default function SettingsPage() {
       {/* Restore Confirmation Modal */}
       <ConfirmModal
         isOpen={showRestoreConfirm}
-        message={t("settings.backupRestore.restoreConfirm")}
+        message={
+          restoreType === "full"
+            ? t("settings.backupRestore.restoreConfirmFull")
+            : t("settings.backupRestore.restoreConfirmDb")
+        }
         onConfirm={handleRestoreConfirm}
         onCancel={handleRestoreCancel}
         confirmText={t("common.confirm")}

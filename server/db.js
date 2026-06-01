@@ -34,6 +34,37 @@ export const resetDbInstance = () => {
   return db;
 };
 
+/** Remove WAL sidecar files so a replaced main DB is not merged with stale journal data. */
+export const removeWalSidecars = (mainDbPath = dbPath) => {
+  for (const suffix of ["-wal", "-shm"]) {
+    const sidecar = `${mainDbPath}${suffix}`;
+    if (fs.existsSync(sidecar)) {
+      fs.unlinkSync(sidecar);
+    }
+  }
+};
+
+/** Close connection, replace app.db, clear WAL files, reopen. */
+export const replaceDatabaseFromPath = (sourcePath) => {
+  try {
+    if (db && typeof db.close === "function") {
+      db.close();
+    }
+  } catch {
+    // ignore if already closed
+  }
+  removeWalSidecars();
+  fs.copyFileSync(sourcePath, dbPath);
+  removeWalSidecars();
+  resetDbInstance();
+  const row = db.prepare("PRAGMA integrity_check").get();
+  const status = row?.integrity_check ?? row?.["integrity_check"];
+  if (status !== "ok") {
+    throw new Error(`Restored database failed integrity check: ${status}`);
+  }
+  return db;
+};
+
 const SECTIONS = ["dashboard", "currencies", "customers", "users", "roles", "orders", "transfers", "accounts", "expenses", "profit", "wallets", "referenceRates"];
 
 const ensureSchema = () => {

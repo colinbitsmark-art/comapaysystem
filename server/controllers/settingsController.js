@@ -1,4 +1,4 @@
-import { db, resetDbInstance, dbPath, initDatabase } from "../db.js";
+import { db, resetDbInstance, dbPath, initDatabase, replaceDatabaseFromPath } from "../db.js";
 import fs from "fs";
 import path from "path";
 import {
@@ -12,11 +12,7 @@ const APP_DOCUMENT_TITLE_EN_KEY = "app_document_title_en";
 const APP_DOCUMENT_TITLE_ZH_KEY = "app_document_title_zh";
 const APP_FAVICON_PATH_KEY = "app_favicon_path";
 import archiver from "archiver";
-import { fileURLToPath } from "url";
-import Database from "better-sqlite3";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import AdmZip from "adm-zip";
 
 const isSafetyBackup = (file) =>
   typeof file === "string" && file.startsWith("pre-restore-") && file.endsWith(".db");
@@ -30,6 +26,91 @@ const backupsDir = path.join(dataDir, "backups");
 if (!fs.existsSync(backupsDir)) {
   fs.mkdirSync(backupsDir, { recursive: true });
 }
+
+const removeDirSafe = (dir) => {
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+const isZipBackupFile = (file) => {
+  const name = (file.originalname || "").toLowerCase();
+  const mime = (file.mimetype || "").toLowerCase();
+  return (
+    name.endsWith(".zip") ||
+    mime === "application/zip" ||
+    mime === "application/x-zip-compressed"
+  );
+};
+
+const restoreDatabaseFromFile = (sourcePath) => {
+  replaceDatabaseFromPath(sourcePath);
+};
+
+const rollbackDatabaseFromSafety = (safetyBackupPath) => {
+  if (!fs.existsSync(safetyBackupPath)) {
+    resetDbInstance();
+    return;
+  }
+  replaceDatabaseFromPath(safetyBackupPath);
+};
+
+const parseIncludeFilesFlag = (value) => value === true || value === "true";
+
+/**
+ * Restore app.db and optional uploads/ from a backup zip (layout from createBackup).
+ */
+const restoreFromZipArchive = (zipPath, timestamp) => {
+  const extractDir = path.join(backupsDir, `extract-${timestamp}`);
+  removeDirSafe(extractDir);
+  fs.mkdirSync(extractDir, { recursive: true });
+
+  try {
+    const zip = new AdmZip(zipPath);
+    zip.extractAllTo(extractDir, true);
+
+    const extractedDb = path.join(extractDir, "app.db");
+    if (!fs.existsSync(extractedDb)) {
+      throw new Error("Invalid backup archive: app.db not found");
+    }
+
+    const extractedUploads = path.join(extractDir, "uploads");
+    const hasUploads = fs.existsSync(extractedUploads);
+    let uploadsSafetyPath = null;
+
+    try {
+      if (hasUploads) {
+        uploadsSafetyPath = path.join(dataDir, `uploads-pre-restore-${timestamp}`);
+        if (fs.existsSync(uploadsSafetyPath)) {
+          removeDirSafe(uploadsSafetyPath);
+        }
+        if (fs.existsSync(uploadsDir)) {
+          fs.renameSync(uploadsDir, uploadsSafetyPath);
+        }
+        fs.mkdirSync(path.dirname(uploadsDir), { recursive: true });
+        fs.renameSync(extractedUploads, uploadsDir);
+      }
+
+      restoreDatabaseFromFile(extractedDb);
+      return { restoredUploads: hasUploads };
+    } catch (err) {
+      if (hasUploads) {
+        try {
+          removeDirSafe(uploadsDir);
+          if (uploadsSafetyPath && fs.existsSync(uploadsSafetyPath)) {
+            fs.renameSync(uploadsSafetyPath, uploadsDir);
+          }
+        } catch (rollbackErr) {
+          console.error("Uploads rollback error:", rollbackErr);
+        }
+      }
+      resetDbInstance();
+      throw err;
+    }
+  } finally {
+    removeDirSafe(extractDir);
+  }
+};
 
 export const getSetting = (req, res, next) => {
   try {
@@ -139,33 +220,62 @@ export const createBackup = (req, res, next) => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     
     if (includeFiles) {
-      // Create zip with database and files
       const zipFilename = `backup-with-files-${timestamp}.zip`;
-      const zipPath = path.join(backupsDir, zipFilename);
-      
+      const snapshotPath = path.join(backupsDir, `zip-snapshot-${timestamp}.db`);
+
       res.setHeader("Content-Type", "application/zip");
       res.setHeader("Content-Disposition", `attachment; filename="${zipFilename}"`);
-      
-      const archive = archiver("zip", { zlib: { level: 9 } });
-      
-      archive.on("error", (err) => {
-        console.error("Archive error:", err);
-        if (!res.headersSent) {
-          res.status(500).json({ message: "Error creating backup archive" });
-        }
-      });
-      
-      archive.pipe(res);
-      
-      // Add database file
-      archive.file(dbPath, { name: "app.db" });
-      
-      // Add uploads directory if it exists
-      if (fs.existsSync(uploadsDir)) {
-        archive.directory(uploadsDir, "uploads");
-      }
-      
-      archive.finalize();
+
+      db.backup(snapshotPath)
+        .then(() => {
+          const archive = archiver("zip", { zlib: { level: 9 } });
+
+          archive.on("error", (err) => {
+            console.error("Archive error:", err);
+            if (fs.existsSync(snapshotPath)) {
+              try {
+                fs.unlinkSync(snapshotPath);
+              } catch {
+                // ignore
+              }
+            }
+            if (!res.headersSent) {
+              res.status(500).json({ message: "Error creating backup archive" });
+            }
+          });
+
+          archive.pipe(res);
+          archive.file(snapshotPath, { name: "app.db" });
+
+          if (fs.existsSync(uploadsDir)) {
+            archive.directory(uploadsDir, "uploads");
+          }
+
+          archive.on("end", () => {
+            if (fs.existsSync(snapshotPath)) {
+              try {
+                fs.unlinkSync(snapshotPath);
+              } catch {
+                // ignore
+              }
+            }
+          });
+
+          archive.finalize();
+        })
+        .catch((err) => {
+          console.error("Backup error:", err);
+          if (fs.existsSync(snapshotPath)) {
+            try {
+              fs.unlinkSync(snapshotPath);
+            } catch {
+              // ignore
+            }
+          }
+          if (!res.headersSent) {
+            res.status(500).json({ message: "Error creating database backup" });
+          }
+        });
     } else {
       // Database only backup
       const dbFilename = `backup-${timestamp}.db`;
@@ -218,43 +328,71 @@ export const restoreBackup = (req, res, next) => {
     }
     
     const uploadedFile = req.file;
+    const includeFiles = parseIncludeFilesFlag(req.body?.includeFiles);
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    
-    // Create safety backup of current database
+
+    const fileName = (uploadedFile.originalname || "").toLowerCase();
+    const isZip = isZipBackupFile(uploadedFile);
+
+    if (includeFiles) {
+      if (!isZip || !fileName.endsWith(".zip")) {
+        fs.unlinkSync(uploadedFile.path);
+        return res.status(400).json({
+          message: "Database + files restore requires a .zip backup file",
+        });
+      }
+    } else if (!fileName.endsWith(".db")) {
+      fs.unlinkSync(uploadedFile.path);
+      return res.status(400).json({
+        message: "Database-only restore requires a .db backup file",
+      });
+    }
+
     const safetyBackupPath = path.join(backupsDir, `pre-restore-${timestamp}.db`);
-    
+
     db.backup(safetyBackupPath)
       .then(() => {
-        // Determine if uploaded file is zip or db
-        const isZip = uploadedFile.originalname.endsWith(".zip") || uploadedFile.mimetype === "application/zip";
-        
-        if (isZip) {
-          // TODO: Implement zip extraction and restore
-          // For now, return error and clean up the upload
+        try {
+          if (includeFiles) {
+            const { restoredUploads } = restoreFromZipArchive(uploadedFile.path, timestamp);
+            fs.unlinkSync(uploadedFile.path);
+            return res.json({
+              message: restoredUploads
+                ? "Database and uploaded files restored successfully"
+                : "Database restored successfully (archive had no uploads folder)",
+              safetyBackup: safetyBackupPath,
+              restoredUploads,
+            });
+          }
+
+          restoreDatabaseFromFile(uploadedFile.path);
           fs.unlinkSync(uploadedFile.path);
-          return res.status(400).json({ 
-            message: "Zip restore not yet implemented. Please use database-only backup for now." 
+          return res.json({
+            message: "Database restored successfully",
+            safetyBackup: safetyBackupPath,
           });
-        } else {
-      // Database only restore
-      // Close current connection temporarily and replace database file
-      db.close();
-      fs.copyFileSync(uploadedFile.path, dbPath);
-      
-      // Reopen database (updates exported binding via resetDbInstance)
-      resetDbInstance();
-      
-      // Clean up uploaded file
-      fs.unlinkSync(uploadedFile.path);
-      
-      res.json({ 
-        message: "Database restored successfully",
-        safetyBackup: safetyBackupPath 
-      });
+        } catch (restoreErr) {
+          console.error("Restore error:", restoreErr);
+          try {
+            rollbackDatabaseFromSafety(safetyBackupPath);
+          } catch (rollbackErr) {
+            console.error("Database rollback error:", rollbackErr);
+            resetDbInstance();
+          }
+          if (fs.existsSync(uploadedFile.path)) {
+            try {
+              fs.unlinkSync(uploadedFile.path);
+            } catch {
+              // ignore cleanup errors
+            }
+          }
+          return res.status(500).json({
+            message: restoreErr.message || "Error restoring backup",
+          });
         }
       })
       .catch((err) => {
-        console.error("Restore error:", err);
+        console.error("Safety backup error:", err);
         if (fs.existsSync(safetyBackupPath)) {
           try {
             fs.unlinkSync(safetyBackupPath);
@@ -262,9 +400,15 @@ export const restoreBackup = (req, res, next) => {
             // Ignore cleanup errors
           }
         }
-        // Ensure database is open after failure
         resetDbInstance();
-        res.status(500).json({ message: "Error restoring backup" });
+        if (fs.existsSync(uploadedFile.path)) {
+          try {
+            fs.unlinkSync(uploadedFile.path);
+          } catch {
+            // ignore
+          }
+        }
+        res.status(500).json({ message: "Error creating safety backup before restore" });
       });
   } catch (error) {
     console.error("Restore error:", error);
@@ -325,11 +469,8 @@ export const restoreSafetyBackup = (req, res, next) => {
       target = sorted[0].fullPath;
     }
     
-    // Replace database with safety backup
-    db.close();
-    fs.copyFileSync(target, dbPath);
-    resetDbInstance();
-    
+    replaceDatabaseFromPath(target);
+
     res.json({
       message: "Database restored from safety backup",
       safetyBackup: target,
