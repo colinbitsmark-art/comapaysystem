@@ -17,6 +17,7 @@ import {
 } from "../services/api";
 import type { CustomerLedgerEntry } from "../types";
 import { useAppSelector } from "../app/hooks";
+import { CustomerAccountStatementPanel } from "../components/customers/CustomerAccountStatementPanel";
 
 const fmt = (n: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -264,6 +265,7 @@ export default function CustomerLedgerPage() {
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; entryId: number | null }>({
     isOpen: false, entryId: null,
   });
+  const [mainTab, setMainTab] = useState<"currency" | "account">("currency");
 
   // Derive active currency tabs (currencies with entries)
   const activeCurrencyTabs = summary.map((s) => s.currencyCode);
@@ -405,10 +407,43 @@ export default function CustomerLedgerPage() {
         )}
       </SectionCard>
 
-      {/* Statement Table */}
-      {activeCurrencyTabs.length > 0 && (
+      <div className="flex gap-1 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setMainTab("currency")}
+          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+            mainTab === "currency"
+              ? "border-blue-500 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          {t("customerLedger.currencyStatement")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setMainTab("account")}
+          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+            mainTab === "account"
+              ? "border-blue-500 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          {t("customerLedger.accountStatement")}
+        </button>
+      </div>
+
+      {mainTab === "account" && (
+        <CustomerAccountStatementPanel
+          customerId={customerId}
+          customerName={customer?.name}
+          canWrite={canWrite}
+          onAlert={(message, type) => setAlertModal({ isOpen: true, message, type: type || "error" })}
+        />
+      )}
+
+      {mainTab === "currency" && activeCurrencyTabs.length > 0 && (
         <SectionCard
-          title={t("customerLedger.statement")}
+          title={t("customerLedger.currencyStatement")}
           actions={
             <div className="flex items-center gap-2">
               {selectedCurrency && (
@@ -570,6 +605,12 @@ export default function CustomerLedgerPage() {
               </table>
             </div>
           )}
+        </SectionCard>
+      )}
+
+      {mainTab === "currency" && activeCurrencyTabs.length === 0 && (
+        <SectionCard title={t("customerLedger.currencyStatement")}>
+          <p className="text-sm text-slate-400">{t("customerLedger.noCurrencies")}</p>
         </SectionCard>
       )}
 

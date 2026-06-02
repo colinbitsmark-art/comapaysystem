@@ -45,6 +45,8 @@ import {
   deleteLedgerEntry,
   getLedgerEntryChanges,
   getAllCustomersConvertedBalances,
+  getAccountStatement,
+  rebuildLedgerFromOrders,
 } from "../controllers/customerLedgerController.js";
 import {
   listUsers,
@@ -284,6 +286,8 @@ protectedRouter.delete("/customers/:id/kyc/documents/:documentId", section("cust
 protectedRouter.get("/customers/ledger/converted-balances", section("customers"), getAllCustomersConvertedBalances);
 protectedRouter.get("/customers/:id/ledger", section("customers"), listLedgerEntries);
 protectedRouter.get("/customers/:id/ledger/summary", section("customers"), getLedgerSummary);
+protectedRouter.get("/customers/:id/ledger/account-statement", section("customers"), getAccountStatement);
+protectedRouter.post("/customers/:id/ledger/rebuild-from-orders", section("customers"), rebuildLedgerFromOrders);
 protectedRouter.post("/customers/:id/ledger", section("customers"), createLedgerEntry);
 protectedRouter.get("/customers/ledger/:entryId/changes", section("customers"), getLedgerEntryChanges);
 protectedRouter.put("/customers/:id/ledger/:entryId", section("customers"), updateLedgerEntry);

@@ -17,6 +17,21 @@ import {
 } from "../utils/accountAccess.js";
 import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 import { convertCurrency } from "../utils/currencyConversion.js";
+import {
+  syncCustomerLedgerForCompletedOrder,
+  syncCustomerLedgerOnOrderCancelOrDelete,
+} from "../services/customerLedgerOrders.js";
+
+function trySyncCompletedOrderLedger(orderId, userId) {
+  try {
+    const row = db.prepare("SELECT status FROM orders WHERE id = ?;").get(orderId);
+    if (row?.status === "completed") {
+      syncCustomerLedgerForCompletedOrder(orderId, userId);
+    }
+  } catch (err) {
+    console.error("[trySyncCompletedOrderLedger]", orderId, err);
+  }
+}
 
 const ORDER_AUDIT_FIELDS = [
   "customerId",
@@ -1392,7 +1407,9 @@ export const createOrder = async (req, res, next) => {
       } else {
         console.log(`[createOrder] Order ${orderId} is completed but has no accounts set, skipping balance update`);
       }
-      
+
+      trySyncCompletedOrderLedger(orderId, userId);
+
       // Handle profit account balance if provided
       // Skip for OTC orders since they're already handled in the OTC block above
       if (orderData.orderType !== "otc" && orderData.profitAmount !== null && orderData.profitAmount !== undefined && orderData.profitAccountId) {
@@ -1788,6 +1805,8 @@ export const updateOrder = async (req, res, next) => {
       insertOrderChange(Number(id), userId, beforeAuditRow, afterAuditRow);
     }
 
+    trySyncCompletedOrderLedger(Number(id), userId);
+
     res.json({
       ...responseData,
       tags: tags.length > 0 ? tags : [],
@@ -1864,6 +1883,11 @@ export const updateOrderStatus = async (req, res, next) => {
         cancelAffectedAccountIds = Array.from(affectedAccountIds);
         db.prepare(`UPDATE orders SET status = @status WHERE id = @id;`).run({ id, status });
       })();
+      try {
+        syncCustomerLedgerOnOrderCancelOrDelete(Number(id), "cancelled", userId);
+      } catch (ledgerErr) {
+        console.error("[updateOrderStatus] customer ledger cancel sync failed:", ledgerErr);
+      }
     } else {
       db.prepare(`UPDATE orders SET status = @status WHERE id = @id;`).run({ id, status });
     }
@@ -1967,6 +1991,10 @@ export const updateOrderStatus = async (req, res, next) => {
           }
         }
       }
+    }
+
+    if (status === "completed" && currentOrder.status !== "completed") {
+      trySyncCompletedOrderLedger(Number(id), userId);
     }
     
     const row = db
@@ -2230,7 +2258,7 @@ export const deleteOrder = async (req, res, next) => {
     console.log(`[deleteOrder] orderId=${id} userId=${userId ?? "none"}`);
 
     // Check if order exists and get profit/service charge data, and account info
-    const order = db.prepare("SELECT id, createdBy, handlerId, profitAmount, profitAccountId, serviceChargeAmount, serviceChargeAccountId, buyAccountId, sellAccountId, amountBuy, amountSell, status FROM orders WHERE id = ?;").get(id);
+    const order = db.prepare("SELECT id, customerId, createdBy, handlerId, profitAmount, profitAccountId, serviceChargeAmount, serviceChargeAccountId, buyAccountId, sellAccountId, amountBuy, amountSell, status FROM orders WHERE id = ?;").get(id);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -2242,6 +2270,14 @@ export const deleteOrder = async (req, res, next) => {
     const userPermissions = getUserPermissions(userId);
     if (!userPermissions?.actions?.deleteOrder) {
       return res.status(403).json({ message: "You do not have permission to delete orders" });
+    }
+
+    if (order.status === "completed") {
+      try {
+        syncCustomerLedgerOnOrderCancelOrDelete(id, "deleted", userId);
+      } catch (ledgerErr) {
+        console.error("[deleteOrder] customer ledger delete sync failed:", ledgerErr);
+      }
     }
 
     // Cancel already ran the same reversals; avoid double-counting on delete.
@@ -3043,6 +3079,9 @@ export const updateReceipt = (req, res, next) => {
     };
 
     res.json(receiptWithUrl);
+    if (existingReceipt.status === "confirmed") {
+      trySyncCompletedOrderLedger(Number(existingReceipt.orderId), userId);
+    }
     notifyOrderWrite(Number(existingReceipt.orderId));
   } catch (error) {
     console.error("Error updating receipt:", error);
@@ -3093,6 +3132,7 @@ export const deleteReceipt = (req, res, next) => {
     db.prepare("DELETE FROM order_receipts WHERE id = ?;").run(receiptId);
 
     res.json({ success: true, orderId });
+    trySyncCompletedOrderLedger(Number(orderId), userId);
     notifyOrderFinancial(
       Number(orderId),
       receipt.accountId ? [receipt.accountId] : undefined,
@@ -3201,6 +3241,7 @@ export const confirmReceipt = (req, res, next) => {
     }
 
     res.json(receiptWithUrl);
+    trySyncCompletedOrderLedger(Number(receipt.orderId), userId);
     notifyOrderFinancial(
       Number(receipt.orderId),
       receipt.accountId ? [receipt.accountId] : undefined,
@@ -3292,6 +3333,9 @@ export const updatePayment = (req, res, next) => {
     };
 
     res.json(paymentWithUrl);
+    if (existingPayment.status === "confirmed") {
+      trySyncCompletedOrderLedger(Number(existingPayment.orderId), userId);
+    }
     notifyOrderWrite(Number(existingPayment.orderId));
   } catch (error) {
     console.error("Error updating payment:", error);
@@ -3343,6 +3387,7 @@ export const deletePayment = (req, res, next) => {
     db.prepare("DELETE FROM order_payments WHERE id = ?;").run(paymentId);
 
     res.json({ success: true, orderId });
+    trySyncCompletedOrderLedger(Number(orderId), userId);
     notifyOrderFinancial(
       Number(orderId),
       payment.accountId ? [payment.accountId] : undefined,
@@ -3428,6 +3473,7 @@ export const confirmPayment = (req, res, next) => {
     };
 
     res.json(paymentWithUrl);
+    trySyncCompletedOrderLedger(Number(payment.orderId), userId);
     notifyOrderFinancial(
       Number(payment.orderId),
       payment.accountId ? [payment.accountId] : undefined,
@@ -3772,6 +3818,7 @@ export const deleteServiceCharge = (req, res, next) => {
     db.prepare("DELETE FROM order_service_charges WHERE id = ?;").run(serviceChargeId);
 
     res.json({ success: true, orderId: serviceCharge.orderId });
+    trySyncCompletedOrderLedger(Number(serviceCharge.orderId), userId);
     notifyOrderFinancial(
       Number(serviceCharge.orderId),
       serviceCharge.accountId ? [serviceCharge.accountId] : undefined,
@@ -3786,6 +3833,7 @@ export const deleteServiceCharge = (req, res, next) => {
 export const confirmServiceCharge = (req, res, next) => {
   try {
     const { serviceChargeId } = req.params;
+    const userId = getUserIdFromHeader(req);
 
     // Check if service charge exists and is a draft
     const serviceCharge = db.prepare("SELECT * FROM order_service_charges WHERE id = ?;").get(serviceChargeId);
@@ -3864,6 +3912,7 @@ export const confirmServiceCharge = (req, res, next) => {
       .get(serviceChargeId);
 
     res.json(confirmedServiceCharge);
+    trySyncCompletedOrderLedger(Number(serviceCharge.orderId), userId);
     notifyOrderFinancial(
       Number(serviceCharge.orderId),
       serviceCharge.accountId ? [serviceCharge.accountId] : undefined,

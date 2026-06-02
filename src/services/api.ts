@@ -37,6 +37,7 @@ import type {
   CustomerLedgerEntryInput,
   CustomerLedgerChange,
   CustomerLedgerSummary,
+  CustomerAccountStatementRow,
   AllCustomersConvertedBalances,
   CustomerKycSchema,
   CustomerKycResponse,
@@ -299,6 +300,30 @@ export const api = createApi({
         { type: "CustomerLedger" as const, id: `SUMMARY-${customerId}` },
       ],
     }),
+    getCustomerAccountStatement: builder.query<
+      CustomerAccountStatementRow[],
+      { customerId: number; includeReversals?: boolean }
+    >({
+      query: ({ customerId, includeReversals = true }) => {
+        const qs = includeReversals ? "" : "?includeReversals=false";
+        return `customers/${customerId}/ledger/account-statement${qs}`;
+      },
+      providesTags: (_res, _err, { customerId }) => [
+        { type: "CustomerLedger" as const, id: `ACCOUNT-STATEMENT-${customerId}` },
+      ],
+    }),
+    rebuildCustomerLedgerFromOrders: builder.mutation<{ ordersProcessed: number }, number>({
+      query: (customerId) => ({
+        url: `customers/${customerId}/ledger/rebuild-from-orders`,
+        method: "POST",
+      }),
+      invalidatesTags: (_res, _err, customerId) => [
+        { type: "CustomerLedger", id: `LIST-${customerId}` },
+        { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `ACCOUNT-STATEMENT-${customerId}` },
+        { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
+      ],
+    }),
     createLedgerEntry: builder.mutation<CustomerLedgerEntry, CustomerLedgerEntryInput>({
       query: ({ customerId, ...body }) => ({
         url: `customers/${customerId}/ledger`,
@@ -308,6 +333,7 @@ export const api = createApi({
       invalidatesTags: (_res, _err, { customerId }) => [
         { type: "CustomerLedger", id: `LIST-${customerId}` },
         { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `ACCOUNT-STATEMENT-${customerId}` },
         { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
       ],
     }),
@@ -323,6 +349,7 @@ export const api = createApi({
       invalidatesTags: (_res, _err, { customerId, entryId }) => [
         { type: "CustomerLedger", id: `LIST-${customerId}` },
         { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `ACCOUNT-STATEMENT-${customerId}` },
         { type: "CustomerLedger", id: entryId },
         { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
       ],
@@ -335,6 +362,7 @@ export const api = createApi({
       invalidatesTags: (_res, _err, { customerId }) => [
         { type: "CustomerLedger", id: `LIST-${customerId}` },
         { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `ACCOUNT-STATEMENT-${customerId}` },
         { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
       ],
     }),
@@ -2268,6 +2296,8 @@ export const {
   useGetAllCustomersConvertedBalancesQuery,
   useGetCustomerLedgerEntriesQuery,
   useGetCustomerLedgerSummaryQuery,
+  useGetCustomerAccountStatementQuery,
+  useRebuildCustomerLedgerFromOrdersMutation,
   useCreateLedgerEntryMutation,
   useUpdateLedgerEntryMutation,
   useDeleteLedgerEntryMutation,

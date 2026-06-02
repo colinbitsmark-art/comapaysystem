@@ -12,6 +12,7 @@ import apiRouter from "./routes/api.js";
 import botRouter from "./routes/botRoutes.js";
 import telegramRouter from "./routes/telegramRoutes.js";
 import { initDatabase } from "./db.js";
+import { runInitialCustomerLedgerOrderSyncIfNeeded } from "./services/customerLedgerOrders.js";
 import {
   getReferenceRatesSyncStatus,
   isPostgresSyncEnabled,
@@ -21,6 +22,14 @@ import { isProduction } from "./utils/env.js";
 // Wrap database initialization in try-catch
 try {
   initDatabase();
+  const ledgerSync = runInitialCustomerLedgerOrderSyncIfNeeded();
+  if (ledgerSync.skipped) {
+    console.log("Customer ledger: initial order sync already applied");
+  } else {
+    console.log(
+      `Customer ledger: initial order sync built ${ledgerSync.ordersProcessed} order(s) for ${ledgerSync.customersUpdated} customer(s)`,
+    );
+  }
   console.log('Database initialized successfully');
   if (isPostgresSyncEnabled()) {
     const { configId } = getReferenceRatesSyncStatus();

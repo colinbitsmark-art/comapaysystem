@@ -2,6 +2,10 @@ import { db } from "../db.js";
 import { getUserIdFromHeader } from "../utils/auth.js";
 import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
 import { convertCurrency } from "../utils/currencyConversion.js";
+import {
+  buildAccountStatementRows,
+  rebuildCustomerLedgerFromOrders,
+} from "../services/customerLedgerOrders.js";
 
 // ─────────────────────────────────────────────
 // CONVERTED BALANCE for all customers
@@ -232,8 +236,8 @@ export const createLedgerEntry = (req, res, next) => {
     const result = db
       .prepare(
         `INSERT INTO customer_ledger_entries
-           (customerId, currencyCode, type, amount, description, createdBy, createdAt, entryDate)
-         VALUES (@customerId, @currencyCode, @type, @amount, @description, @createdBy, @createdAt, @entryDate);`
+           (customerId, currencyCode, type, amount, description, createdBy, createdAt, entryDate, source)
+         VALUES (@customerId, @currencyCode, @type, @amount, @description, @createdBy, @createdAt, @entryDate, 'manual');`
       )
       .run({
         customerId: parseInt(customerId, 10),
@@ -398,6 +402,32 @@ export const deleteLedgerEntry = (req, res, next) => {
 // ─────────────────────────────────────────────
 // GET change history for a single entry
 // ─────────────────────────────────────────────
+export const getAccountStatement = (req, res, next) => {
+  try {
+    const { id: customerId } = req.params;
+    const includeReversals = req.query.includeReversals !== "false";
+    const rows = buildAccountStatementRows(parseInt(customerId, 10), { includeReversals });
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const rebuildLedgerFromOrders = (req, res, next) => {
+  try {
+    const { id: customerId } = req.params;
+    const createdBy = getUserIdFromHeader(req);
+    const customer = db.prepare("SELECT id FROM customers WHERE id = ?;").get(parseInt(customerId, 10));
+    if (!customer) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+    const result = rebuildCustomerLedgerFromOrders(parseInt(customerId, 10), createdBy);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getLedgerEntryChanges = (req, res, next) => {
   try {
     const { entryId } = req.params;

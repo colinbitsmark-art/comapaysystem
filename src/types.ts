@@ -519,6 +519,31 @@ export interface CustomerLedgerEntry {
   deletedBy?: number;
   deletedByName?: string;
   deletedAt?: string;
+  orderId?: number | null;
+  source?: "manual" | "order" | "order_reversal";
+  reversalReason?: "cancelled" | "deleted" | "adjusted" | null;
+  leg?: "receipt" | "payment" | "service_charge" | null;
+  ledgerBatch?: number | null;
+  reversesBatch?: number | null;
+}
+
+export interface CustomerAccountStatementRow {
+  orderId: number;
+  orderDate: string;
+  description: string;
+  currencyPair: string;
+  exchangeRate: number | null;
+  creditAmount: number | null;
+  creditCurrency: string | null;
+  debitAmount: number | null;
+  debitCurrency: string | null;
+  serviceCharges: string | null;
+  remarks: string | null;
+  createdByName: string | null;
+  ledgerBatch: number;
+  source: "order" | "order_reversal";
+  reversalReason: "cancelled" | "deleted" | "adjusted" | null;
+  isReversal: boolean;
 }
 
 export interface CustomerLedgerEntryInput {

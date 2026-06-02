@@ -806,7 +806,46 @@ const ensureSchema = () => {
     `CREATE INDEX IF NOT EXISTS idx_ledger_customer_currency
      ON customer_ledger_entries(customerId, currencyCode);`,
   ).run();
+
+  ensureCustomerLedgerOrderColumns();
 };
+
+/** Order-linked customer ledger columns (idempotent; safe on every startup and API call). */
+export function ensureCustomerLedgerOrderColumns() {
+  const table = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'customer_ledger_entries';")
+    .get();
+  if (!table) return;
+
+  const columnNames = () =>
+    db.prepare("PRAGMA table_info(customer_ledger_entries);").all().map((c) => c.name);
+
+  if (!columnNames().includes("orderId")) {
+    db.prepare("ALTER TABLE customer_ledger_entries ADD COLUMN orderId INTEGER REFERENCES orders(id);").run();
+  }
+  if (!columnNames().includes("source")) {
+    db.prepare(
+      "ALTER TABLE customer_ledger_entries ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';",
+    ).run();
+  }
+  if (!columnNames().includes("reversalReason")) {
+    db.prepare("ALTER TABLE customer_ledger_entries ADD COLUMN reversalReason TEXT;").run();
+  }
+  if (!columnNames().includes("leg")) {
+    db.prepare("ALTER TABLE customer_ledger_entries ADD COLUMN leg TEXT;").run();
+  }
+  if (!columnNames().includes("ledgerBatch")) {
+    db.prepare("ALTER TABLE customer_ledger_entries ADD COLUMN ledgerBatch INTEGER;").run();
+  }
+  if (!columnNames().includes("reversesBatch")) {
+    db.prepare("ALTER TABLE customer_ledger_entries ADD COLUMN reversesBatch INTEGER;").run();
+  }
+
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_ledger_order
+     ON customer_ledger_entries(orderId);`,
+  ).run();
+}
 
 const seedData = () => {
   const currencyCount = db.prepare("SELECT COUNT(*) as count FROM currencies").get().count;
@@ -1288,6 +1327,14 @@ const migrateDatabase = () => {
         `UPDATE orders SET status = 'saved' WHERE status IN ('pending', 'under_process', 'pending_amend', 'pending_delete')`,
       ).run();
       db.prepare("INSERT INTO _schema_migrations (key) VALUES ('orders_three_status_v1')").run();
+    }
+
+    const ledgerOrderColumnsMigration = db
+      .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
+      .get("customer_ledger_order_columns_v1");
+    if (!ledgerOrderColumnsMigration) {
+      ensureCustomerLedgerOrderColumns();
+      db.prepare("INSERT INTO _schema_migrations (key) VALUES ('customer_ledger_order_columns_v1')").run();
     }
 
     // Migrate existing roles to include "profit" and "wallets" sections if not present
