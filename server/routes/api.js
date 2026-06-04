@@ -13,6 +13,11 @@ import {
 } from "../controllers/referenceRatesController.js";
 import {
   listCustomers,
+  listCustomerOptionsHandler,
+  getPinnedCustomerIds,
+  pinCustomer,
+  unpinCustomer,
+  reorderPinnedCustomers,
   createCustomer,
   updateCustomer,
   deleteCustomer,
@@ -45,8 +50,13 @@ import {
   deleteLedgerEntry,
   getLedgerEntryChanges,
   getAllCustomersConvertedBalances,
+  getAllCustomersFundingBalancesHandler,
   getAccountStatement,
   rebuildLedgerFromOrders,
+  getCustomerLedgerBalance,
+  getCustomerFundingBalancesHandler,
+  getCustomerFundingSummaryHandler,
+  getCustomerTradeProfitLossHandler,
 } from "../controllers/customerLedgerController.js";
 import {
   listUsers,
@@ -196,12 +206,37 @@ import {
   requireSection,
   requireAnySection,
   requireAction,
+  requireAnyAction,
 } from "../middleware/authMiddleware.js";
 import { loginRateLimiter, twoFactorRateLimiter, forgotPasswordRateLimiter, resetPasswordRateLimiter } from "../middleware/rateLimit.js";
 
 const section = requireSection;
 const action = requireAction;
+const anyAction = requireAnyAction;
 const anySection = requireAnySection;
+
+const customerLedgerRead = anyAction(
+  "viewCustomerLedger",
+  "createLedgerDepositWithdraw",
+  "editDeleteCustomerLedger",
+);
+const customerKycAccess = anyAction(
+  "submitCustomerKyc",
+  "approveCustomerKyc",
+  "reopenCustomerKyc",
+  "manageKycPolicy",
+);
+
+/** Sections that need read-only account lists (dropdowns); still scoped per role in listAccounts. */
+const accountListSections = [
+  "accounts",
+  "expenses",
+  "transfers",
+  "orders",
+  "profit",
+  "customers",
+  "dashboard",
+];
 
 const router = Router();
 const protectedRouter = Router();
@@ -244,15 +279,15 @@ protectedRouter.get("/uploads/*path", serveUpload);
 protectedRouter.get("/roles/subscribe", subscribeToRoleUpdates);
 protectedRouter.get("/notifications/subscribe", subscribeToNotifications);
 
-protectedRouter.get("/kyc/schema", section("customers"), getKycSchema);
-protectedRouter.put("/kyc/schema", section("customers"), putKycSchema);
+protectedRouter.get("/kyc/schema", section("customers"), customerKycAccess, getKycSchema);
+protectedRouter.put("/kyc/schema", section("customers"), action("manageKycPolicy"), putKycSchema);
 
-protectedRouter.get("/kyc/builder/schema/versions", section("customers"), getBuilderVersions);
-protectedRouter.get("/kyc/builder/schema/version/:id", section("customers"), getBuilderSchemaVersion);
-protectedRouter.delete("/kyc/builder/schema/version/:id", section("customers"), deleteBuilderSchemaVersion);
-protectedRouter.get("/kyc/builder/schema", section("customers"), getBuilderSchema);
-protectedRouter.put("/kyc/builder/schema", section("customers"), putBuilderSchema);
-protectedRouter.post("/kyc/builder/schema/publish", section("customers"), publishBuilderSchema);
+protectedRouter.get("/kyc/builder/schema/versions", section("customers"), action("manageKycPolicy"), getBuilderVersions);
+protectedRouter.get("/kyc/builder/schema/version/:id", section("customers"), action("manageKycPolicy"), getBuilderSchemaVersion);
+protectedRouter.delete("/kyc/builder/schema/version/:id", section("customers"), action("manageKycPolicy"), deleteBuilderSchemaVersion);
+protectedRouter.get("/kyc/builder/schema", section("customers"), action("manageKycPolicy"), getBuilderSchema);
+protectedRouter.put("/kyc/builder/schema", section("customers"), action("manageKycPolicy"), putBuilderSchema);
+protectedRouter.post("/kyc/builder/schema/publish", section("customers"), action("manageKycPolicy"), publishBuilderSchema);
 
 protectedRouter.get(
   "/currencies",
@@ -270,28 +305,63 @@ protectedRouter.put("/reference-rates", section("referenceRates"), updateReferen
 protectedRouter.post("/reference-rates/send-telegram", section("referenceRates"), sendReferenceRatesToTelegram);
 
 protectedRouter.get("/customers", section("customers"), listCustomers);
+protectedRouter.get(
+  "/customers/options",
+  anySection("orders", "customers", "dashboard"),
+  listCustomerOptionsHandler,
+);
+protectedRouter.get("/customers/pins", section("customers"), getPinnedCustomerIds);
+protectedRouter.post("/customers/:id/pin", section("customers"), action("pinCustomers"), pinCustomer);
+protectedRouter.delete("/customers/:id/pin", section("customers"), action("pinCustomers"), unpinCustomer);
+protectedRouter.put("/customers/pins/reorder", section("customers"), action("pinCustomers"), reorderPinnedCustomers);
 protectedRouter.post("/customers", section("customers"), action("createCustomer"), createCustomer);
 protectedRouter.put("/customers/:id", section("customers"), updateCustomer);
-protectedRouter.delete("/customers/:id", section("customers"), deleteCustomer);
+protectedRouter.delete("/customers/:id", section("customers"), action("deleteCustomer"), deleteCustomer);
 protectedRouter.get("/customers/:id/beneficiaries", section("customers"), listCustomerBeneficiaries);
-protectedRouter.post("/customers/:id/beneficiaries", section("customers"), addCustomerBeneficiary);
-protectedRouter.put("/customers/:id/beneficiaries/:beneficiaryId", section("customers"), updateCustomerBeneficiary);
-protectedRouter.delete("/customers/:id/beneficiaries/:beneficiaryId", section("customers"), deleteCustomerBeneficiary);
+protectedRouter.post("/customers/:id/beneficiaries", section("customers"), action("updateCustomer"), addCustomerBeneficiary);
+protectedRouter.put("/customers/:id/beneficiaries/:beneficiaryId", section("customers"), action("updateCustomer"), updateCustomerBeneficiary);
+protectedRouter.delete("/customers/:id/beneficiaries/:beneficiaryId", section("customers"), action("updateCustomer"), deleteCustomerBeneficiary);
 
-protectedRouter.get("/customers/:id/kyc", section("customers"), getCustomerKyc);
-protectedRouter.put("/customers/:id/kyc", section("customers"), updateCustomerKyc);
-protectedRouter.post("/customers/:id/kyc/documents", section("customers"), upload.single("file"), uploadCustomerKycDocument);
-protectedRouter.delete("/customers/:id/kyc/documents/:documentId", section("customers"), deleteCustomerKycDocument);
+protectedRouter.get("/customers/:id/kyc", section("customers"), customerKycAccess, getCustomerKyc);
+protectedRouter.put("/customers/:id/kyc", section("customers"), customerKycAccess, updateCustomerKyc);
+protectedRouter.post(
+  "/customers/:id/kyc/documents",
+  section("customers"),
+  action("submitCustomerKyc"),
+  upload.single("file"),
+  uploadCustomerKycDocument,
+);
+protectedRouter.delete(
+  "/customers/:id/kyc/documents/:documentId",
+  section("customers"),
+  action("submitCustomerKyc"),
+  deleteCustomerKycDocument,
+);
 
-protectedRouter.get("/customers/ledger/converted-balances", section("customers"), getAllCustomersConvertedBalances);
-protectedRouter.get("/customers/:id/ledger", section("customers"), listLedgerEntries);
-protectedRouter.get("/customers/:id/ledger/summary", section("customers"), getLedgerSummary);
-protectedRouter.get("/customers/:id/ledger/account-statement", section("customers"), getAccountStatement);
-protectedRouter.post("/customers/:id/ledger/rebuild-from-orders", section("customers"), rebuildLedgerFromOrders);
-protectedRouter.post("/customers/:id/ledger", section("customers"), createLedgerEntry);
-protectedRouter.get("/customers/ledger/:entryId/changes", section("customers"), getLedgerEntryChanges);
-protectedRouter.put("/customers/:id/ledger/:entryId", section("customers"), updateLedgerEntry);
-protectedRouter.delete("/customers/:id/ledger/:entryId", section("customers"), deleteLedgerEntry);
+protectedRouter.get("/customers/ledger/converted-balances", section("customers"), customerLedgerRead, getAllCustomersConvertedBalances);
+protectedRouter.get("/customers/ledger/funding-converted-balances", section("customers"), customerLedgerRead, getAllCustomersFundingBalancesHandler);
+protectedRouter.get("/customers/:id/ledger", section("customers"), customerLedgerRead, listLedgerEntries);
+protectedRouter.get("/customers/:id/ledger/summary", section("customers"), customerLedgerRead, getLedgerSummary);
+protectedRouter.get("/customers/:id/ledger/balance/:currencyCode", section("customers"), customerLedgerRead, getCustomerLedgerBalance);
+protectedRouter.get("/customers/:id/ledger/funding-balances", section("customers"), customerLedgerRead, getCustomerFundingBalancesHandler);
+protectedRouter.get("/customers/:id/ledger/trade-profit-loss", section("customers"), customerLedgerRead, getCustomerTradeProfitLossHandler);
+protectedRouter.get("/customers/:id/ledger/funding-summary", section("customers"), customerLedgerRead, getCustomerFundingSummaryHandler);
+protectedRouter.get("/customers/:id/ledger/account-statement", section("customers"), customerLedgerRead, getAccountStatement);
+protectedRouter.post(
+  "/customers/:id/ledger/rebuild-from-orders",
+  section("customers"),
+  action("editDeleteCustomerLedger"),
+  rebuildLedgerFromOrders,
+);
+protectedRouter.post(
+  "/customers/:id/ledger",
+  section("customers"),
+  anyAction("createLedgerDepositWithdraw", "editDeleteCustomerLedger"),
+  createLedgerEntry,
+);
+protectedRouter.get("/customers/ledger/:entryId/changes", section("customers"), customerLedgerRead, getLedgerEntryChanges);
+protectedRouter.put("/customers/:id/ledger/:entryId", section("customers"), action("editDeleteCustomerLedger"), updateLedgerEntry);
+protectedRouter.delete("/customers/:id/ledger/:entryId", section("customers"), action("editDeleteCustomerLedger"), deleteLedgerEntry);
 
 protectedRouter.get("/users", requireAdmin, listUsers);
 protectedRouter.post("/users", requireAdmin, createUser);
@@ -336,9 +406,13 @@ protectedRouter.delete("/orders/:id/pin", section("orders"), unpinOrder);
 protectedRouter.put("/orders/:id", section("orders"), updateOrder);
 protectedRouter.delete("/orders/:id", section("orders"), deleteOrder);
 
-protectedRouter.get("/accounts", section("accounts"), listAccounts);
-protectedRouter.get("/accounts/summary", section("accounts"), getAccountsSummary);
-protectedRouter.get("/accounts/currency/:currencyCode", section("accounts"), getAccountsByCurrency);
+protectedRouter.get("/accounts", anySection(...accountListSections), listAccounts);
+protectedRouter.get("/accounts/summary", anySection(...accountListSections), getAccountsSummary);
+protectedRouter.get(
+  "/accounts/currency/:currencyCode",
+  anySection(...accountListSections),
+  getAccountsByCurrency,
+);
 protectedRouter.get("/accounts/debug/references", requireAdmin, getAllReferences);
 protectedRouter.get("/accounts/:id/references", section("accounts"), getAccountReferences);
 protectedRouter.post("/accounts", section("accounts"), action("createAccount"), createAccount);

@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import Badge from "../common/Badge";
 import { SearchableSelect } from "../common/SearchableSelect";
+import { formatAccountSelectLabel } from "../../utils/accounts/accountDisplay";
 import type { DatePreset } from "../../types/orders";
 import type { Tag, User, Account, Currency } from "../../types";
 import type { ExpenseFilters } from "../../hooks/expenses/useExpensesFilters";
@@ -176,6 +177,7 @@ export function ExpensesFilters({
             value={filters.accountId}
             onChange={(value) => onFilterChange('accountId', value)}
             options={accounts}
+            getOptionLabel={formatAccountSelectLabel}
             placeholder={t("expenses.selectAccount")}
             label={t("expenses.account")}
             allOptionLabel={t("expenses.all")}

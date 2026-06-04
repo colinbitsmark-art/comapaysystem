@@ -20,7 +20,15 @@ import { convertCurrency } from "../utils/currencyConversion.js";
 import {
   syncCustomerLedgerForCompletedOrder,
   syncCustomerLedgerOnOrderCancelOrDelete,
+  purgeLedgerEntriesForOrder,
+  notifyCustomerLedger,
 } from "../services/customerLedgerOrders.js";
+import { assertAllocatableBalance, assertAllocatableOwed } from "../services/customerLedgerAccounts.js";
+import {
+  isCustomerBalanceFunded,
+  normalizeReceiptFundedFrom,
+  RECEIPT_FUNDED_CUSTOMER_BALANCE,
+} from "../utils/orderReceiptFunding.js";
 
 function trySyncCompletedOrderLedger(orderId, userId) {
   try {
@@ -120,12 +128,47 @@ function userCanAccessOrderForListing(userId, orderId) {
     return `@${key}`;
   }).join(",");
   const sql = `SELECT 1 FROM orders o WHERE o.id = @orderId AND (
-    o.buyAccountId IN (${placeholders})
-    OR o.sellAccountId IN (${placeholders})
-    OR EXISTS (SELECT 1 FROM order_receipts r WHERE r.orderId = o.id AND r.accountId IN (${placeholders}))
+    EXISTS (SELECT 1 FROM order_receipts r WHERE r.orderId = o.id AND r.accountId IN (${placeholders}))
     OR EXISTS (SELECT 1 FROM order_payments p WHERE p.orderId = o.id AND p.accountId IN (${placeholders}))
+    OR EXISTS (SELECT 1 FROM order_service_charges sc WHERE sc.orderId = o.id AND sc.accountId IN (${placeholders}))
+    OR o.serviceChargeAccountId IN (${placeholders})
   )`;
   return Boolean(db.prepare(sql).get(params));
+}
+
+/** Filter orders by account on receipts (buy), payments (sell), or any leg including service charges. */
+function appendOrderAccountFilter(conditions, params, accountId, accountRole) {
+  const id = parseInt(accountId, 10);
+  if (!id || Number.isNaN(id)) return;
+  params.accountId = id;
+  const role = String(accountRole || "any").toLowerCase();
+  if (role === "buy") {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM order_receipts r
+      WHERE r.orderId = o.id AND r.accountId = @accountId
+    )`);
+  } else if (role === "sell") {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM order_payments p
+      WHERE p.orderId = o.id AND p.accountId = @accountId
+    )`);
+  } else {
+    conditions.push(`(
+      EXISTS (
+        SELECT 1 FROM order_receipts r
+        WHERE r.orderId = o.id AND r.accountId = @accountId
+      )
+      OR EXISTS (
+        SELECT 1 FROM order_payments p
+        WHERE p.orderId = o.id AND p.accountId = @accountId
+      )
+      OR EXISTS (
+        SELECT 1 FROM order_service_charges sc
+        WHERE sc.orderId = o.id AND sc.accountId = @accountId
+      )
+      OR o.serviceChargeAccountId = @accountId
+    )`);
+  }
 }
 
 function listGlobalPinnedOrderIds() {
@@ -272,8 +315,8 @@ export const listOrders = (req, res) => {
     fromCurrency,
     toCurrency,
     currencyPairs,
-    buyAccountId,
-    sellAccountId,
+    accountId,
+    accountRole,
     status,
     orderType,
     tagId,
@@ -298,9 +341,7 @@ export const listOrders = (req, res) => {
         return `@${key}`;
       }).join(",");
       conditions.push(`(
-        o.buyAccountId IN (${placeholders})
-        OR o.sellAccountId IN (${placeholders})
-        OR EXISTS (
+        EXISTS (
           SELECT 1 FROM order_receipts r
           WHERE r.orderId = o.id AND r.accountId IN (${placeholders})
         )
@@ -308,6 +349,11 @@ export const listOrders = (req, res) => {
           SELECT 1 FROM order_payments p
           WHERE p.orderId = o.id AND p.accountId IN (${placeholders})
         )
+        OR EXISTS (
+          SELECT 1 FROM order_service_charges sc
+          WHERE sc.orderId = o.id AND sc.accountId IN (${placeholders})
+        )
+        OR o.serviceChargeAccountId IN (${placeholders})
       )`);
     }
   }
@@ -354,21 +400,8 @@ export const listOrders = (req, res) => {
       params.toCurrency = toCurrency;
     }
   }
-  if (buyAccountId) {
-    // Check if buyAccountId matches the order's buyAccountId OR exists in order_receipts
-    conditions.push(`(o.buyAccountId = @buyAccountId OR EXISTS (
-      SELECT 1 FROM order_receipts r 
-      WHERE r.orderId = o.id AND r.accountId = @buyAccountId
-    ))`);
-    params.buyAccountId = parseInt(buyAccountId, 10);
-  }
-  if (sellAccountId) {
-    // Check if sellAccountId matches the order's sellAccountId OR exists in order_payments
-    conditions.push(`(o.sellAccountId = @sellAccountId OR EXISTS (
-      SELECT 1 FROM order_payments p 
-      WHERE p.orderId = o.id AND p.accountId = @sellAccountId
-    ))`);
-    params.sellAccountId = parseInt(sellAccountId, 10);
+  if (accountId) {
+    appendOrderAccountFilter(conditions, params, accountId, accountRole);
   }
   if (status) {
     conditions.push('o.status = @status');
@@ -463,13 +496,16 @@ export const listOrders = (req, res) => {
     return convertCurrency(amount, rate, currency, profitTargetCurrency, allCurrenciesForProfit);
   };
 
-  // Total profit for ALL filtered orders (same per-order logic as the Profit column)
+  // Total profit for filtered orders with status = completed only (list may show cancelled/saved for records)
   let totalCalculatedProfit = null;
   if (profitTargetCurrency) {
+    const profitWhereClause = whereClause
+      ? `${whereClause} AND o.status = 'completed'`
+      : `WHERE o.status = 'completed'`;
     const allFilteredOrdersQuery = `
       SELECT o.id, o.fromCurrency, o.toCurrency, o.amountBuy, o.amountSell
       FROM orders o
-      ${whereClause}
+      ${profitWhereClause}
     `;
     const allFilteredOrders = db.prepare(allFilteredOrdersQuery).all(filterOnlyParams);
     let profitSum = 0;
@@ -736,8 +772,8 @@ export const exportOrders = (req, res) => {
     fromCurrency,
     toCurrency,
     currencyPairs,
-    buyAccountId,
-    sellAccountId,
+    accountId,
+    accountRole,
     status,
     orderType,
     tagId,
@@ -760,9 +796,7 @@ export const exportOrders = (req, res) => {
         return `@${key}`;
       }).join(",");
       conditions.push(`(
-        o.buyAccountId IN (${placeholders})
-        OR o.sellAccountId IN (${placeholders})
-        OR EXISTS (
+        EXISTS (
           SELECT 1 FROM order_receipts r
           WHERE r.orderId = o.id AND r.accountId IN (${placeholders})
         )
@@ -770,6 +804,11 @@ export const exportOrders = (req, res) => {
           SELECT 1 FROM order_payments p
           WHERE p.orderId = o.id AND p.accountId IN (${placeholders})
         )
+        OR EXISTS (
+          SELECT 1 FROM order_service_charges sc
+          WHERE sc.orderId = o.id AND sc.accountId IN (${placeholders})
+        )
+        OR o.serviceChargeAccountId IN (${placeholders})
       )`);
     }
   }
@@ -816,19 +855,8 @@ export const exportOrders = (req, res) => {
       params.toCurrency = toCurrency;
     }
   }
-  if (buyAccountId) {
-    conditions.push(`(o.buyAccountId = @buyAccountId OR EXISTS (
-      SELECT 1 FROM order_receipts r 
-      WHERE r.orderId = o.id AND r.accountId = @buyAccountId
-    ))`);
-    params.buyAccountId = parseInt(buyAccountId, 10);
-  }
-  if (sellAccountId) {
-    conditions.push(`(o.sellAccountId = @sellAccountId OR EXISTS (
-      SELECT 1 FROM order_payments p 
-      WHERE p.orderId = o.id AND p.accountId = @sellAccountId
-    ))`);
-    params.sellAccountId = parseInt(sellAccountId, 10);
+  if (accountId) {
+    appendOrderAccountFilter(conditions, params, accountId, accountRole);
   }
   if (status) {
     conditions.push('o.status = @status');
@@ -2074,8 +2102,16 @@ function shouldReverseConfirmedEntryOnDelete(orderId) {
  */
 function performOrderFinancialReversals(orderId, order, reasonLabel) {
   const id = orderId;
-  const receipts = db.prepare("SELECT accountId, amount, imagePath, status FROM order_receipts WHERE orderId = ? AND status = 'confirmed';").all(id);
-  const payments = db.prepare("SELECT accountId, amount, imagePath, status FROM order_payments WHERE orderId = ? AND status = 'confirmed';").all(id);
+  const receipts = db
+    .prepare(
+      "SELECT accountId, amount, imagePath, status, fundedFrom FROM order_receipts WHERE orderId = ? AND status = 'confirmed';",
+    )
+    .all(id);
+  const payments = db
+    .prepare(
+      "SELECT accountId, amount, imagePath, status, fundedFrom FROM order_payments WHERE orderId = ? AND status = 'confirmed';",
+    )
+    .all(id);
   const confirmedProfits = db.prepare("SELECT accountId, amount FROM order_profits WHERE orderId = ? AND status = 'confirmed';").all(id);
   const confirmedServiceCharges = db.prepare("SELECT accountId, amount FROM order_service_charges WHERE orderId = ? AND status = 'confirmed';").all(id);
 
@@ -2083,6 +2119,7 @@ function performOrderFinancialReversals(orderId, order, reasonLabel) {
   const hasDirectTransactions = isCompleted && (order.buyAccountId || order.sellAccountId);
 
   receipts.forEach((receipt) => {
+    if (isCustomerBalanceFunded(receipt)) return;
     if (receipt.accountId && receipt.amount) {
       const accountId = receipt.accountId;
       const amount = receipt.amount;
@@ -2100,6 +2137,7 @@ function performOrderFinancialReversals(orderId, order, reasonLabel) {
   });
 
   payments.forEach((payment) => {
+    if (isCustomerBalanceFunded(payment)) return;
     if (payment.accountId && payment.amount) {
       const accountId = payment.accountId;
       const amount = payment.amount;
@@ -2272,12 +2310,27 @@ export const deleteOrder = async (req, res, next) => {
       return res.status(403).json({ message: "You do not have permission to delete orders" });
     }
 
-    if (order.status === "completed") {
+    if (order.status === "completed" || order.status === "cancelled") {
       try {
         syncCustomerLedgerOnOrderCancelOrDelete(id, "deleted", userId);
       } catch (ledgerErr) {
         console.error("[deleteOrder] customer ledger delete sync failed:", ledgerErr);
       }
+    }
+
+    try {
+      const purged = purgeLedgerEntriesForOrder(id);
+      if (purged > 0) {
+        console.log(`[deleteOrder] purged ${purged} customer_ledger_entries for orderId=${id}`);
+      }
+      if (order.customerId) {
+        notifyCustomerLedger(order.customerId);
+      }
+    } catch (ledgerErr) {
+      console.error("[deleteOrder] purge ledger entries failed:", ledgerErr);
+      return res.status(500).json({
+        message: "Failed to remove customer ledger records for this order",
+      });
     }
 
     // Cancel already ran the same reversals; avoid double-counting on delete.
@@ -2566,7 +2619,7 @@ export const processOrder = (req, res, next) => {
 export const addReceipt = (req, res, next) => {
   try {
     const { id } = req.params;
-    const { amount, accountId } = req.body;
+    const { amount, accountId, fundedFrom: fundedFromRaw } = req.body;
     const file = req.file; // Multer file object
     const userId = getUserIdFromHeader(req);
 
@@ -2599,7 +2652,11 @@ export const addReceipt = (req, res, next) => {
     }
 
     // Check if order exists first and get paymentFlow and status
-    const order = db.prepare("SELECT id, createdBy, handlerId, fromCurrency, toCurrency, amountBuy, amountSell, paymentFlow, buyAccountId, status, orderType FROM orders WHERE id = ?;").get(id);
+    const order = db
+      .prepare(
+        "SELECT id, customerId, createdBy, handlerId, fromCurrency, toCurrency, amountBuy, amountSell, paymentFlow, buyAccountId, status, orderType FROM orders WHERE id = ?;",
+      )
+      .get(id);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -2625,34 +2682,51 @@ export const addReceipt = (req, res, next) => {
     if (amount === undefined) {
       return res.status(400).json({ message: "Amount is required" });
     }
-    
-    // Account ID is required
-    if (!accountId) {
-      return res.status(400).json({ message: "Account ID is required for receipt" });
-    }
-    
-    const receiptAccountId = Number(accountId);
-    
-    // Validate account
-    const receiptAccount = db.prepare("SELECT id, currencyCode FROM accounts WHERE id = ?;").get(receiptAccountId);
-    if (!receiptAccount) {
-      return res.status(400).json({ message: "Receipt account not found" });
-    }
-    if (receiptAccount.currencyCode !== order.fromCurrency) {
-      return res.status(400).json({ 
-        message: `Receipt account currency (${receiptAccount.currencyCode}) does not match order fromCurrency (${order.fromCurrency})` 
-      });
-    }
-    if (!requireAccountAccess(req, res, "order.account", receiptAccountId, "You do not have access to use this order account")) {
-      return;
-    }
 
+    const fundedFrom = normalizeReceiptFundedFrom(fundedFromRaw);
     const receiptAmount = parseFloat(amount);
+    if (!receiptAmount || receiptAmount <= 0) {
+      return res.status(400).json({ message: "Amount must be a positive number" });
+    }
 
-    // Insert receipt with accountId and draft status (not confirmed yet)
+    let receiptAccountId = null;
+
+    if (fundedFrom === RECEIPT_FUNDED_CUSTOMER_BALANCE) {
+      if (!order.customerId) {
+        return res.status(400).json({ message: "Order must have a customer to use prepaid balance" });
+      }
+    } else {
+      if (!accountId) {
+        return res.status(400).json({ message: "Account ID is required for cash receipt" });
+      }
+      receiptAccountId = Number(accountId);
+      const receiptAccount = db
+        .prepare("SELECT id, currencyCode FROM accounts WHERE id = ?;")
+        .get(receiptAccountId);
+      if (!receiptAccount) {
+        return res.status(400).json({ message: "Receipt account not found" });
+      }
+      if (receiptAccount.currencyCode !== order.fromCurrency) {
+        return res.status(400).json({
+          message: `Receipt account currency (${receiptAccount.currencyCode}) does not match order fromCurrency (${order.fromCurrency})`,
+        });
+      }
+      if (
+        !requireAccountAccess(
+          req,
+          res,
+          "order.account",
+          receiptAccountId,
+          "You do not have access to use this order account",
+        )
+      ) {
+        return;
+      }
+    }
+
     const stmt = db.prepare(
-      `INSERT INTO order_receipts (orderId, imagePath, amount, accountId, status, createdAt)
-       VALUES (@orderId, @imagePath, @amount, @accountId, @status, @createdAt);`
+      `INSERT INTO order_receipts (orderId, imagePath, amount, accountId, status, fundedFrom, createdAt)
+       VALUES (@orderId, @imagePath, @amount, @accountId, @status, @fundedFrom, @createdAt);`,
     );
 
     const result = stmt.run({
@@ -2660,7 +2734,8 @@ export const addReceipt = (req, res, next) => {
       imagePath,
       amount: receiptAmount,
       accountId: receiptAccountId,
-      status: 'draft', // Create as draft - balances will be updated when confirmed
+      status: "draft",
+      fundedFrom,
       createdAt: new Date().toISOString(),
     });
 
@@ -2688,6 +2763,12 @@ export const addReceipt = (req, res, next) => {
     }
 
     res.json(receiptWithUrl);
+    if (order?.customerId) {
+      scheduleCacheSync({
+        scopes: ["customerLedger"],
+        customerId: order.customerId,
+      });
+    }
     notifyOrderWrite(Number(id));
   } catch (error) {
     console.error("Error adding receipt:", error);
@@ -2871,7 +2952,7 @@ const updateAccountBalancesOnCompletion = (orderId, isImported = false) => {
 export const addPayment = (req, res, next) => {
   try {
     const { id } = req.params;
-    const { amount, accountId } = req.body;
+    const { amount, accountId, fundedFrom: fundedFromRaw } = req.body;
     const file = req.file; // Multer file object
     const userId = getUserIdFromHeader(req);
 
@@ -2902,7 +2983,11 @@ export const addPayment = (req, res, next) => {
       }
     }
 
-    const order = db.prepare("SELECT id, createdBy, handlerId, toCurrency, amountSell, paymentFlow, sellAccountId, rate, orderType FROM orders WHERE id = ?;").get(id);
+    const order = db
+      .prepare(
+        "SELECT id, createdBy, handlerId, customerId, toCurrency, amountSell, paymentFlow, sellAccountId, rate, orderType FROM orders WHERE id = ?;",
+      )
+      .get(id);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -2928,34 +3013,53 @@ export const addPayment = (req, res, next) => {
     if (amount === undefined) {
       return res.status(400).json({ message: "Amount is required" });
     }
-    
-    // Account ID is required
-    if (!accountId) {
-      return res.status(400).json({ message: "Account ID is required for payment" });
-    }
-    
-    const paymentAccountId = Number(accountId);
-    
-    // Validate account
-    const paymentAccount = db.prepare("SELECT id, currencyCode, balance FROM accounts WHERE id = ?;").get(paymentAccountId);
-    if (!paymentAccount) {
-      return res.status(400).json({ message: "Payment account not found" });
-    }
-    if (paymentAccount.currencyCode !== order.toCurrency) {
-      return res.status(400).json({ 
-        message: `Payment account currency (${paymentAccount.currencyCode}) does not match order toCurrency (${order.toCurrency})` 
-      });
-    }
-    if (!requireAccountAccess(req, res, "order.account", paymentAccountId, "You do not have access to use this order account")) {
-      return;
-    }
 
+    const fundedFrom = normalizeReceiptFundedFrom(fundedFromRaw);
     const paymentAmount = parseFloat(amount);
+    if (!paymentAmount || paymentAmount <= 0) {
+      return res.status(400).json({ message: "Amount must be a positive number" });
+    }
 
-    // Insert payment with accountId and draft status (not confirmed yet)
+    let paymentAccountId = null;
+
+    if (fundedFrom === RECEIPT_FUNDED_CUSTOMER_BALANCE) {
+      if (!order.customerId) {
+        return res.status(400).json({
+          message: "Order must have a customer to settle payment from customer advance",
+        });
+      }
+    } else {
+      if (!accountId) {
+        return res.status(400).json({ message: "Account ID is required for cash payment" });
+      }
+      paymentAccountId = Number(accountId);
+      const paymentAccount = db
+        .prepare("SELECT id, currencyCode, balance FROM accounts WHERE id = ?;")
+        .get(paymentAccountId);
+      if (!paymentAccount) {
+        return res.status(400).json({ message: "Payment account not found" });
+      }
+      if (paymentAccount.currencyCode !== order.toCurrency) {
+        return res.status(400).json({
+          message: `Payment account currency (${paymentAccount.currencyCode}) does not match order toCurrency (${order.toCurrency})`,
+        });
+      }
+      if (
+        !requireAccountAccess(
+          req,
+          res,
+          "order.account",
+          paymentAccountId,
+          "You do not have access to use this order account",
+        )
+      ) {
+        return;
+      }
+    }
+
     const stmt = db.prepare(
-      `INSERT INTO order_payments (orderId, imagePath, amount, accountId, status, createdAt)
-       VALUES (@orderId, @imagePath, @amount, @accountId, @status, @createdAt);`
+      `INSERT INTO order_payments (orderId, imagePath, amount, accountId, status, fundedFrom, createdAt)
+       VALUES (@orderId, @imagePath, @amount, @accountId, @status, @fundedFrom, @createdAt);`,
     );
 
     const result = stmt.run({
@@ -2963,7 +3067,8 @@ export const addPayment = (req, res, next) => {
       imagePath,
       amount: paymentAmount,
       accountId: paymentAccountId,
-      status: 'draft', // Create as draft - balances will be updated when confirmed
+      status: "draft",
+      fundedFrom,
       createdAt: new Date().toISOString(),
     });
 
@@ -3002,7 +3107,7 @@ export const addPayment = (req, res, next) => {
 export const updateReceipt = (req, res, next) => {
   try {
     const { receiptId } = req.params;
-    const { amount, accountId } = req.body;
+    const { amount, accountId, fundedFrom: fundedFromRaw } = req.body;
     const file = req.file;
 
     // Check if receipt exists and is a draft
@@ -3014,8 +3119,9 @@ export const updateReceipt = (req, res, next) => {
       return res.status(400).json({ message: "Only draft receipts can be updated" });
     }
 
-    // Get order details
-    const order = db.prepare("SELECT id, fromCurrency FROM orders WHERE id = ?;").get(existingReceipt.orderId);
+    const order = db
+      .prepare("SELECT id, customerId, fromCurrency FROM orders WHERE id = ?;")
+      .get(existingReceipt.orderId);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -3032,36 +3138,61 @@ export const updateReceipt = (req, res, next) => {
       imagePath = saveFile(file.buffer, filename, "order");
     }
 
-    // Validate account if provided
-    let accountIdToUse = existingReceipt.accountId;
-    if (accountId !== undefined && accountId !== null && accountId !== "") {
-      const receiptAccount = db.prepare("SELECT id, currencyCode FROM accounts WHERE id = ?;").get(Number(accountId));
+    const fundedFrom =
+      fundedFromRaw !== undefined
+        ? normalizeReceiptFundedFrom(fundedFromRaw)
+        : normalizeReceiptFundedFrom(existingReceipt.fundedFrom);
+
+    const receiptAmount = amount !== undefined ? parseFloat(amount) : existingReceipt.amount;
+    if (!receiptAmount || receiptAmount <= 0) {
+      return res.status(400).json({ message: "Amount must be a positive number" });
+    }
+
+    let accountIdToUse = null;
+    if (fundedFrom === RECEIPT_FUNDED_CUSTOMER_BALANCE) {
+      if (!order.customerId) {
+        return res.status(400).json({ message: "Order must have a customer to use prepaid balance" });
+      }
+    } else if (accountId !== undefined && accountId !== null && accountId !== "") {
+      const receiptAccount = db
+        .prepare("SELECT id, currencyCode FROM accounts WHERE id = ?;")
+        .get(Number(accountId));
       if (!receiptAccount) {
         return res.status(400).json({ message: "Receipt account not found" });
       }
       if (receiptAccount.currencyCode !== order.fromCurrency) {
-        return res.status(400).json({ 
-          message: `Receipt account currency (${receiptAccount.currencyCode}) does not match order fromCurrency (${order.fromCurrency})` 
+        return res.status(400).json({
+          message: `Receipt account currency (${receiptAccount.currencyCode}) does not match order fromCurrency (${order.fromCurrency})`,
         });
       }
-      if (!requireAccountAccess(req, res, "order.account", Number(accountId), "You do not have access to use this order account")) {
+      if (
+        !requireAccountAccess(
+          req,
+          res,
+          "order.account",
+          Number(accountId),
+          "You do not have access to use this order account",
+        )
+      ) {
         return;
       }
       accountIdToUse = Number(accountId);
+    } else if (existingReceipt.accountId) {
+      accountIdToUse = existingReceipt.accountId;
+    } else {
+      return res.status(400).json({ message: "Account ID is required for cash receipt" });
     }
 
-    const receiptAmount = amount !== undefined ? parseFloat(amount) : existingReceipt.amount;
-
-    // Update receipt
     db.prepare(
-      `UPDATE order_receipts 
-       SET imagePath = @imagePath, amount = @amount, accountId = @accountId
-       WHERE id = @id;`
+      `UPDATE order_receipts
+       SET imagePath = @imagePath, amount = @amount, accountId = @accountId, fundedFrom = @fundedFrom
+       WHERE id = @id;`,
     ).run({
       id: receiptId,
       imagePath,
       amount: receiptAmount,
       accountId: accountIdToUse,
+      fundedFrom,
     });
 
     const updatedReceipt = db
@@ -3105,8 +3236,11 @@ export const deleteReceipt = (req, res, next) => {
       if (!canEditAnyOrder(userPermissions)) {
         return res.status(400).json({ message: "Only draft receipts can be deleted" });
       }
-      // Reverse the balance increase that was applied when this receipt was confirmed
-      if (receipt.accountId && shouldReverseConfirmedEntryOnDelete(receipt.orderId)) {
+      if (
+        !isCustomerBalanceFunded(receipt) &&
+        receipt.accountId &&
+        shouldReverseConfirmedEntryOnDelete(receipt.orderId)
+      ) {
         db.prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?;").run(
           receipt.amount,
           receipt.accountId,
@@ -3173,32 +3307,65 @@ export const confirmReceipt = (req, res, next) => {
       return res.status(401).json({ message: "User ID is required" });
     }
 
-    if (!receipt.accountId) {
-      return res.status(400).json({ message: "Receipt must have an account before confirmation" });
-    }
-    if (!requireAccountAccess(req, res, "order.account", receipt.accountId, "You do not have access to confirm this order account")) {
-      return;
+    const orderForReceipt = db
+      .prepare("SELECT id, customerId, fromCurrency FROM orders WHERE id = ?;")
+      .get(receipt.orderId);
+
+    if (isCustomerBalanceFunded(receipt)) {
+      if (!orderForReceipt?.customerId) {
+        return res.status(400).json({ message: "Order must have a customer to use prepaid balance" });
+      }
+      try {
+        assertAllocatableBalance(
+          orderForReceipt.customerId,
+          orderForReceipt.fromCurrency,
+          receipt.amount,
+          receiptId,
+        );
+      } catch (err) {
+        if (err.status) {
+          return res.status(err.status).json({ message: err.message });
+        }
+        throw err;
+      }
+    } else {
+      if (!receipt.accountId) {
+        return res.status(400).json({ message: "Receipt must have an account before confirmation" });
+      }
+      if (
+        !requireAccountAccess(
+          req,
+          res,
+          "order.account",
+          receipt.accountId,
+          "You do not have access to confirm this order account",
+        )
+      ) {
+        return;
+      }
     }
 
-    // Update receipt status to confirmed
     db.prepare("UPDATE order_receipts SET status = 'confirmed' WHERE id = ?;").run(receiptId);
 
-    // Update account balance
-    const receiptAccount = db.prepare("SELECT balance FROM accounts WHERE id = ?;").get(receipt.accountId);
-    if (receiptAccount) {
-      db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(
-        receipt.amount,
-        receipt.accountId
-      );
-      db.prepare(
-        `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
-         VALUES (?, 'add', ?, ?, ?);`
-      ).run(
-        receipt.accountId,
-        receipt.amount,
-        `Order #${receipt.orderId} - Receipt from customer`,
-        new Date().toISOString()
-      );
+    if (!isCustomerBalanceFunded(receipt) && receipt.accountId) {
+      const receiptAccount = db
+        .prepare("SELECT balance FROM accounts WHERE id = ?;")
+        .get(receipt.accountId);
+      if (receiptAccount) {
+        db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?;").run(
+          receipt.amount,
+          receipt.accountId,
+        );
+        db.prepare(
+          `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
+           VALUES (?, 'add', ?, ?, ?);`,
+        ).run(
+          receipt.accountId,
+          receipt.amount,
+          `Order #${receipt.orderId} - Receipt from customer`,
+          new Date().toISOString(),
+        );
+      }
     }
 
     // Get updated receipt
@@ -3241,6 +3408,12 @@ export const confirmReceipt = (req, res, next) => {
     }
 
     res.json(receiptWithUrl);
+    if (orderForReceipt?.customerId) {
+      scheduleCacheSync({
+        scopes: ["customerLedger"],
+        customerId: orderForReceipt.customerId,
+      });
+    }
     trySyncCompletedOrderLedger(Number(receipt.orderId), userId);
     notifyOrderFinancial(
       Number(receipt.orderId),
@@ -3256,7 +3429,7 @@ export const confirmReceipt = (req, res, next) => {
 export const updatePayment = (req, res, next) => {
   try {
     const { paymentId } = req.params;
-    const { amount, accountId } = req.body;
+    const { amount, accountId, fundedFrom: fundedFromRaw } = req.body;
     const file = req.file;
 
     // Check if payment exists and is a draft
@@ -3268,8 +3441,9 @@ export const updatePayment = (req, res, next) => {
       return res.status(400).json({ message: "Only draft payments can be updated" });
     }
 
-    // Get order details
-    const order = db.prepare("SELECT id, toCurrency FROM orders WHERE id = ?;").get(existingPayment.orderId);
+    const order = db
+      .prepare("SELECT id, customerId, toCurrency FROM orders WHERE id = ?;")
+      .get(existingPayment.orderId);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -3286,36 +3460,63 @@ export const updatePayment = (req, res, next) => {
       imagePath = saveFile(file.buffer, filename, "order");
     }
 
-    // Validate account if provided
-    let accountIdToUse = existingPayment.accountId;
-    if (accountId !== undefined && accountId !== null && accountId !== "") {
-      const paymentAccount = db.prepare("SELECT id, currencyCode FROM accounts WHERE id = ?;").get(Number(accountId));
+    const fundedFrom =
+      fundedFromRaw !== undefined
+        ? normalizeReceiptFundedFrom(fundedFromRaw)
+        : normalizeReceiptFundedFrom(existingPayment.fundedFrom);
+
+    const paymentAmount = amount !== undefined ? parseFloat(amount) : existingPayment.amount;
+    if (!paymentAmount || paymentAmount <= 0) {
+      return res.status(400).json({ message: "Amount must be a positive number" });
+    }
+
+    let accountIdToUse = null;
+    if (fundedFrom === RECEIPT_FUNDED_CUSTOMER_BALANCE) {
+      if (!order.customerId) {
+        return res.status(400).json({
+          message: "Order must have a customer to settle payment from customer advance",
+        });
+      }
+    } else if (accountId !== undefined && accountId !== null && accountId !== "") {
+      const paymentAccount = db
+        .prepare("SELECT id, currencyCode FROM accounts WHERE id = ?;")
+        .get(Number(accountId));
       if (!paymentAccount) {
         return res.status(400).json({ message: "Payment account not found" });
       }
       if (paymentAccount.currencyCode !== order.toCurrency) {
-        return res.status(400).json({ 
-          message: `Payment account currency (${paymentAccount.currencyCode}) does not match order toCurrency (${order.toCurrency})` 
+        return res.status(400).json({
+          message: `Payment account currency (${paymentAccount.currencyCode}) does not match order toCurrency (${order.toCurrency})`,
         });
       }
-      if (!requireAccountAccess(req, res, "order.account", Number(accountId), "You do not have access to use this order account")) {
+      if (
+        !requireAccountAccess(
+          req,
+          res,
+          "order.account",
+          Number(accountId),
+          "You do not have access to use this order account",
+        )
+      ) {
         return;
       }
       accountIdToUse = Number(accountId);
+    } else if (existingPayment.accountId) {
+      accountIdToUse = existingPayment.accountId;
+    } else {
+      return res.status(400).json({ message: "Account ID is required for cash payment" });
     }
 
-    const paymentAmount = amount !== undefined ? parseFloat(amount) : existingPayment.amount;
-
-    // Update payment
     db.prepare(
-      `UPDATE order_payments 
-       SET imagePath = @imagePath, amount = @amount, accountId = @accountId
-       WHERE id = @id;`
+      `UPDATE order_payments
+       SET imagePath = @imagePath, amount = @amount, accountId = @accountId, fundedFrom = @fundedFrom
+       WHERE id = @id;`,
     ).run({
       id: paymentId,
       imagePath,
       amount: paymentAmount,
       accountId: accountIdToUse,
+      fundedFrom,
     });
 
     const updatedPayment = db
@@ -3414,7 +3615,11 @@ export const confirmPayment = (req, res, next) => {
     }
 
     // Check permissions - get order info (fetch all fields needed for later use)
-    const order = db.prepare("SELECT id, createdBy, handlerId, fromCurrency, toCurrency, amountBuy, amountSell, paymentFlow, actualAmountBuy, rate, actualRate, status FROM orders WHERE id = ?;").get(payment.orderId);
+    const order = db
+      .prepare(
+        "SELECT id, createdBy, handlerId, customerId, fromCurrency, toCurrency, amountBuy, amountSell, paymentFlow, actualAmountBuy, rate, actualRate, status FROM orders WHERE id = ?;",
+      )
+      .get(payment.orderId);
     if (userId && order) {
       const userPermissions = getUserPermissions(userId);
       const isUserAdmin = isAdmin(userPermissions);
@@ -3428,33 +3633,56 @@ export const confirmPayment = (req, res, next) => {
       return res.status(401).json({ message: "User ID is required" });
     }
 
-    if (!payment.accountId) {
-      return res.status(400).json({ message: "Payment must have an account before confirmation" });
-    }
-    if (!requireAccountAccess(req, res, "order.account", payment.accountId, "You do not have access to confirm this order account")) {
-      return;
+    if (isCustomerBalanceFunded(payment)) {
+      if (!order?.customerId) {
+        return res.status(400).json({
+          message: "Order must have a customer to settle payment from customer advance",
+        });
+      }
+      try {
+        assertAllocatableOwed(order.customerId, order.toCurrency, payment.amount, paymentId);
+      } catch (err) {
+        if (err.status) {
+          return res.status(err.status).json({ message: err.message });
+        }
+        throw err;
+      }
+    } else {
+      if (!payment.accountId) {
+        return res.status(400).json({ message: "Payment must have an account before confirmation" });
+      }
+      if (
+        !requireAccountAccess(
+          req,
+          res,
+          "order.account",
+          payment.accountId,
+          "You do not have access to confirm this order account",
+        )
+      ) {
+        return;
+      }
     }
 
-    // Update payment status to confirmed
     db.prepare("UPDATE order_payments SET status = 'confirmed' WHERE id = ?;").run(paymentId);
 
-    // Update account balance
-    const accountForBalance = db.prepare("SELECT balance FROM accounts WHERE id = ?;").get(payment.accountId);
-    if (accountForBalance) {
-      const oldBalance = accountForBalance.balance;
-      const newBalance = oldBalance - payment.amount;
-      
-      db.prepare("UPDATE accounts SET balance = ? WHERE id = ?;").run(newBalance, payment.accountId);
-      
-      db.prepare(
-        `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
-         VALUES (?, 'withdraw', ?, ?, ?);`
-      ).run(
-        payment.accountId,
-        payment.amount,
-        `Order #${payment.orderId} - Payment to customer`,
-        new Date().toISOString()
-      );
+    if (!isCustomerBalanceFunded(payment) && payment.accountId) {
+      const accountForBalance = db
+        .prepare("SELECT balance FROM accounts WHERE id = ?;")
+        .get(payment.accountId);
+      if (accountForBalance) {
+        const newBalance = accountForBalance.balance - payment.amount;
+        db.prepare("UPDATE accounts SET balance = ? WHERE id = ?;").run(newBalance, payment.accountId);
+        db.prepare(
+          `INSERT INTO account_transactions (accountId, type, amount, description, createdAt)
+           VALUES (?, 'withdraw', ?, ?, ?);`,
+        ).run(
+          payment.accountId,
+          payment.amount,
+          `Order #${payment.orderId} - Payment to customer`,
+          new Date().toISOString(),
+        );
+      }
     }
 
     // Get updated payment

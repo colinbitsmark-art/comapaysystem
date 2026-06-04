@@ -681,10 +681,6 @@ export const withdrawFunds = (req, res, next) => {
     }
 
     const withdrawAmount = parseFloat(amount);
-    if (account.balance < withdrawAmount) {
-      return res.status(400).json({ message: "Insufficient funds" });
-    }
-
     const newBalance = account.balance - withdrawAmount;
     
     db.prepare("UPDATE accounts SET balance = @balance WHERE id = @id;").run({

@@ -352,7 +352,7 @@ export function postOrderLedgerReversal(orderId, reversesBatch, reversalReason, 
 export function notifyCustomerLedger(customerId) {
   if (!customerId) return;
   scheduleCacheSync({
-    scopes: ["customerLedger", "customers"],
+    scopes: ["customerLedger"],
     customerId: Number(customerId),
   });
 }
@@ -397,6 +397,24 @@ export function purgeAutoLedgerEntriesForCustomer(customerId) {
        WHERE customerId = ? AND source IN ('order', 'order_reversal');`,
     )
     .all(customerId)
+    .map((r) => r.id);
+
+  if (ids.length === 0) return 0;
+
+  const placeholders = ids.map(() => "?").join(",");
+  db.prepare(`DELETE FROM customer_ledger_entry_changes WHERE entryId IN (${placeholders});`).run(...ids);
+  const result = db
+    .prepare(`DELETE FROM customer_ledger_entries WHERE id IN (${placeholders});`)
+    .run(...ids);
+  return result.changes;
+}
+
+/** Remove all ledger rows tied to an order so orders(id) can be deleted (FK on orderId). */
+export function purgeLedgerEntriesForOrder(orderId) {
+  assertLedgerSchema();
+  const ids = db
+    .prepare("SELECT id FROM customer_ledger_entries WHERE orderId = ?;")
+    .all(orderId)
     .map((r) => r.id);
 
   if (ids.length === 0) return 0;
@@ -502,7 +520,7 @@ export function rebuildCustomerLedgerFromOrders(customerId, createdBy = null) {
   return { ordersProcessed: orders.length };
 }
 
-export function buildAccountStatementRows(customerId, { includeReversals = true } = {}) {
+function buildTradeAccountStatementRows(customerId, { includeReversals = false } = {}) {
   assertLedgerSchema();
 
   const orders = db
@@ -534,20 +552,6 @@ export function buildAccountStatementRows(customerId, { includeReversals = true 
     batchesByOrder[b.orderId].push(b);
   }
 
-  const cancelledOrDeletedOrders = new Set();
-  for (const [orderIdStr, list] of Object.entries(batchesByOrder)) {
-    const orderId = Number(orderIdStr);
-    if (
-      list.some(
-        (b) =>
-          b.source === "order_reversal" &&
-          (b.reversalReason === "cancelled" || b.reversalReason === "deleted"),
-      )
-    ) {
-      cancelledOrDeletedOrders.add(orderId);
-    }
-  }
-
   const rows = [];
 
   for (const order of orders) {
@@ -562,17 +566,9 @@ export function buildAccountStatementRows(customerId, { includeReversals = true 
         if (isReversal && (reason === "cancelled" || reason === "deleted" || reason === "adjusted")) {
           continue;
         }
-        if (!isReversal && cancelledOrDeletedOrders.has(order.id)) {
+        // Hide superseded completion batches only (cancelled/deleted/adjusted/re-completed).
+        if (!isReversal && isBatchReversed(order.id, meta.ledgerBatch)) {
           continue;
-        }
-        if (!isReversal) {
-          const supersededByAdjustment = orderBatches.some(
-            (r) =>
-              r.source === "order_reversal" &&
-              r.reversesBatch === meta.ledgerBatch &&
-              r.reversalReason === "adjusted",
-          );
-          if (supersededByAdjustment) continue;
         }
       }
 
@@ -617,8 +613,9 @@ export function buildAccountStatementRows(customerId, { includeReversals = true 
         : `Order #${order.id}`;
 
       rows.push({
+        activity: "trade",
+        activityDate: order.orderDate,
         orderId: order.id,
-        orderDate: order.orderDate,
         description,
         currencyPair: `${order.fromCurrency}/${order.toCurrency}`,
         exchangeRate: order.actualRate ?? order.rate,
@@ -638,10 +635,70 @@ export function buildAccountStatementRows(customerId, { includeReversals = true 
   }
 
   rows.sort((a, b) => {
-    const da = new Date(a.orderDate).getTime();
-    const db_ = new Date(b.orderDate).getTime();
+    const da = new Date(a.activityDate).getTime();
+    const db_ = new Date(b.activityDate).getTime();
     if (db_ !== da) return db_ - da;
     return (b.ledgerBatch ?? 0) - (a.ledgerBatch ?? 0);
+  });
+
+  return rows;
+}
+
+function buildFundingAccountStatementRows(customerId) {
+  assertLedgerSchema();
+
+  const entries = db
+    .prepare(
+      `SELECT e.id, e.currencyCode, e.type, e.amount, e.description,
+              COALESCE(e.entryDate, e.createdAt) AS activityDate,
+              u.name AS createdByName, acc.name AS accountName
+       FROM customer_ledger_entries e
+       LEFT JOIN users u ON u.id = e.createdBy
+       LEFT JOIN accounts acc ON acc.id = e.accountId
+       WHERE e.customerId = ? AND e.source = 'manual' AND e.deletedAt IS NULL
+       ORDER BY COALESCE(e.entryDate, e.createdAt) DESC, e.id DESC;`,
+    )
+    .all(customerId);
+
+  return entries.map((e) => ({
+    activity: "funding",
+    entryId: e.id,
+    activityDate: e.activityDate,
+    description: e.description || (e.type === "credit" ? "Deposit" : "Withdrawal"),
+    fundingType: e.type === "credit" ? "deposit" : "withdrawal",
+    currencyCode: e.currencyCode,
+    amount: e.amount,
+    accountName: e.accountName ?? null,
+    createdByName: e.createdByName ?? null,
+    isReversal: false,
+  }));
+}
+
+/**
+ * Combined account statement: manual funding + order trades.
+ * @param {'all'|'funding'|'trade'} activity
+ */
+export function buildAccountStatementRows(
+  customerId,
+  { activity = "all", includeReversals = false } = {},
+) {
+  const normalized = activity === "funding" || activity === "trade" ? activity : "all";
+  let rows = [];
+
+  if (normalized === "all" || normalized === "trade") {
+    rows = rows.concat(buildTradeAccountStatementRows(customerId, { includeReversals }));
+  }
+  if (normalized === "all" || normalized === "funding") {
+    rows = rows.concat(buildFundingAccountStatementRows(customerId));
+  }
+
+  rows.sort((a, b) => {
+    const da = new Date(a.activityDate).getTime();
+    const db_ = new Date(b.activityDate).getTime();
+    if (db_ !== da) return db_ - da;
+    const aTrade = a.activity === "trade" ? a.orderId : a.entryId;
+    const bTrade = b.activity === "trade" ? b.orderId : b.entryId;
+    return bTrade - aTrade;
   });
 
   return rows;

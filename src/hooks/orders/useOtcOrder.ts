@@ -5,6 +5,7 @@ import {
   useUpdateOrderMutation,
   useProcessOrderMutation,
   useGetOrderDetailsQuery,
+  useGetCustomerLedgerBalanceQuery,
   useAddReceiptMutation,
   useAddPaymentMutation,
   useDeleteReceiptMutation,
@@ -34,11 +35,13 @@ interface OtcForm {
 interface OtcReceipt {
   amount: string;
   accountId: string;
+  fundedFrom?: "cash" | "customer_balance";
 }
 
 interface OtcPayment {
   amount: string;
   accountId: string;
+  fundedFrom?: "cash" | "customer_balance";
 }
 
 export function useOtcOrder(
@@ -125,15 +128,21 @@ export function useOtcOrder(
       const receipts = Array.isArray(otcOrderDetails.receipts) ? otcOrderDetails.receipts : [];
       const payments = Array.isArray(otcOrderDetails.payments) ? otcOrderDetails.payments : [];
       
-      setOtcReceipts(receipts.map(r => ({
-        amount: String(r.amount || ""),
-        accountId: r.accountId ? String(r.accountId) : "",
-      })));
+      setOtcReceipts(
+        receipts.map((r) => ({
+          amount: String(r.amount || ""),
+          accountId: r.accountId ? String(r.accountId) : "",
+          fundedFrom: r.fundedFrom === "customer_balance" ? "customer_balance" : "cash",
+        })),
+      );
       
-      setOtcPayments(payments.map(p => ({
-        amount: String(p.amount || ""),
-        accountId: p.accountId ? String(p.accountId) : "",
-      })));
+      setOtcPayments(
+        payments.map((p) => ({
+          amount: String(p.amount || ""),
+          accountId: p.accountId ? String(p.accountId) : "",
+          fundedFrom: p.fundedFrom === "customer_balance" ? "customer_balance" : "cash",
+        })),
+      );
       
       // Load profit and service charges from separate tables (like receipts/payments)
       // Check confirmed entries first, then fall back to order table fields
@@ -367,11 +376,15 @@ export function useOtcOrder(
       alert("Handler is required");
       return;
     }
-    const buyAccountId = otcReceipts.find((r) => r.accountId)?.accountId
-      ? Number(otcReceipts.find((r) => r.accountId)!.accountId)
+    const buyAccountId = otcReceipts.find(
+      (r) => r.accountId && (r.fundedFrom ?? "cash") === "cash",
+    )?.accountId
+      ? Number(otcReceipts.find((r) => r.accountId && (r.fundedFrom ?? "cash") === "cash")!.accountId)
       : null;
-    const sellAccountId = otcPayments.find((p) => p.accountId)?.accountId
-      ? Number(otcPayments.find((p) => p.accountId)!.accountId)
+    const sellAccountId = otcPayments.find(
+      (p) => p.accountId && (p.fundedFrom ?? "cash") === "cash",
+    )?.accountId
+      ? Number(otcPayments.find((p) => p.accountId && (p.fundedFrom ?? "cash") === "cash")!.accountId)
       : null;
     const buyAccountIdValue: number | undefined = buyAccountId === null ? undefined : buyAccountId;
     const sellAccountIdValue: number | undefined = sellAccountId === null ? undefined : sellAccountId;
@@ -473,27 +486,31 @@ export function useOtcOrder(
       // Create receipts (without image for OTC orders)
       for (const receipt of otcReceipts) {
         const receiptAmount = Number(receipt.amount) || 0;
-        if (receiptAmount !== 0 && receipt.accountId) {
-          await addReceipt({
-            id: orderId,
-            amount: receiptAmount,
-            accountId: Number(receipt.accountId),
-            imagePath: "", // Empty for OTC orders - backend will use placeholder
-          } as any).unwrap();
-        }
+        if (receiptAmount <= 0) continue;
+        const fundedFrom = receipt.fundedFrom ?? "cash";
+        if (fundedFrom === "cash" && !receipt.accountId) continue;
+        await addReceipt({
+          id: orderId,
+          amount: receiptAmount,
+          accountId: fundedFrom === "cash" ? Number(receipt.accountId) : undefined,
+          fundedFrom,
+          imagePath: "",
+        } as any).unwrap();
       }
 
       // Create payments (without image for OTC orders)
       for (const payment of otcPayments) {
         const paymentAmount = Number(payment.amount) || 0;
-        if (paymentAmount !== 0 && payment.accountId) {
-          await addPayment({
-            id: orderId,
-            amount: paymentAmount,
-            accountId: Number(payment.accountId),
-            imagePath: "", // Empty for OTC orders - backend will use placeholder
-          } as any).unwrap();
-        }
+        if (paymentAmount <= 0) continue;
+        const fundedFrom = payment.fundedFrom ?? "cash";
+        if (fundedFrom === "cash" && !payment.accountId) continue;
+        await addPayment({
+          id: orderId,
+          amount: paymentAmount,
+          accountId: fundedFrom === "cash" ? Number(payment.accountId) : undefined,
+          fundedFrom,
+          imagePath: "",
+        } as any).unwrap();
       }
 
       closeOtcModal();
@@ -522,36 +539,61 @@ export function useOtcOrder(
       return;
     }
 
-    const buyAccountId =
-      otcReceipts.find((r) => r.accountId)?.accountId
-        ? Number(otcReceipts.find((r) => r.accountId)!.accountId)
-        : accounts.find((a) => a.currencyCode === otcForm.fromCurrency)?.id;
-    const sellAccountId =
-      otcPayments.find((p) => p.accountId)?.accountId
-        ? Number(otcPayments.find((p) => p.accountId)!.accountId)
-        : accounts.find((a) => a.currencyCode === otcForm.toCurrency)?.id;
+    const cashReceipt = otcReceipts.find(
+      (r) => r.accountId && (r.fundedFrom ?? "cash") === "cash",
+    );
+    const buyAccountId = cashReceipt?.accountId
+      ? Number(cashReceipt.accountId)
+      : accounts.find((a) => a.currencyCode === otcForm.fromCurrency)?.id;
+    const cashPayment = otcPayments.find(
+      (p) => p.accountId && (p.fundedFrom ?? "cash") === "cash",
+    );
+    const sellAccountId = cashPayment?.accountId
+      ? Number(cashPayment.accountId)
+      : accounts.find((a) => a.currencyCode === otcForm.toCurrency)?.id;
     const buyAccountIdValue = buyAccountId ?? undefined;
-    const sellAccountIdValue = sellAccountId ?? undefined;
-    if (!buyAccountId || !sellAccountId) {
-      alert("Please select accounts for both From and To currencies before completing.");
+    const sellAccountIdValue = cashPayment ? (sellAccountId ?? undefined) : undefined;
+    const hasValidReceipt = otcReceipts.some((r) => {
+      const amt = Number(r.amount) || 0;
+      if (amt <= 0) return false;
+      return (r.fundedFrom ?? "cash") === "customer_balance" || !!r.accountId;
+    });
+    const hasValidPayment = otcPayments.some((p) => {
+      const amt = Number(p.amount) || 0;
+      if (amt <= 0) return false;
+      return (p.fundedFrom ?? "cash") === "customer_balance" || !!p.accountId;
+    });
+    if (!hasValidReceipt) {
+      alert("Add at least one receipt with amount (prepaid balance or cash account).");
+      return;
+    }
+    if (!hasValidPayment) {
+      alert("Add at least one payment with amount (customer advance Bal or cash account).");
+      return;
+    }
+    if (cashPayment && !sellAccountId) {
+      alert("Please select a payment account for cash payout before completing.");
       return;
     }
 
-    // Validate that all receipts with amounts have accounts selected
-    const receiptsWithoutAccounts = otcReceipts.filter(
-      (r) => (Number(r.amount) || 0) > 0 && !r.accountId
-    );
+    const receiptsWithoutAccounts = otcReceipts.filter((r) => {
+      const amt = Number(r.amount) || 0;
+      if (amt <= 0) return false;
+      return (r.fundedFrom ?? "cash") === "cash" && !r.accountId;
+    });
     if (receiptsWithoutAccounts.length > 0) {
-      alert("All receipts with amounts must have an account selected. Please select accounts for all receipts with amounts.");
+      alert("Cash receipt lines need a company account selected.");
       return;
     }
 
     // Validate that all payments with amounts have accounts selected
-    const paymentsWithoutAccounts = otcPayments.filter(
-      (p) => (Number(p.amount) || 0) > 0 && !p.accountId
-    );
+    const paymentsWithoutAccounts = otcPayments.filter((p) => {
+      const amt = Number(p.amount) || 0;
+      if (amt <= 0) return false;
+      return (p.fundedFrom ?? "cash") === "cash" && !p.accountId;
+    });
     if (paymentsWithoutAccounts.length > 0) {
-      alert("All payments with amounts must have an account selected. Please select accounts for all payments with amounts.");
+      alert("Cash payment lines need a company account selected.");
       return;
     }
 
@@ -664,31 +706,33 @@ export function useOtcOrder(
       // Create and confirm receipts
       for (const receipt of otcReceipts) {
         const receiptAmount = Number(receipt.amount) || 0;
-        if (receiptAmount !== 0 && receipt.accountId) {
-          const receiptResult = await addReceipt({
-            id: orderId,
-            amount: receiptAmount,
-            accountId: Number(receipt.accountId),
-            imagePath: "",
-          } as any).unwrap();
-          // Confirm receipt immediately for OTC orders
-          await confirmReceipt((receiptResult as any).id).unwrap();
-        }
+        if (receiptAmount <= 0) continue;
+        const fundedFrom = receipt.fundedFrom ?? "cash";
+        if (fundedFrom === "cash" && !receipt.accountId) continue;
+        const receiptResult = await addReceipt({
+          id: orderId,
+          amount: receiptAmount,
+          accountId: fundedFrom === "cash" ? Number(receipt.accountId) : undefined,
+          fundedFrom,
+          imagePath: "",
+        } as any).unwrap();
+        await confirmReceipt((receiptResult as { id: number }).id).unwrap();
       }
 
       // Create and confirm payments
       for (const payment of otcPayments) {
         const paymentAmount = Number(payment.amount) || 0;
-        if (paymentAmount !== 0 && payment.accountId) {
-          const paymentResult = await addPayment({
-            id: orderId,
-            amount: paymentAmount,
-            accountId: Number(payment.accountId),
-            imagePath: "",
-          } as any).unwrap();
-          // Confirm payment immediately for OTC orders
-          await confirmPayment((paymentResult as any).id).unwrap();
-        }
+        if (paymentAmount <= 0) continue;
+        const fundedFrom = payment.fundedFrom ?? "cash";
+        if (fundedFrom === "cash" && !payment.accountId) continue;
+        const paymentResult = await addPayment({
+          id: orderId,
+          amount: paymentAmount,
+          accountId: fundedFrom === "cash" ? Number(payment.accountId) : undefined,
+          fundedFrom,
+          imagePath: "",
+        } as any).unwrap();
+        await confirmPayment((paymentResult as { id: number }).id).unwrap();
       }
 
       // Profit and service charges are now handled in the addOrder/updateOrder call above

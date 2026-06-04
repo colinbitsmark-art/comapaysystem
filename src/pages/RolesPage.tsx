@@ -39,6 +39,17 @@ const ACTION_GROUPS = [
     section: "customers",
     actions: [
       { key: "createCustomer", labelKey: "roles.createCustomer" },
+      { key: "formatCustomerColors", labelKey: "roles.formatCustomerColors" },
+      { key: "updateCustomer", labelKey: "roles.updateCustomer" },
+      { key: "pinCustomers", labelKey: "roles.pinCustomers" },
+      { key: "deleteCustomer", labelKey: "roles.deleteCustomer" },
+      { key: "submitCustomerKyc", labelKey: "roles.submitCustomerKyc" },
+      { key: "approveCustomerKyc", labelKey: "roles.approveCustomerKyc" },
+      { key: "reopenCustomerKyc", labelKey: "roles.reopenCustomerKyc" },
+      { key: "manageKycPolicy", labelKey: "roles.manageKycPolicy" },
+      { key: "viewCustomerLedger", labelKey: "roles.viewCustomerLedger" },
+      { key: "createLedgerDepositWithdraw", labelKey: "roles.createLedgerDepositWithdraw" },
+      { key: "editDeleteCustomerLedger", labelKey: "roles.editDeleteCustomerLedger" },
     ],
   },
   {

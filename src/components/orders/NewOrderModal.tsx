@@ -1,12 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import type { Account, Currency, Tag } from "../../types";
+import type {
+  Account,
+  Currency,
+  CustomerFundingBalanceRow,
+  CustomerLedgerBalanceInfo,
+  Tag,
+} from "../../types";
 import Badge from "../common/Badge";
 import type { UnifiedLine, UnifiedLineKind } from "../../hooks/orders/useUnifiedOrderModal";
 import { CurrencyPairSwapButton } from "./CurrencyPairSwapButton";
 import { AccountSelect } from "../common/AccountSelect";
 import { CustomerSelect } from "../common/CustomerSelect";
 import FileUploadModal from "../common/FileUploadModal";
+import { CustomerFundingSummaryInline } from "./CustomerFundingSummaryInline";
 
 export type NewOrderViewerState = {
   isOpen: boolean;
@@ -62,6 +69,11 @@ type Props = {
   addPresetServiceCharge: (amount: string) => void;
   viewerModal: NewOrderViewerState;
   setViewerModal: (v: NewOrderViewerState) => void;
+  selectedCustomerId?: number | null;
+  prepaidBalance?: CustomerLedgerBalanceInfo;
+  advanceBalance?: CustomerLedgerBalanceInfo;
+  fundingSummary?: CustomerFundingBalanceRow[];
+  fundingSummaryLoading?: boolean;
 };
 
 const kindLabel = (k: UnifiedLineKind, t: (k: string) => string) => {
@@ -78,6 +90,44 @@ const kindLabel = (k: UnifiedLineKind, t: (k: string) => string) => {
       return k;
   }
 };
+
+export function formatLedgerAmount(amount: number) {
+  return amount.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function OrderLineBalanceField({
+  messageKey,
+  amount,
+  currency,
+  variant = "prepaid",
+  t,
+}: {
+  messageKey: string;
+  amount: number;
+  currency: string;
+  variant?: "prepaid" | "advance";
+  t: (key: string, opts?: Record<string, string>) => string;
+}) {
+  const hasFunds = amount > 0;
+  const tone =
+    variant === "advance"
+      ? hasFunds
+        ? "border-amber-200 bg-amber-50 text-amber-900"
+        : "border-slate-200 bg-slate-50 text-slate-600"
+      : hasFunds
+        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+        : "border-slate-200 bg-slate-50 text-slate-600";
+  return (
+    <div
+      className={`flex min-h-[34px] min-w-[240px] flex-[1_1_240px] items-center rounded-lg border px-3 py-1.5 text-sm ${tone}`}
+    >
+      {t(messageKey, { amount: formatLedgerAmount(amount), currency })}
+    </div>
+  );
+}
 
 type CurrencySelectorProps = {
   label: string;
@@ -397,6 +447,11 @@ export default function NewOrderModal({
   addPresetServiceCharge,
   viewerModal,
   setViewerModal,
+  selectedCustomerId: selectedCustomerIdProp,
+  prepaidBalance,
+  advanceBalance,
+  fundingSummary = [],
+  fundingSummaryLoading = false,
 }: Props) {
   const { t } = useTranslation();
   const [uploadModalLineId, setUploadModalLineId] = useState<string | null>(null);
@@ -405,6 +460,7 @@ export default function NewOrderModal({
 
   const activeCurrencies = currencies.filter((c) => c.active);
   const selectedCustomerId = (() => {
+    if (selectedCustomerIdProp) return String(selectedCustomerIdProp);
     const match = customers.find((c) => c.name.toLowerCase() === customerName.trim().toLowerCase());
     return match ? String(match.id) : "";
   })();
@@ -468,57 +524,67 @@ export default function NewOrderModal({
         </div>
 
         <form className="space-y-5 px-6 py-5" onSubmit={(e) => e.preventDefault()}>
-          {/* Row 1: Customer + Handler */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-end">
-            <div className="min-w-0">
-              <label className="mb-1 block text-sm font-medium text-slate-700">{t("orders.customerName")}</label>
-              <div className="flex items-end gap-2">
-                <CustomerSelect
-                  value={selectedCustomerId}
-                  onChange={(value) => {
-                    const selected = customers.find((c) => c.id === Number(value));
-                    setCustomerName(selected?.name || "");
-                  }}
-                  customers={customers}
-                  placeholder={t("orders.selectCustomer") || "Select customer"}
-                  required
-                  disabled={!!editingOrderId}
-                  t={t}
-                />
-                {!editingOrderId ? (
-                  <button
-                    type="button"
-                    onClick={onOpenCreateCustomer}
-                    className="rounded-lg border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50 whitespace-nowrap"
-                  >
-                    {t("orders.createNewCustomer")}
-                  </button>
-                ) : null}
+          {/* Row 1: Customer + Handler (hints below so handler stays aligned with customer select) */}
+          <div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-end">
+              <div className="min-w-0">
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  {t("orders.customerName")}
+                </label>
+                <div className="flex items-end gap-2">
+                  <CustomerSelect
+                    value={selectedCustomerId}
+                    onChange={(value) => {
+                      const selected = customers.find((c) => c.id === Number(value));
+                      setCustomerName(selected?.name || "");
+                    }}
+                    customers={customers}
+                    placeholder={t("orders.selectCustomer") || "Select customer"}
+                    required
+                    disabled={!!editingOrderId}
+                    t={t}
+                  />
+                  {!editingOrderId ? (
+                    <button
+                      type="button"
+                      onClick={onOpenCreateCustomer}
+                      className="rounded-lg border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50 whitespace-nowrap"
+                    >
+                      {t("orders.createNewCustomer")}
+                    </button>
+                  ) : null}
+                </div>
               </div>
-              {editingOrderId ? (
-                <p className="mt-1 text-xs text-slate-500">{t("orders.customerNameLockedWhenEditing")}</p>
-              ) : null}
+              <div className="min-w-0">
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  {t("orders.handler")}{" "}
+                  <span className="text-xs font-normal text-slate-400">({t("common.optional")})</span>
+                </label>
+                <select
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+                  value={handlerId}
+                  onChange={(e) => setHandlerId(e.target.value)}
+                >
+                  <option value="">{t("orders.noHandler")}</option>
+                  {users
+                    .filter((u) => u.role !== "admin")
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
             </div>
-            <div className="min-w-0">
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                {t("orders.handler")}{" "}
-                <span className="text-xs font-normal text-slate-400">({t("common.optional")})</span>
-              </label>
-              <select
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
-                value={handlerId}
-                onChange={(e) => setHandlerId(e.target.value)}
-              >
-                <option value="">{t("orders.noHandler")}</option>
-                {users
-                  .filter((u) => u.role !== "admin")
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-              </select>
-            </div>
+            {editingOrderId ? (
+              <p className="mt-1 text-xs text-slate-500">{t("orders.customerNameLockedWhenEditing")}</p>
+            ) : null}
+            {selectedCustomerId ? (
+              <CustomerFundingSummaryInline
+                items={fundingSummary}
+                loading={fundingSummaryLoading}
+              />
+            ) : null}
           </div>
 
           {/* Row 2: Currency pair */}
@@ -640,7 +706,7 @@ export default function NewOrderModal({
                   key={line.localId}
                   className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3"
                 >
-                  <span className="text-xs font-semibold uppercase text-slate-500">
+                  <span className="shrink-0 whitespace-nowrap text-xs font-semibold uppercase text-slate-500">
                     {kindLabel(line.kind, t)}
                   </span>
 
@@ -722,18 +788,111 @@ export default function NewOrderModal({
                       ))}
                     </select>
                   )}
-                  <div className="min-w-[240px] flex-1">
-                    <AccountSelect
-                      value={line.accountId}
-                      onChange={(accountId) => updateLine(line.localId, { accountId })}
-                      accounts={accountOptionsForLine(line)}
-                      placeholder={isServiceCharge && !line.serviceChargeCurrency ? t("orders.selectCurrencyFirst") : t("orders.selectAccount")}
-                      showBalance
-                      showSelectedBalanceBelow={false}
-                      showOptionBalanceInline
-                      t={t}
-                    />
-                  </div>
+                  {line.kind === "receipt" && (
+                    <div className="flex shrink-0 rounded-md border border-slate-200 overflow-hidden text-xs font-semibold">
+                      <button
+                        type="button"
+                        className={`px-2.5 py-1.5 transition-colors ${
+                          (line.fundedFrom ?? "cash") === "cash"
+                            ? "bg-slate-700 text-white"
+                            : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                        title={t("orders.receiptFundedCash")}
+                        onClick={() => updateLine(line.localId, { fundedFrom: "cash" })}
+                      >
+                        {t("orders.receiptFundedCashShort")}
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-2.5 py-1.5 transition-colors ${
+                          (line.fundedFrom ?? "cash") === "customer_balance"
+                            ? "bg-slate-700 text-white"
+                            : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                        title={t("orders.receiptFundedBalance")}
+                        onClick={() =>
+                          updateLine(line.localId, {
+                            fundedFrom: "customer_balance",
+                            accountId: "",
+                          })
+                        }
+                      >
+                        {t("orders.receiptFundedBalanceShort")}
+                      </button>
+                    </div>
+                  )}
+                  {line.kind === "payment" && (
+                    <div className="flex shrink-0 rounded-md border border-slate-200 overflow-hidden text-xs font-semibold">
+                      <button
+                        type="button"
+                        className={`px-2.5 py-1.5 transition-colors ${
+                          (line.fundedFrom ?? "cash") === "cash"
+                            ? "bg-slate-700 text-white"
+                            : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                        title={t("orders.paymentFundedCash")}
+                        onClick={() => updateLine(line.localId, { fundedFrom: "cash" })}
+                      >
+                        {t("orders.paymentFundedCashShort")}
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-2.5 py-1.5 transition-colors ${
+                          (line.fundedFrom ?? "cash") === "customer_balance"
+                            ? "bg-slate-700 text-white"
+                            : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                        title={t("orders.paymentFundedBalance")}
+                        onClick={() =>
+                          updateLine(line.localId, {
+                            fundedFrom: "customer_balance",
+                            accountId: "",
+                          })
+                        }
+                      >
+                        {t("orders.paymentFundedBalanceShort")}
+                      </button>
+                    </div>
+                  )}
+                  {line.kind === "receipt" &&
+                    (line.fundedFrom ?? "cash") === "customer_balance" && (
+                      <OrderLineBalanceField
+                        messageKey="orders.linePrepaidBalance"
+                        amount={prepaidBalance?.allocatable ?? 0}
+                        currency={fromCurrency}
+                        t={t}
+                      />
+                    )}
+                  {line.kind === "payment" &&
+                    (line.fundedFrom ?? "cash") === "customer_balance" && (
+                      <OrderLineBalanceField
+                        messageKey="orders.lineAdvanceBalance"
+                        amount={advanceBalance?.allocatableAdvance ?? 0}
+                        currency={toCurrency}
+                        variant="advance"
+                        t={t}
+                      />
+                    )}
+                  {(line.kind === "service_charge" ||
+                    (line.fundedFrom ?? "cash") === "cash") && (
+                    <div className="min-w-[240px] flex-[1_1_240px] [&_input]:py-1.5 [&_input]:text-sm">
+                      <AccountSelect
+                        value={line.accountId}
+                        onChange={(accountId) => updateLine(line.localId, { accountId })}
+                        accounts={accountOptionsForLine(line)}
+                        placeholder={
+                          isServiceCharge && !line.serviceChargeCurrency
+                            ? t("orders.selectCurrencyFirst")
+                            : t("orders.selectAccount")
+                        }
+                        showBalance
+                        showSelectedBalanceBelow={false}
+                        showOptionBalanceInline
+                        t={t}
+                      />
+                    </div>
+                  )}
+                  <div className="flex shrink-0 items-center gap-2">
                   {line.file || line.serverImagePath ? (
                     <div className="flex flex-wrap gap-1">
                       <button
@@ -803,6 +962,7 @@ export default function NewOrderModal({
                   >
                     +
                   </button>
+                  </div>
                 </div>
                 );
               })}

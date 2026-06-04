@@ -8,6 +8,12 @@ import {
   generateKycDocumentFilename,
 } from "../utils/fileStorage.js";
 import { scheduleCacheSync } from "../services/cacheSyncBroadcast.js";
+import { getUserPermissions } from "../utils/orderPermissions.js";
+import {
+  canSubmitCustomerKyc,
+  canApproveCustomerKyc,
+  canReopenCustomerKyc,
+} from "../utils/customerPermissions.js";
 
 export const KYC_SCHEMA_KEY_INDIVIDUAL = "kyc_customer_schema_individual";
 export const KYC_SCHEMA_KEY_CORPORATE = "kyc_customer_schema_corporate";
@@ -118,6 +124,29 @@ function ensureDefaultSchemaRow(customerType) {
       updatedAt: now,
     });
   }
+}
+
+/** Active KYC schema: v2 published builder schema, else legacy v1 settings schema. */
+export function resolveKycSchema(customerType) {
+  const v2 = getActiveSchemaForCustomerType(customerType);
+  if (v2?.schema) {
+    return { ...v2.schema, version: v2.version };
+  }
+  return parseStoredSchema(customerType);
+}
+
+function kycDocumentCodes(schema) {
+  if (schema?.schemaType === "v2" && Array.isArray(schema.documents)) {
+    return schema.documents.map((d) => d.code).filter(Boolean);
+  }
+  return (schema?.requiredDocuments || []).map((d) => d.code).filter(Boolean);
+}
+
+function kycRequiredDocumentCodes(schema) {
+  if (schema?.schemaType === "v2" && Array.isArray(schema.documents)) {
+    return schema.documents.filter((d) => d.required !== false).map((d) => d.code).filter(Boolean);
+  }
+  return (schema?.requiredDocuments || []).map((d) => d.code).filter(Boolean);
 }
 
 export function parseStoredSchema(customerType) {
@@ -419,9 +448,10 @@ export const updateCustomerKyc = (req, res, next) => {
       return res.status(404).json({ message: "Customer not found" });
     }
     const customerType = normalizeKycCustomerType(customer.customerType);
-    const schema = parseStoredSchema(customerType);
+    const schema = resolveKycSchema(customerType);
     const profile = getOrCreateProfile(customerId, schema.version, customerType);
     const { answers: rawAnswers, status: nextStatus, rejectionReason } = req.body || {};
+    const userPermissions = getUserPermissions(userId);
 
     let answers = {};
     try {
@@ -442,6 +472,36 @@ export const updateCustomerKyc = (req, res, next) => {
       return res.status(400).json({ message: "Invalid status" });
     }
 
+    const reopeningLocked =
+      status === "draft" && (profile.status === "approved" || profile.status === "rejected");
+    if (reopeningLocked && !canReopenCustomerKyc(userPermissions, userId)) {
+      return res.status(403).json({ message: "You do not have permission to reopen KYC for editing" });
+    }
+
+    if ((status === "approved" || status === "rejected") && !canApproveCustomerKyc(userPermissions, userId)) {
+      return res.status(403).json({ message: "You do not have permission to review KYC" });
+    }
+
+    const touchesSubmission =
+      (rawAnswers &&
+        typeof rawAnswers === "object" &&
+        Object.keys(rawAnswers).length > 0) ||
+      status === "submitted" ||
+      (status === "draft" &&
+        !reopeningLocked &&
+        (profile.status === "draft" || profile.status === "rejected"));
+    if (touchesSubmission && !canSubmitCustomerKyc(userPermissions, userId)) {
+      return res.status(403).json({ message: "You do not have permission to submit KYC" });
+    }
+
+    if (profile.status === "submitted" && status === "submitted" && rawAnswers) {
+      if (!canApproveCustomerKyc(userPermissions, userId)) {
+        return res.status(403).json({
+          message: "Submitted KYC cannot be edited without review permission",
+        });
+      }
+    }
+
     if (status === "submitted") {
       const { errors, answers: validated } = validateAnswersAgainstSchema(schema, answers);
       if (errors.length) {
@@ -460,7 +520,7 @@ export const updateCustomerKyc = (req, res, next) => {
 
     if (status === "submitted" && profile.status !== "submitted") {
       const docs = mapDocuments(profile.id);
-      const requiredCodes = (schema.requiredDocuments || []).map((d) => d.code);
+      const requiredCodes = kycRequiredDocumentCodes(schema);
       for (const code of requiredCodes) {
         if (!docs.some((d) => d.documentCode === code)) {
           return res.status(400).json({ message: `Missing required document: ${code}` });
@@ -484,7 +544,6 @@ export const updateCustomerKyc = (req, res, next) => {
       }
     }
 
-    // Allow reopening an approved or rejected profile back to draft (admin action)
     if (status === "draft" && (profile.status === "approved" || profile.status === "rejected")) {
       submittedAt = null;
       submittedBy = null;
@@ -571,8 +630,8 @@ export const uploadCustomerKycDocument = (req, res, next) => {
       return res.status(400).json({ message: "File and documentCode are required" });
     }
 
-    const schema = parseStoredSchema(customerType);
-    const allowedCodes = new Set((schema.requiredDocuments || []).map((d) => d.code));
+    const schema = resolveKycSchema(customerType);
+    const allowedCodes = new Set(kycDocumentCodes(schema));
     if (!allowedCodes.has(documentCode)) {
       return res.status(400).json({ message: "Unknown document code for current KYC policy" });
     }

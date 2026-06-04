@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, memo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 
 interface SearchableSelectProps<T extends { id: number; name: string }> {
   value: number | null;
@@ -7,6 +7,8 @@ interface SearchableSelectProps<T extends { id: number; name: string }> {
   placeholder: string;
   label: string;
   allOptionLabel: string;
+  /** Override visible label and search text (e.g. append currency to account name). */
+  getOptionLabel?: (option: T) => string;
 }
 
 /**
@@ -19,7 +21,12 @@ function SearchableSelectComponent<T extends { id: number; name: string }>({
   placeholder,
   label,
   allOptionLabel,
+  getOptionLabel,
 }: SearchableSelectProps<T>) {
+  const labelFor = useCallback(
+    (option: T) => (getOptionLabel ? getOptionLabel(option) : option.name),
+    [getOptionLabel],
+  );
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -31,8 +38,8 @@ function SearchableSelectComponent<T extends { id: number; name: string }>({
   const filteredOptions = useMemo(() => {
     if (!searchTerm.trim()) return options;
     const term = searchTerm.toLowerCase();
-    return options.filter((option) => option.name.toLowerCase().includes(term));
-  }, [options, searchTerm]);
+    return options.filter((option) => labelFor(option).toLowerCase().includes(term));
+  }, [options, searchTerm, labelFor]);
 
   // Get all options including "All" option
   const allOptions = useMemo(() => {
@@ -41,7 +48,7 @@ function SearchableSelectComponent<T extends { id: number; name: string }>({
 
   // Get selected option name
   const selectedOption = options.find((opt) => opt.id === value);
-  const displayValue = selectedOption ? selectedOption.name : "";
+  const displayValue = selectedOption ? labelFor(selectedOption) : "";
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -181,7 +188,7 @@ function SearchableSelectComponent<T extends { id: number; name: string }>({
                   : "text-slate-700 hover:bg-slate-50"
               }`}
             >
-              {option.name}
+              {labelFor(option)}
             </div>
           ))}
           {filteredOptions.length === 0 && searchTerm.trim() && (

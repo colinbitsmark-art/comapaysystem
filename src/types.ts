@@ -100,6 +100,30 @@ export interface Customer {
   customerType?: CustomerType;
   displayBgColor?: string | null;
   displayTextColor?: string | null;
+  /** Pinned to top of customer list (team-wide; pinOrders permission). */
+  pinned?: boolean;
+  pinOrder?: number;
+  /** Funding total in default profit target currency (list API). */
+  listBalance?: number | null;
+  /** Trade P/L in default profit target currency (list API). */
+  listProfitLoss?: number | null;
+  /** KYC review state for list column; draft / no profile omitted. */
+  kycStatus?: "submitted" | "approved" | "rejected" | null;
+}
+
+/** Lightweight customer row for dropdowns (orders, dashboard, ledger). */
+export interface CustomerOption {
+  id: number;
+  name: string;
+  email?: string;
+  phone?: string;
+  customerType?: CustomerType;
+  displayBgColor?: string | null;
+  displayTextColor?: string | null;
+}
+
+export interface CustomerOptionsResponse {
+  customers: CustomerOption[];
 }
 
 export interface CustomerListResponse {
@@ -107,7 +131,11 @@ export interface CustomerListResponse {
   total: number;
   page: number | null;
   limit: number | null;
+  targetCurrency?: string | null;
 }
+
+export type CustomerListSortField = "balance" | "profitLoss";
+export type CustomerListSortDir = "asc" | "desc";
 
 export interface User {
   id: number;
@@ -235,6 +263,8 @@ export interface Order {
   pinOrder?: number;
 }
 
+export type ReceiptFundedFrom = "cash" | "customer_balance";
+
 export interface OrderReceipt {
   id: number;
   orderId: number;
@@ -242,6 +272,7 @@ export interface OrderReceipt {
   amount: number;
   accountId?: number;
   accountName?: string;
+  fundedFrom?: ReceiptFundedFrom;
   status?: "draft" | "confirmed";
   createdAt: string;
 }
@@ -268,6 +299,7 @@ export interface OrderPayment {
   amount: number;
   accountId?: number;
   accountName?: string;
+  fundedFrom?: ReceiptFundedFrom;
   status?: "draft" | "confirmed";
   createdAt: string;
 }
@@ -525,12 +557,22 @@ export interface CustomerLedgerEntry {
   leg?: "receipt" | "payment" | "service_charge" | null;
   ledgerBatch?: number | null;
   reversesBatch?: number | null;
+  accountId?: number | null;
+  accountName?: string | null;
 }
 
-export interface CustomerAccountStatementRow {
-  orderId: number;
-  orderDate: string;
+export type AccountStatementActivityFilter = "all" | "funding" | "trade";
+
+interface CustomerAccountStatementRowBase {
+  activityDate: string;
   description: string;
+  createdByName: string | null;
+  isReversal: boolean;
+}
+
+export interface CustomerAccountStatementTradeRow extends CustomerAccountStatementRowBase {
+  activity: "trade";
+  orderId: number;
   currencyPair: string;
   exchangeRate: number | null;
   creditAmount: number | null;
@@ -539,20 +581,68 @@ export interface CustomerAccountStatementRow {
   debitCurrency: string | null;
   serviceCharges: string | null;
   remarks: string | null;
-  createdByName: string | null;
   ledgerBatch: number;
   source: "order" | "order_reversal";
   reversalReason: "cancelled" | "deleted" | "adjusted" | null;
-  isReversal: boolean;
 }
+
+export interface CustomerAccountStatementFundingRow extends CustomerAccountStatementRowBase {
+  activity: "funding";
+  entryId: number;
+  fundingType: "deposit" | "withdrawal";
+  currencyCode: string;
+  amount: number;
+  accountName: string | null;
+}
+
+export type CustomerAccountStatementRow =
+  | CustomerAccountStatementTradeRow
+  | CustomerAccountStatementFundingRow;
 
 export interface CustomerLedgerEntryInput {
   customerId: number;
   currencyCode: string;
   type: "credit" | "debit";
   amount: number;
+  accountId: number;
   description?: string;
   entryDate?: string | null;
+}
+
+export interface CustomerFundingBalanceRow {
+  currencyCode: string;
+  fundedBalance: number;
+  allocatable: number;
+  allocatableAdvance: number;
+  convertedAmount: number | null;
+}
+
+export interface CustomerFundingBalances {
+  targetCurrency: string | null;
+  totalConverted: number | null;
+  hasUnknownRate: boolean;
+  currencies: CustomerFundingBalanceRow[];
+}
+
+/** @deprecated Use CustomerFundingBalanceRow from funding-balances API */
+export type CustomerFundingSummaryItem = CustomerFundingBalanceRow;
+
+export interface CustomerLedgerBalanceInfo {
+  currencyCode: string;
+  /** Total ledger balance (deposits/withdrawals + trades). */
+  balance: number;
+  /** Net funding after Bal usage on completed orders (not raw manual-only). */
+  fundedBalance: number;
+  /** Manual deposits/withdrawals only, before order Bal consumption. */
+  manualFundedBalance?: number;
+  /** Net from order / reversal postings. */
+  tradePosition: number;
+  /** Prepaid (deposit) available for receipt Bal — funded only. */
+  allocatable: number;
+  reserved: number;
+  /** Advance to settle (funded negative balance) available for payment Bal. */
+  allocatableAdvance?: number;
+  reservedAdvance?: number;
 }
 
 export interface CustomerLedgerChange {
@@ -576,14 +666,36 @@ export interface CustomerLedgerSummary {
 
 export interface CustomerConvertedBalance {
   customerId: number;
-  convertedBalance: number;
+  /** Company P/L from trades only (excludes funding), in target currency. */
+  profitLoss: number;
   hasUnknownRate: boolean;
+  /** Per-currency trade position (customer sign); negate for company view. */
   currencyBreakdown: Array<{ currencyCode: string; balance: number }>;
 }
 
 export interface AllCustomersConvertedBalances {
   targetCurrency: string | null;
   result: CustomerConvertedBalance[];
+}
+
+export interface CustomerFundingConvertedRow {
+  customerId: number;
+  totalBalance: number;
+  hasUnknownRate: boolean;
+  currencyBreakdown: Array<{ currencyCode: string; fundedBalance: number }>;
+}
+
+export interface AllCustomersFundingConverted {
+  targetCurrency: string | null;
+  result: CustomerFundingConvertedRow[];
+}
+
+/** Trade-only P/L for one customer (same logic as customer list Profit/Loss). */
+export interface CustomerTradeProfitLoss {
+  targetCurrency: string | null;
+  profitLoss: number | null;
+  hasUnknownRate: boolean;
+  currencyBreakdown: Array<{ currencyCode: string; balance: number }>;
 }
 
 // Notification types

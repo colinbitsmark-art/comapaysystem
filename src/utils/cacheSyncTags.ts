@@ -54,6 +54,7 @@ export function tagsFromCacheSyncPayload(payload: CacheSyncPayload): AnyInvalida
         break;
       case "customers":
         tags.push({ type: "Customer", id: "LIST" });
+        tags.push({ type: "Customer", id: "OPTIONS" });
         if (customerId != null && Number.isFinite(Number(customerId))) {
           tags.push({ type: "Customer", id: Number(customerId) });
         }
@@ -80,10 +81,17 @@ export function tagsFromCacheSyncPayload(payload: CacheSyncPayload): AnyInvalida
         break;
       case "customerLedger":
         tags.push({ type: "CustomerLedger", id: "CONVERTED-BALANCES" });
+        tags.push({ type: "CustomerLedger", id: "FUNDING-CONVERTED-BALANCES" });
+        tags.push({ type: "Customer", id: "LIST" });
         if (customerId != null && Number.isFinite(Number(customerId))) {
           const cid = Number(customerId);
           tags.push({ type: "CustomerLedger", id: `LIST-${cid}` });
           tags.push({ type: "CustomerLedger", id: `SUMMARY-${cid}` });
+          tags.push({ type: "CustomerLedger", id: `FUNDING-BALANCES-${cid}` });
+          tags.push({ type: "CustomerLedger", id: `FUNDING-SUMMARY-${cid}` });
+          tags.push({ type: "CustomerLedger", id: `TRADE-PROFIT-${cid}` });
+          tags.push({ type: "CustomerLedger", id: `BALANCE-${cid}` });
+          tags.push({ type: "CustomerLedger", id: `ACCOUNT-STATEMENT-${cid}` });
         }
         break;
       case "customerKyc":

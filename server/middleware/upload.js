@@ -6,22 +6,34 @@ import { getUploadsDir } from "../utils/fileStorage.js";
 // Configure multer to store files in memory (used for images/PDFs)
 const storage = multer.memoryStorage();
 
-// File filter to only allow images and PDFs
-const fileFilter = (req, file, cb) => {
-  const allowedMimes = [
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "application/pdf",
-  ];
+const IMAGE_MIMES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+const PDF_MIMES = new Set(["application/pdf", "application/x-pdf"]);
 
-  if (allowedMimes.includes(file.mimetype)) {
+// File filter to only allow images and PDFs (extension fallback for browsers that send octet-stream)
+const fileFilter = (req, file, cb) => {
+  const mime = file.mimetype || "";
+  const ext = path.extname(file.originalname || "").toLowerCase();
+
+  if (IMAGE_MIMES.has(mime) || PDF_MIMES.has(mime)) {
     cb(null, true);
-  } else {
-    cb(new Error("Invalid file type. Only images and PDFs are allowed."), false);
+    return;
   }
+  if (ext === ".pdf" && (!mime || mime === "application/octet-stream")) {
+    cb(null, true);
+    return;
+  }
+  if ([".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext) && (!mime || mime === "application/octet-stream")) {
+    cb(null, true);
+    return;
+  }
+
+  cb(new Error("Invalid file type. Only images and PDFs are allowed."), false);
 };
 
 // Create multer instance for standard uploads

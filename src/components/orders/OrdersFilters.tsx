@@ -2,8 +2,9 @@ import React, { useRef, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Badge from "../common/Badge";
 import { SearchableSelect } from "../common/SearchableSelect";
-import type { OrderFilters, DatePreset } from "../../types/orders";
+import type { OrderFilters, DatePreset, OrderAccountFilterRole } from "../../types/orders";
 import type { OrderStatus, Tag, Customer, User, Account, Currency } from "../../types";
+import { formatAccountSelectLabel } from "../../utils/accounts/accountDisplay";
 
 interface OrdersFiltersProps {
   filters: OrderFilters;
@@ -24,7 +25,7 @@ interface OrdersFiltersProps {
   onTagFilterKeyDown: (e: React.KeyboardEvent) => void;
   // Data
   users: User[];
-  customers: Customer[];
+  customers: import("../../types").CustomerOption[];
   accounts: Account[];
   currencyPairs: string[];
   tags: Tag[];
@@ -67,9 +68,10 @@ export function OrdersFilters({
 
   // Calculate active filter count
   const activeFilterCount = useMemo(() => {
-    return Object.values(filters).filter(
-      v => v !== null && v !== 'all' && v !== 'custom' && (Array.isArray(v) ? v.length > 0 : true)
-    ).length;
+    return Object.entries(filters).filter(([key, v]) => {
+      if (key === 'accountRole') return false;
+      return v !== null && v !== 'all' && v !== 'custom' && v !== 'any' && (Array.isArray(v) ? v.length > 0 : true);
+    }).length;
   }, [filters]);
 
   useEffect(() => {
@@ -183,25 +185,34 @@ export function OrdersFilters({
             t={t}
           />
 
-          {/* Buy Account */}
-          <SearchableSelect
-            value={filters.buyAccountId}
-            onChange={(value) => onFilterChange('buyAccountId', value)}
-            options={accounts}
-            placeholder={t("orders.selectBuyAccount") || "Type to search buy accounts..."}
-            label={t("orders.buyAccount") || "Buy Account"}
-            allOptionLabel={t("orders.all") || "All"}
-          />
-
-          {/* Sell Account */}
-          <SearchableSelect
-            value={filters.sellAccountId}
-            onChange={(value) => onFilterChange('sellAccountId', value)}
-            options={accounts}
-            placeholder={t("orders.selectSellAccount") || "Type to search sell accounts..."}
-            label={t("orders.sellAccount") || "Sell Account"}
-            allOptionLabel={t("orders.all") || "All"}
-          />
+          {/* Account (receipts / payments / service charges) */}
+          <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:items-end">
+            <div className="min-w-0">
+              <SearchableSelect
+                value={filters.accountId}
+                onChange={(value) => onFilterChange('accountId', value)}
+                options={accounts}
+                getOptionLabel={formatAccountSelectLabel}
+                placeholder={t("orders.filterAccountPlaceholder") || "Type to search accounts..."}
+                label={t("orders.filterAccount") || "Account"}
+                allOptionLabel={t("orders.all") || "All"}
+              />
+            </div>
+            <div className="min-w-0">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                {t("orders.accountFilterSide") || "Side"}
+              </label>
+              <select
+                value={filters.accountRole}
+                onChange={(e) => onFilterChange('accountRole', e.target.value as OrderAccountFilterRole)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="any">{t("orders.accountFilterAny") || "Any"}</option>
+                <option value="buy">{t("orders.accountFilterBuy") || "Buy"}</option>
+                <option value="sell">{t("orders.accountFilterSell") || "Sell"}</option>
+              </select>
+            </div>
+          </div>
 
           {/* Status */}
           <div>

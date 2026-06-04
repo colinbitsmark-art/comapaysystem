@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import SectionCard from "../components/common/SectionCard";
@@ -10,24 +10,65 @@ import type { Customer, CustomerBeneficiary, CustomerType } from "../types";
 import {
   useAddCustomerMutation,
   useGetCustomersQuery,
+  useGetCustomerPinsQuery,
+  usePinCustomerMutation,
+  useUnpinCustomerMutation,
+  useReorderPinnedCustomersMutation,
   useUpdateCustomerMutation,
   useDeleteCustomerMutation,
   useAddCustomerBeneficiaryMutation,
   useGetCustomerBeneficiariesQuery,
   useUpdateCustomerBeneficiaryMutation,
   useDeleteCustomerBeneficiaryMutation,
-  useGetAllCustomersConvertedBalancesQuery,
 } from "../services/api";
+import { useAppSelector } from "../app/hooks";
+import { hasActionPermission } from "../utils/permissions";
+import {
+  canViewCustomerLedger,
+  hasAnyCustomerKycPermission,
+  showCustomerActionsColumn,
+} from "../utils/customerPermissions";
+import {
+  loadCustomerListSort,
+  saveCustomerListSort,
+  type CustomerListSortState,
+} from "../utils/customerListSort";
+import { applyVisiblePinReorder } from "../utils/pinReorder";
+import { CustomersFilters } from "../components/customers/CustomersFilters";
+import { useCustomersFilters } from "../hooks/customers/useCustomersFilters";
 
 const PAGE_SIZE = 20;
+
+function kycListStatusClass(status: "submitted" | "approved" | "rejected") {
+  if (status === "approved") return "text-emerald-700";
+  if (status === "rejected") return "text-rose-600";
+  return "text-amber-800";
+}
 
 export default function CustomersPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const authUser = useAppSelector((s) => s.auth.user);
+  const canCreateCustomer = hasActionPermission(authUser, "createCustomer");
+  const canFormatColors =
+    hasActionPermission(authUser, "formatCustomerColors") ||
+    hasActionPermission(authUser, "updateCustomer");
+  const canUpdateCustomer = hasActionPermission(authUser, "updateCustomer");
+  const canDeleteCustomer = hasActionPermission(authUser, "deleteCustomer");
+  const canPinCustomers = hasActionPermission(authUser, "pinCustomers");
+  const canOpenProfile = hasAnyCustomerKycPermission(authUser);
+  const canOpenLedger = canViewCustomerLedger(authUser);
+  const showActionsColumn = showCustomerActionsColumn(authUser);
 
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [listSort, setListSort] = useState<CustomerListSortState | null>(() =>
+    loadCustomerListSort(),
+  );
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const sortMenuRef = useRef<HTMLDivElement | null>(null);
+  const [dragOverPinnedId, setDragOverPinnedId] = useState<number | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
@@ -36,16 +77,68 @@ export default function CustomersPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearch]);
+  }, [debouncedSearch, listSort]);
 
-  const { data: customersData, isLoading } = useGetCustomersQuery({
-    page: currentPage,
-    limit: PAGE_SIZE,
-    search: debouncedSearch || undefined,
-  });
+  const {
+    filters,
+    isExpanded: isFilterExpanded,
+    setIsExpanded: setIsFilterExpanded,
+    queryParams,
+    updateFilter,
+    clearFilters,
+    activeFilterCount,
+  } = useCustomersFilters(
+    currentPage,
+    setCurrentPage,
+    debouncedSearch,
+    listSort?.sortBy,
+    listSort?.sortDir,
+    PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    if (!sortMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
+        setSortMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [sortMenuOpen]);
+
+  const { data: customersData, isLoading } = useGetCustomersQuery(queryParams);
   const customers = customersData?.customers ?? [];
   const totalCustomers = customersData?.total ?? 0;
   const totalPages = Math.ceil(totalCustomers / PAGE_SIZE);
+  const targetCurrency = customersData?.targetCurrency ?? null;
+
+  const { data: pinsData } = useGetCustomerPinsQuery(undefined, {
+    skip: !authUser?.id || !canPinCustomers,
+  });
+  const pinnedCustomerIds = pinsData?.customerIds ?? [];
+  const [pinCustomerMut] = usePinCustomerMutation();
+  const [unpinCustomerMut] = useUnpinCustomerMutation();
+  const [reorderPinnedMut] = useReorderPinnedCustomersMutation();
+
+  const pinnedOnPage = useMemo(
+    () => customers.filter((c) => c.pinned).map((c) => c.id),
+    [customers],
+  );
+  const canReorderPinned =
+    Boolean(canPinCustomers) &&
+    pinnedCustomerIds.length > 1 &&
+    pinnedOnPage.length === pinnedCustomerIds.length &&
+    pinnedCustomerIds.every((id) => pinnedOnPage.includes(id));
+  const showPinHandleColumn = Boolean(canPinCustomers && canReorderPinned);
+  const canPinMore = !canPinCustomers || pinnedCustomerIds.length < 10;
+
+  const applyListSort = useCallback((next: CustomerListSortState | null) => {
+    setListSort(next);
+    saveCustomerListSort(next);
+    setSortMenuOpen(false);
+  }, []);
+
   const [addCustomer, { isLoading: isSaving }] = useAddCustomerMutation();
   const [addCustomerBeneficiary, { isLoading: isSavingBeneficiary }] =
     useAddCustomerBeneficiaryMutation();
@@ -55,7 +148,6 @@ export default function CustomersPage() {
     useDeleteCustomerBeneficiaryMutation();
   const [updateCustomer] = useUpdateCustomerMutation();
   const [deleteCustomer, { isLoading: isDeleting }] = useDeleteCustomerMutation();
-  const { data: convertedBalancesData } = useGetAllCustomersConvertedBalancesQuery();
 
   // 3-dot action menu state
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
@@ -96,19 +188,60 @@ export default function CustomersPage() {
     });
   }, [openMenuId]);
 
-  const balanceByCustomer = Object.fromEntries(
-    (convertedBalancesData?.result ?? []).map((b) => [b.customerId, b])
-  );
-  const targetCurrency = convertedBalancesData?.targetCurrency ?? null;
-
   const fmtBalance = (n: number) =>
     n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  
+
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string; type?: "error" | "warning" | "info" | "success" }>({
     isOpen: false,
     message: "",
     type: "error",
   });
+
+  const handlePinCustomer = useCallback(
+    async (customerId: number) => {
+      try {
+        await pinCustomerMut(customerId).unwrap();
+      } catch (e: unknown) {
+        let msg = t("customers.pinLimitReached");
+        if (e && typeof e === "object" && "data" in e) {
+          const d = (e as { data?: { message?: string } }).data;
+          if (d?.message) msg = d.message;
+        }
+        setAlertModal({ isOpen: true, message: msg, type: "error" });
+      }
+    },
+    [pinCustomerMut, setAlertModal, t],
+  );
+
+  const handleUnpinCustomer = useCallback(
+    async (customerId: number) => {
+      try {
+        await unpinCustomerMut(customerId).unwrap();
+      } catch {
+        /* ignore */
+      }
+    },
+    [unpinCustomerMut],
+  );
+
+  const handleReorderPinnedRows = useCallback(
+    (fromId: number, toId: number) => {
+      const visible = customers.filter((c) => c.pinned).map((c) => c.id);
+      const fromIdx = visible.indexOf(fromId);
+      const toIdx = visible.indexOf(toId);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const newVisible = [...visible];
+      const [removed] = newVisible.splice(fromIdx, 1);
+      newVisible.splice(toIdx, 0, removed);
+      const merged = applyVisiblePinReorder(pinnedCustomerIds, visible, newVisible);
+      void reorderPinnedMut({ customerIds: merged })
+        .unwrap()
+        .catch(() => {
+          /* ignore */
+        });
+    },
+    [customers, pinnedCustomerIds, reorderPinnedMut],
+  );
 
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; message: string; customerId: number | null }>({
     isOpen: false,
@@ -492,15 +625,26 @@ export default function CustomersPage() {
         actions={
           <div className="flex items-center gap-4">
             {isLoading ? t("common.loading") : `${totalCustomers} ${t("customers.records")}`}
-            <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 transition-colors"
-            >
-              {t("customers.createNew")}
-            </button>
+            {canCreateCustomer && (
+              <button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 transition-colors"
+              >
+                {t("customers.createNew")}
+              </button>
+            )}
           </div>
         }
       >
+        <CustomersFilters
+          filters={filters}
+          isExpanded={isFilterExpanded}
+          onToggleExpanded={() => setIsFilterExpanded(!isFilterExpanded)}
+          onFilterChange={updateFilter}
+          onClearFilters={clearFilters}
+          activeFilterCount={activeFilterCount}
+        />
+
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative max-w-md flex-1">
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
@@ -517,17 +661,86 @@ export default function CustomersPage() {
               autoComplete="off"
             />
           </div>
-          <button
-            type="button"
-            onClick={() => { setIsBulkColorMode((v) => !v); setSelectedCustomerIds(new Set()); }}
-            className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-              isBulkColorMode
-                ? "border-blue-400 bg-blue-50 text-blue-700"
-                : "border-slate-200 text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            {t("customers.colorFormat") || "Color format"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative" ref={sortMenuRef}>
+              <button
+                type="button"
+                onClick={() => setSortMenuOpen((v) => !v)}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                  listSort
+                    ? "border-indigo-400 bg-indigo-50 text-indigo-700"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {t("customers.sort")}
+              </button>
+              {sortMenuOpen && (
+                <div className="absolute right-0 z-50 mt-1 w-56 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                  <button
+                    type="button"
+                    className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() =>
+                      applyListSort({ sortBy: "balance", sortDir: "desc" })
+                    }
+                  >
+                    {t("customers.sortBalanceDesc")}
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() =>
+                      applyListSort({ sortBy: "balance", sortDir: "asc" })
+                    }
+                  >
+                    {t("customers.sortBalanceAsc")}
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() =>
+                      applyListSort({ sortBy: "profitLoss", sortDir: "desc" })
+                    }
+                  >
+                    {t("customers.sortProfitLossDesc")}
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() =>
+                      applyListSort({ sortBy: "profitLoss", sortDir: "asc" })
+                    }
+                  >
+                    {t("customers.sortProfitLossAsc")}
+                  </button>
+                  {listSort && (
+                    <>
+                      <div className="my-1 border-t border-slate-100" />
+                      <button
+                        type="button"
+                        className="w-full px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
+                        onClick={() => applyListSort(null)}
+                      >
+                        {t("customers.resetSort")}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            {canFormatColors && (
+              <button
+                type="button"
+                onClick={() => { setIsBulkColorMode((v) => !v); setSelectedCustomerIds(new Set()); }}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                  isBulkColorMode
+                    ? "border-blue-400 bg-blue-50 text-blue-700"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {t("customers.colorFormat") || "Color format"}
+              </button>
+            )}
+          </div>
         </div>
 
         {isBulkColorMode && selectedCustomerIds.size > 0 && (
@@ -593,6 +806,9 @@ export default function CustomersPage() {
           <table className="w-full table-fixed text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-slate-600">
+                {showPinHandleColumn && (
+                  <th className="py-2 w-8" aria-label={t("customers.pinReorderColumn")} />
+                )}
                 {isBulkColorMode && (
                   <th className="py-2 w-8">
                     <input
@@ -608,21 +824,93 @@ export default function CustomersPage() {
                 <th className="py-2 w-1/6">{t("customers.email")}</th>
                 <th className="py-2 w-1/6">{t("customers.phone")}</th>
                 <th className="py-2 w-1/6">{t("customers.remarks") || "Remarks"}</th>
-                <th className="py-2 pr-4 w-1/6">
-                  {t("customerLedger.balance")}
-                  {targetCurrency && <span className="ml-1 text-xs font-normal text-slate-400">({targetCurrency})</span>}
+                <th className="py-2 w-[8%] whitespace-nowrap">{t("customers.kyc")}</th>
+                <th className="py-2 pr-4 w-[7%]">
+                  <div className="flex flex-col leading-tight">
+                    <span>{t("customers.balance")}</span>
+                    {targetCurrency ? (
+                      <span className="text-xs font-normal text-slate-400">({targetCurrency})</span>
+                    ) : null}
+                  </div>
                 </th>
-                <th className="py-2 pl-4 w-12">{t("customers.actions")}</th>
+                <th className="py-2 pr-4 w-[7%]">
+                  <div className="flex flex-col leading-tight">
+                    <span>{t("customers.profitLoss")}</span>
+                    {targetCurrency ? (
+                      <span className="text-xs font-normal text-slate-400">({targetCurrency})</span>
+                    ) : null}
+                  </div>
+                </th>
+                {showActionsColumn && (
+                  <th className="py-2 pl-4 w-12">{t("customers.actions")}</th>
+                )}
               </tr>
             </thead>
             <tbody>
-              {customers.map((customer: Customer) => (
+              {customers.map((customer: Customer) => {
+                const draggable = Boolean(customer.pinned && canReorderPinned);
+                return (
                 <tr
                   key={customer.id}
-                  className={`border-b border-slate-100 ${isBulkColorMode && selectedCustomerIds.has(customer.id) ? "bg-blue-50" : ""}`}
+                  className={`border-b border-slate-100 ${
+                    customer.pinned ? "bg-amber-50/50" : ""
+                  } ${isBulkColorMode && selectedCustomerIds.has(customer.id) ? "bg-blue-50" : ""} ${
+                    dragOverPinnedId === customer.id ? "ring-1 ring-inset ring-amber-400" : ""
+                  }`}
                   onClick={isBulkColorMode ? () => toggleCustomerSelection(customer.id) : undefined}
                   style={isBulkColorMode ? { cursor: "pointer" } : undefined}
+                  draggable={draggable}
+                  onDragStart={
+                    draggable
+                      ? (e) => {
+                          e.dataTransfer.setData("text/plain", String(customer.id));
+                          e.dataTransfer.effectAllowed = "move";
+                        }
+                      : undefined
+                  }
+                  onDragEnd={draggable ? () => setDragOverPinnedId(null) : undefined}
+                  onDragOver={
+                    draggable
+                      ? (e) => {
+                          e.preventDefault();
+                          setDragOverPinnedId(customer.id);
+                        }
+                      : undefined
+                  }
+                  onDragLeave={draggable ? () => setDragOverPinnedId(null) : undefined}
+                  onDrop={
+                    draggable
+                      ? (e) => {
+                          e.preventDefault();
+                          const raw = e.dataTransfer.getData("text/plain");
+                          const fromId = parseInt(raw, 10);
+                          if (!Number.isNaN(fromId) && fromId !== customer.id) {
+                            handleReorderPinnedRows(fromId, customer.id);
+                          }
+                          setDragOverPinnedId(null);
+                        }
+                      : undefined
+                  }
                 >
+                  {showPinHandleColumn && (
+                    <td className="py-2 w-8 align-middle text-slate-400" onClick={(e) => e.stopPropagation()}>
+                      {customer.pinned && canReorderPinned ? (
+                        <span
+                          className="inline-flex cursor-grab active:cursor-grabbing select-none touch-none px-0.5"
+                          aria-label={t("customers.pinReorderColumn")}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                            <circle cx="9" cy="5" r="1.5" />
+                            <circle cx="15" cy="5" r="1.5" />
+                            <circle cx="9" cy="12" r="1.5" />
+                            <circle cx="15" cy="12" r="1.5" />
+                            <circle cx="9" cy="19" r="1.5" />
+                            <circle cx="15" cy="19" r="1.5" />
+                          </svg>
+                        </span>
+                      ) : null}
+                    </td>
+                  )}
                   {isBulkColorMode && (
                     <td className="py-2 w-8" onClick={(e) => e.stopPropagation()}>
                       <input
@@ -657,86 +945,150 @@ export default function CustomersPage() {
                     {customer.phone}
                   </td>
                   <td className="py-2 w-1/6 truncate" title={customer.remarks || undefined}>
-                    {customer.remarks || "—"}
+                    {customer.remarks || ""}
                   </td>
-                  <td className="py-2 pr-4 w-1/6">
-                    {(() => {
-                      const b = balanceByCustomer[customer.id];
-                      if (!b) return <span className="text-slate-300">—</span>;
-                      const val = b.convertedBalance;
-                      return (
-                        <span
-                          className={`font-semibold ${val < 0 ? "text-rose-600" : val > 0 ? "text-emerald-700" : "text-slate-500"}`}
-                          title={
-                            b.hasUnknownRate
-                              ? "Some currencies have no exchange rate set"
-                              : b.currencyBreakdown
-                                  .map((c) => `${c.currencyCode}: ${c.balance >= 0 ? "" : "-"}${fmtBalance(Math.abs(c.balance))}`)
-                                  .join("\n")
-                          }
-                        >
-                          {val < 0 ? "-" : ""}{fmtBalance(Math.abs(val))}
-                          {b.hasUnknownRate && <span className="ml-1 text-xs text-amber-500">*</span>}
-                        </span>
-                      );
-                    })()}
+                  <td className="py-2 w-[8%] text-xs whitespace-nowrap">
+                    {customer.kycStatus ? (
+                      <span className={`font-medium ${kycListStatusClass(customer.kycStatus)}`}>
+                        {t(`customerKyc.status.${customer.kycStatus}`)}
+                      </span>
+                    ) : null}
                   </td>
-                  <td className="py-2 pl-4 w-12">
-                    <div
-                      className="relative inline-block"
-                      ref={handleMenuRef(customer.id)}
-                    >
-                      <button
-                        className="flex items-center justify-center p-1 hover:bg-slate-100 rounded transition-colors"
-                        onClick={() => setOpenMenuId(openMenuId === customer.id ? null : customer.id)}
-                        aria-label={t("customers.actions")}
+                  <td className="py-2 pr-4 w-[7%]">
+                    {customer.listBalance != null && (
+                      <span
+                        className={`font-semibold tabular-nums ${
+                          customer.listBalance < 0
+                            ? "text-rose-600"
+                            : customer.listBalance > 0
+                              ? "text-indigo-900"
+                              : "text-slate-500"
+                        }`}
+                        title={t("customers.balanceFundingOnly")}
                       >
-                        <svg className="w-5 h-5 text-slate-600" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                        </svg>
-                      </button>
-
-                      {openMenuId === customer.id && (
-                        <div
-                          ref={handleMenuElementRef(customer.id)}
-                          className={`absolute right-0 w-40 bg-white border border-slate-200 rounded-lg shadow-lg z-[9999] ${
-                            menuPositionAbove[customer.id] ? "bottom-full mb-1" : "top-0"
-                          }`}
-                        >
-                          <button
-                            className="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-slate-50 first:rounded-t-lg"
-                            onClick={() => { navigate(`/customers/${customer.id}/ledger`); setOpenMenuId(null); }}
-                          >
-                            {t("customers.ledger")}
-                          </button>
-                          <button
-                            className="w-full text-left px-4 py-2 text-sm text-emerald-600 hover:bg-slate-50"
-                            onClick={() => { navigate(`/customers/${customer.id}/profile`); setOpenMenuId(null); }}
-                          >
-                            {t("customers.profile")}
-                          </button>
-                          <button
-                            className="w-full text-left px-4 py-2 text-sm text-amber-600 hover:bg-slate-50"
-                            onClick={() => { startEdit(customer.id); setOpenMenuId(null); }}
-                          >
-                            {t("common.edit")}
-                          </button>
-                          <button
-                            className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 last:rounded-b-lg border-t border-slate-200"
-                            onClick={() => { handleDeleteClick(customer.id); setOpenMenuId(null); }}
-                            disabled={isDeleting}
-                          >
-                            {t("common.delete")}
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                        {customer.listBalance < 0 ? "-" : ""}
+                        {fmtBalance(Math.abs(customer.listBalance))}
+                      </span>
+                    )}
                   </td>
+                  <td className="py-2 pr-4 w-[7%]">
+                    {customer.listProfitLoss != null && (
+                      <span
+                        className={`font-semibold tabular-nums ${
+                          customer.listProfitLoss < 0
+                            ? "text-rose-600"
+                            : customer.listProfitLoss > 0
+                              ? "text-emerald-700"
+                              : "text-slate-500"
+                        }`}
+                        title={t("customers.profitLossTradesOnly")}
+                      >
+                        {customer.listProfitLoss < 0 ? "-" : ""}
+                        {fmtBalance(Math.abs(customer.listProfitLoss))}
+                      </span>
+                    )}
+                  </td>
+                  {showActionsColumn && (
+                    <td className="py-2 pl-4 w-12">
+                      <div
+                        className="relative inline-block"
+                        ref={handleMenuRef(customer.id)}
+                      >
+                        <button
+                          className="flex items-center justify-center p-1 hover:bg-slate-100 rounded transition-colors"
+                          onClick={() => setOpenMenuId(openMenuId === customer.id ? null : customer.id)}
+                          aria-label={t("customers.actions")}
+                        >
+                          <svg className="w-5 h-5 text-slate-600" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                          </svg>
+                        </button>
+
+                        {openMenuId === customer.id && (
+                          <div
+                            ref={handleMenuElementRef(customer.id)}
+                            className={`absolute right-0 w-40 bg-white border border-slate-200 rounded-lg shadow-lg z-[9999] ${
+                              menuPositionAbove[customer.id] ? "bottom-full mb-1" : "top-0"
+                            }`}
+                          >
+                            {canOpenLedger && (
+                              <button
+                                className="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-slate-50 first:rounded-t-lg"
+                                onClick={() => { navigate(`/customers/${customer.id}/ledger`); setOpenMenuId(null); }}
+                              >
+                                {t("customers.ledger")}
+                              </button>
+                            )}
+                            {canOpenProfile && (
+                              <button
+                                className={`w-full text-left px-4 py-2 text-sm text-emerald-600 hover:bg-slate-50 ${
+                                  !canOpenLedger ? "first:rounded-t-lg" : ""
+                                }`}
+                                onClick={() => { navigate(`/customers/${customer.id}/profile`); setOpenMenuId(null); }}
+                              >
+                                {t("customers.profile")}
+                              </button>
+                            )}
+                            {canUpdateCustomer && (
+                              <button
+                                className="w-full text-left px-4 py-2 text-sm text-amber-600 hover:bg-slate-50"
+                                onClick={() => { startEdit(customer.id); setOpenMenuId(null); }}
+                              >
+                                {t("common.edit")}
+                              </button>
+                            )}
+                            {canPinCustomers && (
+                              customer.pinned ? (
+                                <button
+                                  className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 border-t border-slate-100"
+                                  onClick={() => {
+                                    void handleUnpinCustomer(customer.id);
+                                    setOpenMenuId(null);
+                                  }}
+                                >
+                                  {t("customers.unpin")}
+                                </button>
+                              ) : (
+                                <button
+                                  className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 border-t border-slate-100 disabled:opacity-50"
+                                  disabled={!canPinMore}
+                                  onClick={() => {
+                                    void handlePinCustomer(customer.id);
+                                    setOpenMenuId(null);
+                                  }}
+                                >
+                                  {t("customers.pinToTop")}
+                                </button>
+                              )
+                            )}
+                            {canDeleteCustomer && (
+                              <button
+                                className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 last:rounded-b-lg border-t border-slate-200"
+                                onClick={() => { handleDeleteClick(customer.id); setOpenMenuId(null); }}
+                                disabled={isDeleting}
+                              >
+                                {t("common.delete")}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
-              ))}
+              );
+              })}
               {!customers.length && (
                 <tr>
-                  <td className="py-4 text-sm text-slate-500" colSpan={isBulkColorMode ? 8 : 7}>
+                  <td
+                    className="py-4 text-sm text-slate-500"
+                    colSpan={
+                      8 +
+                      (showPinHandleColumn ? 1 : 0) +
+                      (isBulkColorMode ? 1 : 0) +
+                      (showActionsColumn ? 1 : 0)
+                    }
+                  >
                     {t("customers.noCustomers")}
                   </td>
                 </tr>
@@ -756,7 +1108,7 @@ export default function CustomersPage() {
         />
       </SectionCard>
 
-      {editingId && editForm && (
+      {editingId && editForm && canUpdateCustomer && (
         <SectionCard
           title={t("customers.editTitle")}
           actions={<button onClick={cancelEdit} className="text-sm text-slate-600">{t("common.cancel")}</button>}
@@ -1135,7 +1487,7 @@ export default function CustomersPage() {
       )}
 
       {/* Create Customer Modal */}
-      {isCreateModalOpen && (
+      {isCreateModalOpen && canCreateCustomer && (
         <div
           className="fixed top-0 left-0 right-0 bottom-0 w-full h-full z-[9999] flex items-center justify-center bg-black bg-opacity-50"
           style={{ margin: 0, padding: 0 }}

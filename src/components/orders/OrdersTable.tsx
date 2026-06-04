@@ -3,12 +3,12 @@ import { useTranslation } from "react-i18next";
 import { OrdersTableRow } from "./OrdersTableRow";
 import { Pagination } from "../common/Pagination";
 import { getStatusTone } from "../../utils/orders/orderFormatters";
-import type { Order, Account, AuthResponse, Currency, Customer, User } from "../../types";
+import type { Order, Account, AuthResponse, Currency, CustomerOption, User } from "../../types";
 
 interface OrdersTableProps {
   orders: Order[];
   accounts: Account[];
-  customers?: Customer[];
+  customers?: CustomerOption[];
   users?: User[];
   currencyByCode: Map<string, Currency>;
   // Column management

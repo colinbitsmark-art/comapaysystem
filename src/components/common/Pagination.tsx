@@ -1,4 +1,75 @@
-import React from "react";
+import React, { useCallback, useEffect, useState } from "react";
+
+interface PageJumpInputProps {
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  t: (key: string) => string;
+  className?: string;
+}
+
+function clampPage(page: number, totalPages: number): number {
+  return Math.min(totalPages, Math.max(1, page));
+}
+
+/**
+ * Page number field — type a page and press Enter to navigate.
+ */
+export function PageJumpInput({
+  currentPage,
+  totalPages,
+  onPageChange,
+  t,
+  className = "",
+}: PageJumpInputProps) {
+  const [pageInput, setPageInput] = useState(String(currentPage));
+
+  useEffect(() => {
+    setPageInput(String(currentPage));
+  }, [currentPage]);
+
+  const commitPage = useCallback(() => {
+    const trimmed = pageInput.trim();
+    if (!trimmed) {
+      setPageInput(String(currentPage));
+      return;
+    }
+    const parsed = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(parsed)) {
+      setPageInput(String(currentPage));
+      return;
+    }
+    const page = clampPage(parsed, totalPages);
+    onPageChange(page);
+    setPageInput(String(page));
+  }, [pageInput, currentPage, totalPages, onPageChange]);
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-sm text-slate-600 ${className}`}>
+      <span>{t("common.page") || "Page"}</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        aria-label={t("common.goToPage") || "Go to page"}
+        title={t("common.goToPageHint") || "Enter a page number and press Enter"}
+        value={pageInput}
+        onChange={(e) => setPageInput(e.target.value.replace(/\D/g, ""))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commitPage();
+          }
+        }}
+        onBlur={commitPage}
+        className="w-14 rounded-lg border border-slate-300 px-2 py-1.5 text-center text-sm font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      />
+      <span>
+        {t("common.of") || "of"} {totalPages}
+      </span>
+    </span>
+  );
+}
 
 interface PaginationProps {
   currentPage: number;
@@ -41,10 +112,12 @@ export function Pagination({
         >
           {t("common.previous") || "Previous"}
         </button>
-        <span className="text-sm text-slate-600">
-          {t("common.page") || "Page"} {currentPage} {t("common.of") || "of"}{" "}
-          {totalPages}
-        </span>
+        <PageJumpInput
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={onPageChange}
+          t={t}
+        />
         <button
           onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
           disabled={currentPage === totalPages}

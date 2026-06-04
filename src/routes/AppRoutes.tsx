@@ -25,6 +25,11 @@ import WalletTrackerPage from "../pages/WalletTrackerPage";
 import ReferenceRatesPage from "../pages/ReferenceRatesPage";
 import { useAppSelector } from "../app/hooks";
 import { hasSectionAccess } from "../utils/permissions";
+import {
+  canManageKycPolicy,
+  canViewCustomerLedger,
+  hasAnyCustomerKycPermission,
+} from "../utils/customerPermissions";
 import { hasStoredSession } from "../utils/authToken";
 
 function RequireAuth({ children, section }: { children: ReactElement; section?: string }) {
@@ -49,6 +54,39 @@ function RequireAdmin({ children }: { children: ReactElement }) {
   return children;
 }
 
+function RequireCustomerLedger({ children }: { children: ReactElement }) {
+  const user = useAppSelector((s) => s.auth.user);
+  if (!user || !hasStoredSession()) {
+    return <Navigate to="/login" replace />;
+  }
+  if (!hasSectionAccess(user, "customers") || !canViewCustomerLedger(user)) {
+    return <Navigate to="/customers" replace />;
+  }
+  return children;
+}
+
+function RequireCustomerKyc({ children }: { children: ReactElement }) {
+  const user = useAppSelector((s) => s.auth.user);
+  if (!user || !hasStoredSession()) {
+    return <Navigate to="/login" replace />;
+  }
+  if (!hasSectionAccess(user, "customers") || !hasAnyCustomerKycPermission(user)) {
+    return <Navigate to="/customers" replace />;
+  }
+  return children;
+}
+
+function RequireKycPolicy({ children }: { children: ReactElement }) {
+  const user = useAppSelector((s) => s.auth.user);
+  if (!user || !hasStoredSession()) {
+    return <Navigate to="/login" replace />;
+  }
+  if (!hasSectionAccess(user, "customers") || !canManageKycPolicy(user)) {
+    return <Navigate to="/customers" replace />;
+  }
+  return children;
+}
+
 export default function AppRoutes() {
   return (
     <BrowserRouter>
@@ -59,10 +97,37 @@ export default function AppRoutes() {
           <Route path="accounts" element={<RequireAuth section="accounts"><AccountsPage /></RequireAuth>} />
           <Route path="transfers" element={<RequireAuth section="transfers"><TransfersPage /></RequireAuth>} />
           <Route path="expenses" element={<RequireAuth section="expenses"><ExpensesPage /></RequireAuth>} />
-          <Route path="customers/settings" element={<RequireAuth section="customers"><CustomerSettingsPage /></RequireAuth>} />
+          <Route
+            path="customers/settings"
+            element={
+              <RequireAuth section="customers">
+                <RequireKycPolicy>
+                  <CustomerSettingsPage />
+                </RequireKycPolicy>
+              </RequireAuth>
+            }
+          />
           <Route path="customers" element={<RequireAuth section="customers"><CustomersPage /></RequireAuth>} />
-          <Route path="customers/:id/ledger" element={<RequireAuth section="customers"><CustomerLedgerPage /></RequireAuth>} />
-          <Route path="customers/:id/profile" element={<RequireAuth section="customers"><CustomerProfilePage /></RequireAuth>} />
+          <Route
+            path="customers/:id/ledger"
+            element={
+              <RequireAuth section="customers">
+                <RequireCustomerLedger>
+                  <CustomerLedgerPage />
+                </RequireCustomerLedger>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="customers/:id/profile"
+            element={
+              <RequireAuth section="customers">
+                <RequireCustomerKyc>
+                  <CustomerProfilePage />
+                </RequireCustomerKyc>
+              </RequireAuth>
+            }
+          />
           <Route path="users" element={<RequireAuth section="users"><UsersPage /></RequireAuth>} />
           <Route path="roles" element={<RequireAuth section="roles"><RolesPage /></RequireAuth>} />
           <Route path="tags" element={<RequireAuth section="tags"><TagsPage /></RequireAuth>} />

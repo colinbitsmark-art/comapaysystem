@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import SectionCard from "../components/common/SectionCard";
+import { PageJumpInput } from "../components/common/Pagination";
 import {
   useGetNotificationsQuery,
   useMarkNotificationAsReadMutation,
@@ -305,6 +306,13 @@ export default function NotificationsPage() {
                   );
                 })}
               </div>
+
+              <PageJumpInput
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+                t={t}
+              />
 
               {/* Next Button */}
               <button

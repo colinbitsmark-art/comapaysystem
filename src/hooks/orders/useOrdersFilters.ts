@@ -9,8 +9,8 @@ const defaultFilters: OrderFilters = {
   handlerId: null,
   customerId: null,
   currencyPairs: [],
-  buyAccountId: null,
-  sellAccountId: null,
+  accountId: null,
+  accountRole: 'any',
   status: null,
   tagIds: [],
 };
@@ -28,9 +28,23 @@ export function useOrdersFilters(
   // Apply initial filters if provided after mount
   useEffect(() => {
     if (initialFilters && Object.keys(initialFilters).length > 0) {
+      const legacy = initialFilters as Partial<OrderFilters> & {
+        buyAccountId?: number | null;
+        sellAccountId?: number | null;
+      };
+      const mapped: Partial<OrderFilters> = { ...initialFilters };
+      if (mapped.accountId == null) {
+        if (legacy.buyAccountId != null) {
+          mapped.accountId = legacy.buyAccountId;
+          mapped.accountRole = mapped.accountRole ?? 'buy';
+        } else if (legacy.sellAccountId != null) {
+          mapped.accountId = legacy.sellAccountId;
+          mapped.accountRole = mapped.accountRole ?? 'sell';
+        }
+      }
       setFilters((prev) => ({
         ...prev,
-        ...initialFilters,
+        ...mapped,
       }));
       setCurrentPage(1);
     }
@@ -55,8 +69,12 @@ export function useOrdersFilters(
     if (filterState.currencyPairs.length > 0) {
       params.currencyPairs = filterState.currencyPairs.join(',');
     }
-    if (filterState.buyAccountId !== null) params.buyAccountId = filterState.buyAccountId;
-    if (filterState.sellAccountId !== null) params.sellAccountId = filterState.sellAccountId;
+    if (filterState.accountId !== null) {
+      params.accountId = filterState.accountId;
+      if (filterState.accountRole !== 'any') {
+        params.accountRole = filterState.accountRole;
+      }
+    }
     if (filterState.status) params.status = filterState.status;
     if (filterState.tagIds.length > 0) params.tagIds = filterState.tagIds.join(',');
     

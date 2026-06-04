@@ -5,6 +5,7 @@ import Badge from "../components/common/Badge";
 import { useAppDispatch, useAppSelector } from "../app/hooks";
 import { setUser } from "../app/authSlice";
 import { hasSectionAccess } from "../utils/permissions";
+import { canManageKycPolicy } from "../utils/customerPermissions";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { 
   useGetUnreadCountQuery, 
@@ -42,7 +43,13 @@ const sidebarEntries: SidebarEntry[] = [
   { kind: "link", to: "/settings", labelKey: "nav.settings", adminOnly: true },
 ];
 
-function CustomersNavGroup({ onNavigate }: { onNavigate: () => void }) {
+function CustomersNavGroup({
+  onNavigate,
+  showSettings,
+}: {
+  onNavigate: () => void;
+  showSettings: boolean;
+}) {
   const { t } = useTranslation();
   const { pathname } = useLocation();
   const parentActive = pathname.startsWith("/customers");
@@ -92,9 +99,11 @@ function CustomersNavGroup({ onNavigate }: { onNavigate: () => void }) {
           <NavLink to="/customers" end onClick={onNavigate} className={subNavCls}>
             {t("nav.customerList")}
           </NavLink>
-          <NavLink to="/customers/settings" onClick={onNavigate} className={subNavCls}>
-            {t("nav.customerSettings")}
-          </NavLink>
+          {showSettings && (
+            <NavLink to="/customers/settings" onClick={onNavigate} className={subNavCls}>
+              {t("nav.customerSettings")}
+            </NavLink>
+          )}
         </div>
       )}
     </div>
@@ -108,6 +117,7 @@ export default function AppLayout() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const user = useAppSelector((s) => s.auth.user);
+  const showCustomerSettings = canManageKycPolicy(user);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 5;
@@ -117,7 +127,14 @@ export default function AppLayout() {
   const [isNotificationDropdownOpen, setIsNotificationDropdownOpen] = useState(false);
   const notificationDropdownRef = useRef<HTMLDivElement>(null);
   const notificationEventSourceRef = useRef<EventSource | null>(null);
+  const notificationReconnectAttemptsRef = useRef(0);
+  const notificationReconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxNotificationReconnectAttempts = 5;
   const [realtimeUnreadCount, setRealtimeUnreadCount] = useState(0);
+  const [isPageVisible, setIsPageVisible] = useState(
+    () => typeof document !== "undefined" && document.visibilityState === "visible",
+  );
+  const isPageVisibleRef = useRef(isPageVisible);
 
   // Theme preferences — CSS vars are injected automatically by the hook
   const { sidebarBgColor, appBgColor, derived } = useThemePreferences();
@@ -171,92 +188,166 @@ export default function AppLayout() {
     }
   }, [unreadCountData]);
 
+  // Release HTTP connections while tab is in background (browser ~6 conn limit per host in dev)
+  useEffect(() => {
+    const syncVisibility = () => {
+      const visible = document.visibilityState === "visible";
+      isPageVisibleRef.current = visible;
+      setIsPageVisible(visible);
+    };
+    document.addEventListener("visibilitychange", syncVisibility);
+    return () => document.removeEventListener("visibilitychange", syncVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (user && isPageVisible) {
+      void refetchUnreadCount();
+    }
+  }, [user, isPageVisible, refetchUnreadCount]);
+
   // Subscribe to notifications via Server-Sent Events (SSE)
   useEffect(() => {
-    if (!user) {
-      // Close existing connection if user logs out
+    if (!user || !isPageVisible) {
       if (notificationEventSourceRef.current) {
         notificationEventSourceRef.current.close();
         notificationEventSourceRef.current = null;
       }
+      if (notificationReconnectTimeoutRef.current) {
+        clearTimeout(notificationReconnectTimeoutRef.current);
+        notificationReconnectTimeoutRef.current = null;
+      }
+      notificationReconnectAttemptsRef.current = 0;
       return;
     }
 
-    // Connect to notification SSE endpoint with userId as query param
-    const notificationEventSource = new EventSource(getSseUrl("/api/notifications/subscribe"));
+    notificationReconnectAttemptsRef.current = 0;
 
-    notificationEventSource.onopen = () => {
-      console.log('Notification SSE: Connection opened');
-    };
-
-    notificationEventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        
-        if (data.type === 'notification') {
-          console.log('New notification received:', data.notification);
-          
-          // Update count immediately in state
-          setRealtimeUnreadCount(prev => prev + 1);
-          
-          // Invalidate cache to trigger refetch
-          dispatch(api.util.invalidateTags([
-            { type: 'Notification', id: 'LIST' },
-            { type: 'Notification', id: 'UNREAD_COUNT' }
-          ]));
-          
-          // If wallet-related notification, also invalidate Wallet cache
-          const notification = data.notification;
-          if (notification.type === 'wallet_transaction' || notification.type === 'wallet_balance_change') {
-            console.log('Wallet notification detected, invalidating Wallet cache');
-            dispatch(api.util.invalidateTags([
-              { type: 'Wallet', id: 'LIST' },
-              { type: 'Wallet', id: 'SUMMARY' },
-              'Wallet' // Invalidate all wallet-related queries including transactions
-            ]));
-          }
-        } else if (data.type === 'cacheSync' && Array.isArray(data.scopes) && data.scopes.length > 0) {
-          const tags = tagsFromCacheSyncPayload({
-            scopes: data.scopes,
-            orderId: typeof data.orderId === "number" ? data.orderId : data.orderId != null ? Number(data.orderId) : undefined,
-            accountIds: Array.isArray(data.accountIds) ? data.accountIds : undefined,
-            customerId: typeof data.customerId === "number" ? data.customerId : data.customerId != null ? Number(data.customerId) : undefined,
-            calculationId: typeof data.calculationId === "number" ? data.calculationId : data.calculationId != null ? Number(data.calculationId) : undefined,
-            beneficiaryId: typeof data.beneficiaryId === "number" ? data.beneficiaryId : data.beneficiaryId != null ? Number(data.beneficiaryId) : undefined,
-          });
-          if (tags.length > 0) {
-            dispatch(api.util.invalidateTags(tags));
-          }
-        } else if (data.type === 'unreadCount') {
-          // Initial unread count received
-          setRealtimeUnreadCount(data.count);
-          console.log('Initial unread count:', data.count);
-        }
-      } catch (error) {
-        console.error('Error parsing notification SSE message:', error);
+    const connectNotificationSSE = () => {
+      if (!isPageVisibleRef.current) return;
+      if (notificationReconnectAttemptsRef.current >= maxNotificationReconnectAttempts) {
+        console.warn("Notification SSE: max reconnection attempts reached.");
+        return;
       }
+
+      if (notificationEventSourceRef.current) {
+        notificationEventSourceRef.current.close();
+        notificationEventSourceRef.current = null;
+      }
+
+      const notificationEventSource = new EventSource(getSseUrl("/api/notifications/subscribe"));
+
+      notificationEventSource.onopen = () => {
+        console.log("Notification SSE: Connection opened");
+        notificationReconnectAttemptsRef.current = 0;
+      };
+
+      notificationEventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === "notification") {
+            setRealtimeUnreadCount((prev) => prev + 1);
+            dispatch(
+              api.util.invalidateTags([
+                { type: "Notification", id: "LIST" },
+                { type: "Notification", id: "UNREAD_COUNT" },
+              ]),
+            );
+
+            const notification = data.notification;
+            if (
+              notification.type === "wallet_transaction" ||
+              notification.type === "wallet_balance_change"
+            ) {
+              dispatch(
+                api.util.invalidateTags([
+                  { type: "Wallet", id: "LIST" },
+                  { type: "Wallet", id: "SUMMARY" },
+                  "Wallet",
+                ]),
+              );
+            }
+          } else if (data.type === "cacheSync" && Array.isArray(data.scopes) && data.scopes.length > 0) {
+            const tags = tagsFromCacheSyncPayload({
+              scopes: data.scopes,
+              orderId:
+                typeof data.orderId === "number"
+                  ? data.orderId
+                  : data.orderId != null
+                    ? Number(data.orderId)
+                    : undefined,
+              accountIds: Array.isArray(data.accountIds) ? data.accountIds : undefined,
+              customerId:
+                typeof data.customerId === "number"
+                  ? data.customerId
+                  : data.customerId != null
+                    ? Number(data.customerId)
+                    : undefined,
+              calculationId:
+                typeof data.calculationId === "number"
+                  ? data.calculationId
+                  : data.calculationId != null
+                    ? Number(data.calculationId)
+                    : undefined,
+              beneficiaryId:
+                typeof data.beneficiaryId === "number"
+                  ? data.beneficiaryId
+                  : data.beneficiaryId != null
+                    ? Number(data.beneficiaryId)
+                    : undefined,
+            });
+            if (tags.length > 0) {
+              dispatch(api.util.invalidateTags(tags));
+            }
+          } else if (data.type === "unreadCount") {
+            setRealtimeUnreadCount(data.count);
+          }
+        } catch (error) {
+          console.error("Error parsing notification SSE message:", error);
+        }
+      };
+
+      notificationEventSource.onerror = (error) => {
+        console.error("Notification SSE connection error:", error);
+        notificationEventSource.close();
+        notificationEventSourceRef.current = null;
+        notificationReconnectAttemptsRef.current += 1;
+
+        if (
+          isPageVisibleRef.current &&
+          notificationReconnectAttemptsRef.current < maxNotificationReconnectAttempts
+        ) {
+          const delay = Math.min(
+            1000 * Math.pow(2, notificationReconnectAttemptsRef.current - 1),
+            30000,
+          );
+          notificationReconnectTimeoutRef.current = setTimeout(() => {
+            connectNotificationSSE();
+          }, delay);
+        }
+      };
+
+      notificationEventSourceRef.current = notificationEventSource;
     };
 
-    notificationEventSource.onerror = (error) => {
-      console.error('Notification SSE connection error:', error);
-      notificationEventSource.close();
-      notificationEventSourceRef.current = null;
-    };
+    connectNotificationSSE();
 
-    notificationEventSourceRef.current = notificationEventSource;
-
-    // Cleanup on unmount or user change
     return () => {
       if (notificationEventSourceRef.current) {
         notificationEventSourceRef.current.close();
         notificationEventSourceRef.current = null;
       }
+      if (notificationReconnectTimeoutRef.current) {
+        clearTimeout(notificationReconnectTimeoutRef.current);
+        notificationReconnectTimeoutRef.current = null;
+      }
+      notificationReconnectAttemptsRef.current = 0;
     };
-  }, [user, dispatch]);
+  }, [user, dispatch, isPageVisible]);
 
   // Subscribe to role updates via Server-Sent Events (SSE)
   useEffect(() => {
-    if (!user?.role) {
+    if (!user?.role || !isPageVisible) {
       // Close existing connection if user logs out
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
@@ -274,13 +365,12 @@ export default function AppLayout() {
     reconnectAttemptsRef.current = 0;
 
     const connectSSE = () => {
-      // Don't reconnect if we've exceeded max attempts
+      if (!isPageVisibleRef.current) return;
       if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
         console.warn('SSE: Max reconnection attempts reached. Stopping reconnection attempts.');
         return;
       }
 
-      // Close existing connection if any
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
@@ -318,14 +408,15 @@ export default function AppLayout() {
         reconnectAttemptsRef.current += 1;
 
         // Only reconnect if we haven't exceeded max attempts
-        if (reconnectAttemptsRef.current < maxReconnectAttempts) {
-          // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+        if (isPageVisibleRef.current && reconnectAttemptsRef.current < maxReconnectAttempts) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current - 1), 30000);
           console.log(`SSE: Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`);
-          
+
           reconnectTimeoutRef.current = setTimeout(() => {
             connectSSE();
           }, delay);
+        } else if (!isPageVisibleRef.current) {
+          reconnectAttemptsRef.current = 0;
         } else {
           console.warn('SSE: Max reconnection attempts reached. SSE disabled for this session.');
         }
@@ -334,10 +425,8 @@ export default function AppLayout() {
       eventSourceRef.current = eventSource;
     };
 
-    // Initial connection
     connectSSE();
 
-    // Cleanup on unmount or role change
     return () => {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
@@ -349,7 +438,7 @@ export default function AppLayout() {
       }
       reconnectAttemptsRef.current = 0;
     };
-  }, [user?.role, dispatch, navigate, handleSignOut]);
+  }, [user?.role, dispatch, handleSignOut, isPageVisible]);
 
   // Handle idle timeout - auto logout after 3 hours of inactivity
   const handleIdleTimeout = useCallback(() => {
@@ -598,7 +687,11 @@ export default function AppLayout() {
           <nav className={`flex flex-wrap gap-2 lg:flex-col ${sidebarAppName ? "mt-6" : ""}`}>
             {visibleSidebarEntries.map((entry) =>
               entry.kind === "customersSubmenu" ? (
-                <CustomersNavGroup key="customers-submenu" onNavigate={() => setIsMobileMenuOpen(false)} />
+                <CustomersNavGroup
+                  key="customers-submenu"
+                  onNavigate={() => setIsMobileMenuOpen(false)}
+                  showSettings={showCustomerSettings}
+                />
               ) : (
                 <NavLink
                   key={entry.to}

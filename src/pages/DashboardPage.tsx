@@ -22,7 +22,7 @@ import StatCard from "../components/common/StatCard";
 import {
   useGetAccountsQuery,
   useGetCurrenciesQuery,
-  useGetCustomersQuery,
+  useGetCustomerOptionsQuery,
   useGetOrdersQuery,
   useGetUsersQuery,
   useGetProfitCalculationsQuery,
@@ -258,7 +258,7 @@ export default function DashboardPage() {
   const userId = useAppSelector((s) => s.auth.user?.id);
 
   const { data: currencies = [] } = useGetCurrenciesQuery();
-  const { data: customersData } = useGetCustomersQuery();
+  const { data: customersData } = useGetCustomerOptionsQuery();
   const customers = customersData?.customers ?? [];
   const { data: users = [] } = useGetUsersQuery();
   const { data: ordersData } = useGetOrdersQuery({ limit: 10000 });
@@ -335,13 +335,24 @@ export default function DashboardPage() {
       map[account.currencyCode].accounts.push(account);
     }
 
-    // Apply per-pool account drag order
+    // Apply per-pool account drag order; append accounts not in saved order so stale IDs cannot hide them
     for (const code of Object.keys(map)) {
       const order = accountOrders[code];
-      if (order) {
-        const indexed = Object.fromEntries(map[code].accounts.map((a) => [a.id, a]));
-        map[code].accounts = order.map((id) => indexed[id]).filter(Boolean);
+      if (!order?.length) continue;
+
+      const allAccounts = map[code].accounts;
+      const indexed = Object.fromEntries(allAccounts.map((a) => [a.id, a]));
+      const knownIds = new Set<number>();
+      const ordered: Account[] = [];
+      for (const id of order) {
+        const account = indexed[id];
+        if (account) {
+          ordered.push(account);
+          knownIds.add(id);
+        }
       }
+      const remainder = allAccounts.filter((a) => !knownIds.has(a.id));
+      map[code].accounts = [...ordered, ...remainder];
     }
 
     // Apply pool section drag order

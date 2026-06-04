@@ -34,7 +34,7 @@ import { useCurrencyByCode } from "../hooks/useCurrencyByCode";
 import {
   useAddOrderMutation,
   useGetCurrenciesQuery,
-  useGetCustomersQuery,
+  useGetCustomerOptionsQuery,
   useGetOrdersQuery,
   useGetUsersQuery,
   useUpdateOrderMutation,
@@ -130,7 +130,7 @@ export default function OrdersPage() {
     return Math.ceil(totalOrders / 20);
   }, [totalOrders]);
 
-  const { data: customersData } = useGetCustomersQuery();
+  const { data: customersData } = useGetCustomerOptionsQuery();
   const customers = customersData?.customers ?? [];
   const { data: currencies = [] } = useGetCurrenciesQuery();
   const currencyByCode = useCurrencyByCode();
@@ -158,7 +158,7 @@ export default function OrdersPage() {
     title: string;
   } | null>(null);
 
-  const unifiedOrder = useUnifiedOrderModal(currencies, accounts, authUser);
+  const unifiedOrder = useUnifiedOrderModal(currencies, accounts, authUser, customers);
 
   // Get unique currency pairs from all orders (for dropdown)
   // Note: This would ideally come from the backend, but for now we'll generate from currencies
@@ -1549,6 +1549,11 @@ export default function OrdersPage() {
         onClose={unifiedOrder.closeModal}
         onOpenCreateCustomer={() => setIsCreateCustomerModalOpen(true)}
         onAutoFill={unifiedOrder.fillReceiptPaymentFromTotals}
+        prepaidBalance={unifiedOrder.prepaidBalance}
+        advanceBalance={unifiedOrder.advanceBalance}
+        fundingSummary={unifiedOrder.fundingSummary}
+        fundingSummaryLoading={unifiedOrder.fundingSummaryLoading}
+        selectedCustomerId={unifiedOrder.selectedCustomerId}
         addLineRow={unifiedOrder.addLineRow}
         addPresetServiceCharge={unifiedOrder.addPresetServiceCharge}
         viewerModal={newOrderViewerModal}

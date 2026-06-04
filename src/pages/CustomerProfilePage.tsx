@@ -10,6 +10,14 @@ import {
   useDeleteCustomerKycDocumentMutation,
 } from "../services/api";
 import type { KycSchemaField, KycV2Schema } from "../types";
+import {
+  canApproveCustomerKyc,
+  canManageKycPolicy,
+  canReopenCustomerKyc,
+  canSubmitCustomerKyc,
+  canViewCustomerLedger,
+  hasAnyCustomerKycPermission,
+} from "../utils/customerPermissions";
 import { useAppSelector } from "../app/hooks";
 import KycV2Renderer from "../components/kyc/KycV2Renderer";
 
@@ -28,6 +36,13 @@ const FIELD_KEY_ZH_FALLBACK: Record<string, string> = {
   businessNature: "业务性质",
   uboName: "最终受益人姓名",
 };
+
+const KYC_DOCUMENT_ACCEPT = "image/*,application/pdf,.pdf";
+
+function isAllowedKycDocument(file: File): boolean {
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) return true;
+  return file.type.startsWith("image/");
+}
 
 const DOCUMENT_CODE_ZH_FALLBACK: Record<string, string> = {
   id_front: "身份证件（正面）",
@@ -165,7 +180,12 @@ export default function CustomerProfilePage() {
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const authUser = useAppSelector((s) => s.auth.user);
-  const isAdmin = authUser?.role === "admin";
+  const canAccessProfile = hasAnyCustomerKycPermission(authUser);
+  const canSubmitKyc = canSubmitCustomerKyc(authUser);
+  const canApproveKyc = canApproveCustomerKyc(authUser);
+  const canReopenKyc = canReopenCustomerKyc(authUser);
+  const canEditPolicy = canManageKycPolicy(authUser);
+  const canOpenLedger = canViewCustomerLedger(authUser);
   const isZh = (i18n.resolvedLanguage || i18n.language || "").toLowerCase().startsWith("zh");
 
   const customerId = parseInt(id ?? "0", 10);
@@ -204,9 +224,17 @@ export default function CustomerProfilePage() {
   const v2Schema = isV2Schema ? (schema as unknown as KycV2Schema) : null;
 
   const [isReopening, setIsReopening] = useState(false);
-  const canEditFields = status === "draft" || status === "submitted";
-  const showReviewActions = status === "submitted";
-  const showReopenButton = isAdmin && (status === "approved" || status === "rejected");
+  const canEditFields =
+    canSubmitKyc && (status === "draft" || status === "rejected");
+  const showReviewActions = status === "submitted" && canApproveKyc;
+  const showReopenButton =
+    canReopenKyc && (status === "approved" || status === "rejected");
+
+  useEffect(() => {
+    if (!canAccessProfile) {
+      navigate("/customers", { replace: true });
+    }
+  }, [canAccessProfile, navigate]);
 
   const setAnswer = (key: string, v: unknown) => {
     setLocalAnswers((prev) => ({ ...prev, [key]: v }));
@@ -354,6 +382,14 @@ export default function CustomerProfilePage() {
   const onFileSelected = async (code: string, files: FileList | null) => {
     const file = files?.[0];
     if (!file) return;
+    if (!isAllowedKycDocument(file)) {
+      setAlertModal({
+        isOpen: true,
+        message: t("customerKyc.invalidFileType"),
+        type: "error",
+      });
+      return;
+    }
     try {
       await uploadDoc({ customerId, documentCode: code, file }).unwrap();
       refetch();
@@ -392,6 +428,10 @@ export default function CustomerProfilePage() {
     return <div className="p-8 text-slate-500">{t("customerKyc.invalidCustomer")}</div>;
   }
 
+  if (!canAccessProfile) {
+    return null;
+  }
+
   if (isLoading) {
     return (
       <div className="p-8 text-slate-500">{t("common.loading")}</div>
@@ -417,13 +457,15 @@ export default function CustomerProfilePage() {
           </svg>
           {t("customerLedger.backToCustomers")}
         </button>
-        <Link
-          to={`/customers/${customerId}/ledger`}
-          className="text-sm font-semibold text-blue-600 hover:text-blue-700"
-        >
-          {t("customers.ledger")}
-        </Link>
-        {isAdmin && (
+        {canOpenLedger && (
+          <Link
+            to={`/customers/${customerId}/ledger`}
+            className="text-sm font-semibold text-blue-600 hover:text-blue-700"
+          >
+            {t("customers.ledger")}
+          </Link>
+        )}
+        {canEditPolicy && (
           <Link to="/customers/settings" className="text-sm font-semibold text-slate-600 hover:text-slate-900">
             {t("customerKyc.editPolicyLink")}
           </Link>
@@ -492,29 +534,31 @@ export default function CustomerProfilePage() {
                 key={doc.code}
                 ref={(el) => { fileInputs.current[doc.code] = el; }}
                 type="file"
-                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                accept={KYC_DOCUMENT_ACCEPT}
                 className="hidden"
                 onChange={(e) => { void onFileSelected(doc.code, e.target.files); e.target.value = ""; }}
               />
             ))}
-            <div className="mt-6 flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={isSaving || !canEditFields}
-                onClick={() => void handleSaveDraft()}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-              >
-                {isSaving ? t("common.saving") : t("customerKyc.saveDraft")}
-              </button>
-              <button
-                type="button"
-                disabled={isSaving || !canEditFields}
-                onClick={() => void handleSubmit()}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-50"
-              >
-                {t("customerKyc.submitForReview")}
-              </button>
-            </div>
+            {canSubmitKyc && (
+              <div className="mt-6 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={isSaving || !canEditFields}
+                  onClick={() => void handleSaveDraft()}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {isSaving ? t("common.saving") : t("customerKyc.saveDraft")}
+                </button>
+                <button
+                  type="button"
+                  disabled={isSaving || !canEditFields}
+                  onClick={() => void handleSubmit()}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {t("customerKyc.submitForReview")}
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -559,23 +603,25 @@ export default function CustomerProfilePage() {
             </div>
           ))}
 
-          <div className="md:col-span-2 flex flex-wrap gap-2 pt-2">
-            <button
-              type="submit"
-              disabled={isSaving || !canEditFields}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {isSaving ? t("common.saving") : t("customerKyc.saveDraft")}
-            </button>
-            <button
-              type="button"
-              disabled={isSaving || !canEditFields}
-              onClick={() => void handleSubmit()}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-50"
-            >
-              {t("customerKyc.submitForReview")}
-            </button>
-          </div>
+          {canSubmitKyc && (
+            <div className="md:col-span-2 flex flex-wrap gap-2 pt-2">
+              <button
+                type="submit"
+                disabled={isSaving || !canEditFields}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {isSaving ? t("common.saving") : t("customerKyc.saveDraft")}
+              </button>
+              <button
+                type="button"
+                disabled={isSaving || !canEditFields}
+                onClick={() => void handleSubmit()}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-50"
+              >
+                {t("customerKyc.submitForReview")}
+              </button>
+            </div>
+          )}
         </form>
           </>
         )}
@@ -613,7 +659,7 @@ export default function CustomerProfilePage() {
                       fileInputs.current[doc.code] = el;
                     }}
                     type="file"
-                    accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                    accept={KYC_DOCUMENT_ACCEPT}
                     className="hidden"
                     onChange={(e) => {
                       void onFileSelected(doc.code, e.target.files);

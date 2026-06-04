@@ -16,8 +16,11 @@ export async function exportOrdersToExcel(
   if (queryParams.customerId !== undefined) queryString.append("customerId", queryParams.customerId.toString());
   if (queryParams.fromCurrency) queryString.append("fromCurrency", queryParams.fromCurrency);
   if (queryParams.toCurrency) queryString.append("toCurrency", queryParams.toCurrency);
-  if (queryParams.buyAccountId !== undefined) queryString.append("buyAccountId", queryParams.buyAccountId.toString());
-  if (queryParams.sellAccountId !== undefined) queryString.append("sellAccountId", queryParams.sellAccountId.toString());
+  if (queryParams.currencyPairs) queryString.append("currencyPairs", queryParams.currencyPairs);
+  if (queryParams.accountId !== undefined) queryString.append("accountId", queryParams.accountId.toString());
+  if (queryParams.accountRole && queryParams.accountRole !== "any") {
+    queryString.append("accountRole", queryParams.accountRole);
+  }
   if (queryParams.status) queryString.append("status", queryParams.status);
   if (queryParams.tagIds) queryString.append("tagIds", queryParams.tagIds);
 

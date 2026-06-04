@@ -4,6 +4,8 @@ import {
   useUpdateOrderMutation,
   useUpdateOrderStatusMutation,
   useGetOrderDetailsQuery,
+  useGetCustomerFundingBalancesQuery,
+  useGetCustomerLedgerBalanceQuery,
   useAddReceiptMutation,
   useAddPaymentMutation,
   useDeleteReceiptMutation,
@@ -17,7 +19,7 @@ import {
   useConfirmServiceChargeMutation,
   useDeleteServiceChargeMutation,
 } from "../../services/api";
-import type { Account, AuthResponse, Currency, Tag } from "../../types";
+import type { Account, AuthResponse, Currency, ReceiptFundedFrom, Tag } from "../../types";
 import { ORDER_RECEIPT_PAYMENT_TOLERANCE } from "../../utils/orders/orderAmountTolerance";
 
 export type UnifiedLineKind = "receipt" | "payment" | "profit" | "service_charge";
@@ -27,6 +29,7 @@ export type UnifiedLine = {
   kind: UnifiedLineKind;
   amount: string;
   accountId: string;
+  fundedFrom?: ReceiptFundedFrom;
   file: File | null;
   serverImagePath?: string;
   serverReceiptId?: number;
@@ -43,6 +46,7 @@ function newLine(kind: UnifiedLineKind): UnifiedLine {
     kind,
     amount: "",
     accountId: "",
+    fundedFrom: kind === "receipt" || kind === "payment" ? "cash" : undefined,
     file: null,
     ...(kind === "service_charge" ? { serviceChargeMode: "fixed" as const, serviceChargePercent: "", serviceChargeCurrency: "" } : {}),
   };
@@ -61,6 +65,7 @@ export function useUnifiedOrderModal(
   currencies: Currency[],
   accounts: Account[],
   authUser: AuthResponse | null,
+  customers: { id: number; name: string }[] = [],
 ) {
   const [isOpen, setIsOpen] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
@@ -92,6 +97,34 @@ export function useUnifiedOrderModal(
   const { data: orderDetails } = useGetOrderDetailsQuery(editingOrderId || 0, {
     skip: !editingOrderId,
   });
+
+  const selectedCustomerId = (() => {
+    if (editingOrderId && orderDetails?.order?.customerId) {
+      return orderDetails.order.customerId;
+    }
+    const match = customers.find(
+      (c) => c.name.toLowerCase() === customerName.trim().toLowerCase(),
+    );
+    return match?.id ?? null;
+  })();
+
+  const { data: prepaidBalance } = useGetCustomerLedgerBalanceQuery(
+    { customerId: selectedCustomerId!, currencyCode: fromCurrency },
+    { skip: !selectedCustomerId || !fromCurrency },
+  );
+
+  const { data: advanceBalance } = useGetCustomerLedgerBalanceQuery(
+    { customerId: selectedCustomerId!, currencyCode: toCurrency },
+    { skip: !selectedCustomerId || !toCurrency },
+  );
+
+  const { data: fundingBalances, isFetching: fundingSummaryLoading } =
+    useGetCustomerFundingBalancesQuery(selectedCustomerId!, {
+      skip: !selectedCustomerId,
+    });
+  const fundingSummary = (fundingBalances?.currencies ?? []).filter(
+    (c) => c.allocatable >= 0.005 || c.allocatableAdvance >= 0.005,
+  );
 
   const [addOrder] = useAddOrderMutation();
   const [updateOrder] = useUpdateOrderMutation();
@@ -283,6 +316,7 @@ export function useUnifiedOrderModal(
         kind: "receipt",
         amount: String(r.amount ?? ""),
         accountId: r.accountId ? String(r.accountId) : "",
+        fundedFrom: r.fundedFrom === "customer_balance" ? "customer_balance" : "cash",
         file: null,
         serverImagePath: r.imagePath,
         serverReceiptId: r.id,
@@ -294,6 +328,7 @@ export function useUnifiedOrderModal(
         kind: "payment",
         amount: String(p.amount ?? ""),
         accountId: p.accountId ? String(p.accountId) : "",
+        fundedFrom: p.fundedFrom === "customer_balance" ? "customer_balance" : "cash",
         file: null,
         serverImagePath: p.imagePath,
         serverPaymentId: p.id,
@@ -355,8 +390,12 @@ export function useUnifiedOrderModal(
     const receiptLines = lines.filter((l) => l.kind === "receipt");
     const paymentLines = lines.filter((l) => l.kind === "payment");
     const scLines = lines.filter((l) => l.kind === "service_charge");
-    const firstReceiptAcc = receiptLines.find((l) => l.accountId)?.accountId;
-    const firstPayAcc = paymentLines.find((l) => l.accountId)?.accountId;
+    const firstReceiptAcc = receiptLines.find(
+      (l) => l.accountId && (l.fundedFrom ?? "cash") === "cash",
+    )?.accountId;
+    const firstPayAcc = paymentLines.find(
+      (l) => l.accountId && (l.fundedFrom ?? "cash") === "cash",
+    )?.accountId;
     const payload: Record<string, unknown> = {
       fromCurrency,
       toCurrency,
@@ -411,6 +450,42 @@ export function useUnifiedOrderModal(
     selectedTagIds,
   ]);
 
+  const postPaymentLine = async (orderId: number, line: UnifiedLine, confirmEach: boolean) => {
+    const amt = Number(line.amount) || 0;
+    if (amt <= 0) return;
+    const fundedFrom = line.fundedFrom ?? "cash";
+    if (fundedFrom === "cash" && !line.accountId) return;
+    const res = await addPayment({
+      id: orderId,
+      amount: amt,
+      accountId: fundedFrom === "cash" ? Number(line.accountId) : undefined,
+      fundedFrom,
+      file: line.file || undefined,
+      imagePath: line.file ? undefined : line.serverImagePath || "",
+    } as Parameters<typeof addPayment>[0]).unwrap();
+    if (confirmEach) {
+      await confirmPayment((res as { id: number }).id).unwrap();
+    }
+  };
+
+  const postReceiptLine = async (orderId: number, line: UnifiedLine, confirmEach: boolean) => {
+    const amt = Number(line.amount) || 0;
+    if (amt <= 0) return;
+    const fundedFrom = line.fundedFrom ?? "cash";
+    if (fundedFrom === "cash" && !line.accountId) return;
+    const res = await addReceipt({
+      id: orderId,
+      amount: amt,
+      accountId: fundedFrom === "cash" ? Number(line.accountId) : undefined,
+      fundedFrom,
+      file: line.file || undefined,
+      imagePath: line.file ? undefined : line.serverImagePath || "",
+    } as Parameters<typeof addReceipt>[0]).unwrap();
+    if (confirmEach) {
+      await confirmReceipt((res as { id: number }).id).unwrap();
+    }
+  };
+
   const replaceReceiptsPayments = async (orderId: number, confirmEach: boolean) => {
     if (orderDetails) {
       for (const r of orderDetails.receipts || []) {
@@ -430,32 +505,10 @@ export function useUnifiedOrderModal(
     }
     const { receiptLines, paymentLines } = buildPayload();
     for (const line of receiptLines) {
-      const amt = Number(line.amount) || 0;
-      if (amt === 0 || !line.accountId) continue;
-      const res = await addReceipt({
-        id: orderId,
-        amount: amt,
-        accountId: Number(line.accountId),
-        file: line.file || undefined,
-        imagePath: line.file ? undefined : line.serverImagePath || "",
-      } as { id: number; amount: number; accountId: number; file?: File; imagePath?: string }).unwrap();
-      if (confirmEach) {
-        await confirmReceipt((res as { id: number }).id).unwrap();
-      }
+      await postReceiptLine(orderId, line, confirmEach);
     }
     for (const line of paymentLines) {
-      const amt = Number(line.amount) || 0;
-      if (amt === 0 || !line.accountId) continue;
-      const res = await addPayment({
-        id: orderId,
-        amount: amt,
-        accountId: Number(line.accountId),
-        file: line.file || undefined,
-        imagePath: line.file ? undefined : line.serverImagePath || "",
-      } as { id: number; amount: number; accountId: number; file?: File; imagePath?: string }).unwrap();
-      if (confirmEach) {
-        await confirmPayment((res as { id: number }).id).unwrap();
-      }
+      await postPaymentLine(orderId, line, confirmEach);
     }
   };
 
@@ -546,26 +599,10 @@ export function useUnifiedOrderModal(
         // Create all profit and SC draft entries (leave as drafts for saved orders)
         await createAndConfirmProfitsAndSCs(orderId, resolvedProfitLines, resolvedScLines, false);
         for (const line of receiptLines) {
-          const amt = Number(line.amount) || 0;
-          if (amt === 0 || !line.accountId) continue;
-          await addReceipt({
-            id: orderId,
-            amount: amt,
-            accountId: Number(line.accountId),
-            file: line.file || undefined,
-            imagePath: line.file ? undefined : "",
-          } as any).unwrap();
+          await postReceiptLine(orderId, line, false);
         }
         for (const line of paymentLines) {
-          const amt = Number(line.amount) || 0;
-          if (amt === 0 || !line.accountId) continue;
-          await addPayment({
-            id: orderId,
-            amount: amt,
-            accountId: Number(line.accountId),
-            file: line.file || undefined,
-            imagePath: line.file ? undefined : "",
-          } as any).unwrap();
+          await postPaymentLine(orderId, line, false);
         }
       }
       closeModal();
@@ -586,34 +623,48 @@ export function useUnifiedOrderModal(
       return;
     }
     const { receiptLines, paymentLines } = buildPayload();
-    const hasValidReceiptLine = receiptLines.some((l) => (Number(l.amount) || 0) > 0 && !!l.accountId);
-    const hasValidPaymentLine = paymentLines.some((l) => (Number(l.amount) || 0) > 0 && !!l.accountId);
+    const hasValidReceiptLine = receiptLines.some((l) => {
+      const amt = Number(l.amount) || 0;
+      if (amt <= 0) return false;
+      const funded = l.fundedFrom ?? "cash";
+      return funded === "customer_balance" || !!l.accountId;
+    });
+    const hasValidPaymentLine = paymentLines.some((l) => {
+      const amt = Number(l.amount) || 0;
+      if (amt <= 0) return false;
+      const funded = l.fundedFrom ?? "cash";
+      return funded === "customer_balance" || !!l.accountId;
+    });
     if (!hasValidReceiptLine) {
-      alert("At least one receipt line must have amount and account before completing.");
+      alert("At least one receipt line must have an amount and either a company account or prepaid balance.");
       return;
     }
     if (!hasValidPaymentLine) {
-      alert("At least one payment line must have amount and account before completing.");
+      alert("At least one payment line must have an amount and either a company account or customer advance (Bal).");
       return;
     }
 
     const partialReceiptLines = receiptLines.filter((l) => {
       const hasAmount = (Number(l.amount) || 0) > 0;
-      const hasAccount = !!l.accountId;
-      return hasAmount !== hasAccount;
+      if (!hasAmount) return false;
+      const funded = l.fundedFrom ?? "cash";
+      if (funded === "customer_balance") return false;
+      return !l.accountId;
     });
     if (partialReceiptLines.length > 0) {
-      alert("Each receipt line must have both amount and account, or leave both empty.");
+      alert("Cash receipt lines need a company account.");
       return;
     }
 
     const partialPaymentLines = paymentLines.filter((l) => {
       const hasAmount = (Number(l.amount) || 0) > 0;
-      const hasAccount = !!l.accountId;
-      return hasAmount !== hasAccount;
+      if (!hasAmount) return false;
+      const funded = l.fundedFrom ?? "cash";
+      if (funded === "customer_balance") return false;
+      return !l.accountId;
     });
     if (partialPaymentLines.length > 0) {
-      alert("Each payment line must have both amount and account, or leave both empty.");
+      alert("Cash payment lines need a company account.");
       return;
     }
 
@@ -629,14 +680,22 @@ export function useUnifiedOrderModal(
       alert(`Payment total (${paymentTotal.toFixed(2)}) must match Amount Sell (${sell.toFixed(2)})`);
       return;
     }
-    const badR = receiptLines.filter((l) => (Number(l.amount) || 0) > 0 && !l.accountId);
+    const badR = receiptLines.filter((l) => {
+      const amt = Number(l.amount) || 0;
+      if (amt <= 0) return false;
+      return (l.fundedFrom ?? "cash") === "cash" && !l.accountId;
+    });
     if (badR.length) {
-      alert("Each receipt line with an amount needs an account.");
+      alert("Each cash receipt line needs a company account.");
       return;
-    } 
-    const badP = paymentLines.filter((l) => (Number(l.amount) || 0) > 0 && !l.accountId);
+    }
+    const badP = paymentLines.filter((l) => {
+      const amt = Number(l.amount) || 0;
+      if (amt <= 0) return false;
+      return (l.fundedFrom ?? "cash") === "cash" && !l.accountId;
+    });
     if (badP.length) {
-      alert("Each payment line with an amount needs an account.");
+      alert("Each cash payment line needs a company account.");
       return;
     }
     isSubmittingRef.current = true;
@@ -665,28 +724,10 @@ export function useUnifiedOrderModal(
         await createAndConfirmProfitsAndSCs(orderId, resolvedProfitLines, resolvedScLines, true);
         const { receiptLines: rl, paymentLines: pl } = buildPayload();
         for (const line of rl) {
-          const amt = Number(line.amount) || 0;
-          if (amt === 0 || !line.accountId) continue;
-          const res = await addReceipt({
-            id: orderId,
-            amount: amt,
-            accountId: Number(line.accountId),
-            file: line.file || undefined,
-            imagePath: line.file ? undefined : "",
-          } as any).unwrap();
-          await confirmReceipt((res as { id: number }).id).unwrap();
+          await postReceiptLine(orderId, line, true);
         }
         for (const line of pl) {
-          const amt = Number(line.amount) || 0;
-          if (amt === 0 || !line.accountId) continue;
-          const res = await addPayment({
-            id: orderId,
-            amount: amt,
-            accountId: Number(line.accountId),
-            file: line.file || undefined,
-            imagePath: line.file ? undefined : "",
-          } as any).unwrap();
-          await confirmPayment((res as { id: number }).id).unwrap();
+          await postPaymentLine(orderId, line, true);
         }
       }
       await updateOrderStatus({ id: orderId, status: "completed" }).unwrap();
@@ -745,6 +786,11 @@ export function useUnifiedOrderModal(
     orderDate,
     setOrderDate,
     orderDetails,
+    selectedCustomerId,
+    prepaidBalance,
+    advanceBalance,
+    fundingSummary,
+    fundingSummaryLoading,
     closeModal,
     openNew,
     openEdit,

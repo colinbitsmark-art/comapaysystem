@@ -110,6 +110,23 @@ export function requireAction(actionKey) {
   };
 }
 
+export function requireAnyAction(...actionKeys) {
+  return (req, res, next) => {
+    if (!req.userId) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    if (isAdminRole(req)) {
+      return next();
+    }
+    const permissions = getPermissionsForRequest(req);
+    const actions = permissions.actions || {};
+    if (actionKeys.some((key) => actions[key])) {
+      return next();
+    }
+    return res.status(403).json({ message: "You do not have permission for this action" });
+  };
+}
+
 /** Allow internal cron jobs (e.g. wallet auto-refresh) when INTERNAL_CRON_SECRET is set. */
 export function authenticateOrInternalCron(req, res, next) {
   const secret = process.env.INTERNAL_CRON_SECRET;

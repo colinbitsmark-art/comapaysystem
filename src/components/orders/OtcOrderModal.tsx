@@ -4,9 +4,15 @@ import { formatDate } from "../../utils/format";
 import { RemarksSection } from "./RemarksSection";
 import { CustomerSelect } from "../common/CustomerSelect";
 import { CurrencyPairSwapButton } from "./CurrencyPairSwapButton";
+import { OrderLineBalanceField } from "./NewOrderModal";
+import { CustomerFundingSummaryInline } from "./CustomerFundingSummaryInline";
 import { saveDefaultOtcHandler, getDefaultOtcHandler, clearDefaultOtcHandler } from "../../utils/otcHandlerPreference";
 import { useTranslation } from "react-i18next";
 import type { Account, Order, OrderStatus } from "../../types";
+import {
+  useGetCustomerFundingBalancesQuery,
+  useGetCustomerLedgerBalanceQuery,
+} from "../../services/api";
 import { getStatusTone } from "../../utils/orders/orderFormatters";
 
 type BasicEntity = { id: number; name: string };
@@ -23,7 +29,11 @@ export type OtcFormState = {
   handlerId: string;
 };
 
-export type OtcEntry = { amount: string; accountId: string };
+export type OtcEntry = {
+  amount: string;
+  accountId: string;
+  fundedFrom?: "cash" | "customer_balance";
+};
 
 export type OtcOrderDetails = {
   order?: {
@@ -375,6 +385,22 @@ const OtcOrderForm = ({
   onRemoveRemarks,
   t,
 }: FormProps) => {
+  const { data: prepaidBalance } = useGetCustomerLedgerBalanceQuery(
+    { customerId: Number(otcForm.customerId), currencyCode: otcForm.fromCurrency },
+    { skip: !otcForm.customerId || !otcForm.fromCurrency },
+  );
+  const { data: advanceBalance } = useGetCustomerLedgerBalanceQuery(
+    { customerId: Number(otcForm.customerId), currencyCode: otcForm.toCurrency },
+    { skip: !otcForm.customerId || !otcForm.toCurrency },
+  );
+
+  const otcCustomerId = otcForm.customerId ? Number(otcForm.customerId) : null;
+  const { data: otcFundingBalances, isFetching: otcFundingSummaryLoading } =
+    useGetCustomerFundingBalancesQuery(otcCustomerId!, { skip: !otcCustomerId });
+  const otcFundingSummary = (otcFundingBalances?.currencies ?? []).filter(
+    (c) => c.allocatable >= 0.005 || c.allocatableAdvance >= 0.005,
+  );
+
   // Track the current default handler ID to update button state immediately
   const [defaultHandlerId, setDefaultHandlerId] = useState<string | null>(() => {
     if (authUser?.id) {
@@ -453,14 +479,22 @@ const OtcOrderForm = ({
     <div className="space-y-3 border-b border-slate-200 pb-4">
       <h3 className="text-lg font-semibold text-slate-900">{t("orders.orderDetails")}</h3>
       <div className="flex gap-2 items-end">
-        <CustomerSelect
-          value={otcForm.customerId}
-          onChange={(value) => setOtcForm((p) => ({ ...p, customerId: value }))}
-          customers={customers}
-          placeholder={t("orders.selectCustomer") || "Select customer"}
-          required
-          t={t}
-        />
+        <div className="min-w-0 flex-1">
+          <CustomerSelect
+            value={otcForm.customerId}
+            onChange={(value) => setOtcForm((p) => ({ ...p, customerId: value }))}
+            customers={customers}
+            placeholder={t("orders.selectCustomer") || "Select customer"}
+            required
+            t={t}
+          />
+          {otcForm.customerId ? (
+            <CustomerFundingSummaryInline
+              items={otcFundingSummary}
+              loading={otcFundingSummaryLoading}
+            />
+          ) : null}
+        </div>
         <button
           type="button"
           onClick={() => setIsCreateCustomerModalOpen(true)}
@@ -668,7 +702,12 @@ const OtcOrderForm = ({
           </button>
           <button
             type="button"
-            onClick={() => setOtcReceipts([...otcReceipts, { amount: "", accountId: "" }])}
+            onClick={() =>
+              setOtcReceipts([
+                ...otcReceipts,
+                { amount: "", accountId: "", fundedFrom: "cash" },
+              ])
+            }
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
           >
             {t("orders.addReceipt")}
@@ -676,7 +715,10 @@ const OtcOrderForm = ({
         </div>
       </div>
       {otcReceipts.map((receipt, index) => (
-        <div key={index} className="grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-lg">
+        <div
+          key={index}
+          className="flex flex-nowrap items-center gap-2 overflow-visible p-3 bg-slate-50 rounded-lg"
+        >
           <input
             type="number"
             step="0.01"
@@ -687,13 +729,59 @@ const OtcOrderForm = ({
               newReceipts[index] = { ...newReceipts[index], amount: e.target.value };
               setOtcReceipts(newReceipts);
             }}
-            className="rounded-lg border border-slate-200 px-3 py-2"
+            className="w-28 shrink-0 rounded-lg border border-slate-200 px-3 py-2"
             required
             onWheel={handleNumberInputWheel}
           />
-          <div className="flex gap-2">
+          <div className="flex shrink-0 rounded-md border border-slate-200 overflow-hidden text-xs font-semibold">
+            <button
+              type="button"
+              className={`px-2.5 py-1.5 transition-colors ${
+                (receipt.fundedFrom ?? "cash") === "cash"
+                  ? "bg-slate-700 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+              title={t("orders.receiptFundedCash")}
+              onClick={() => {
+                const newReceipts = [...otcReceipts];
+                newReceipts[index] = { ...newReceipts[index], fundedFrom: "cash" };
+                setOtcReceipts(newReceipts);
+              }}
+            >
+              {t("orders.receiptFundedCashShort")}
+            </button>
+            <button
+              type="button"
+              className={`px-2.5 py-1.5 transition-colors ${
+                (receipt.fundedFrom ?? "cash") === "customer_balance"
+                  ? "bg-slate-700 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+              title={t("orders.receiptFundedBalance")}
+              onClick={() => {
+                const newReceipts = [...otcReceipts];
+                newReceipts[index] = {
+                  ...newReceipts[index],
+                  fundedFrom: "customer_balance",
+                  accountId: "",
+                };
+                setOtcReceipts(newReceipts);
+              }}
+            >
+              {t("orders.receiptFundedBalanceShort")}
+            </button>
+          </div>
+          {(receipt.fundedFrom ?? "cash") === "customer_balance" && (
+            <OrderLineBalanceField
+              messageKey="orders.linePrepaidBalance"
+              amount={prepaidBalance?.allocatable ?? 0}
+              currency={otcForm.fromCurrency}
+              t={t}
+            />
+          )}
+          {(receipt.fundedFrom ?? "cash") === "cash" && (
             <select
-              className="flex-1 rounded-lg border border-slate-200 px-3 py-2"
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2"
               value={receipt.accountId}
               onChange={(e) => {
                 const newReceipts = [...otcReceipts];
@@ -713,14 +801,14 @@ const OtcOrderForm = ({
                   </option>
                 ))}
             </select>
-            <button
-              type="button"
-              onClick={() => setOtcReceipts(otcReceipts.filter((_, i) => i !== index))}
-              className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg"
-            >
-              {t("orders.remove")}
-            </button>
-          </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setOtcReceipts(otcReceipts.filter((_, i) => i !== index))}
+            className="shrink-0 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg"
+          >
+            {t("orders.remove")}
+          </button>
         </div>
       ))}
       <div className="text-sm text-slate-600">
@@ -736,14 +824,19 @@ const OtcOrderForm = ({
         </h3>
         <button
           type="button"
-          onClick={() => setOtcPayments([...otcPayments, { amount: "", accountId: "" }])}
+          onClick={() =>
+            setOtcPayments([...otcPayments, { amount: "", accountId: "", fundedFrom: "cash" }])
+          }
           className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 transition-colors"
         >
           {t("orders.addPayment")}
         </button>
       </div>
       {otcPayments.map((payment, index) => (
-        <div key={index} className="grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-lg">
+        <div
+          key={index}
+          className="flex flex-wrap items-center gap-2 overflow-visible rounded-lg bg-slate-50 p-3"
+        >
           <input
             type="number"
             step="0.01"
@@ -754,13 +847,60 @@ const OtcOrderForm = ({
               newPayments[index] = { ...newPayments[index], amount: e.target.value };
               setOtcPayments(newPayments);
             }}
-            className="rounded-lg border border-slate-200 px-3 py-2"
+            className="w-28 shrink-0 rounded-lg border border-slate-200 px-3 py-2"
             required
             onWheel={handleNumberInputWheel}
           />
-          <div className="flex gap-2">
+          <div className="flex shrink-0 rounded-md border border-slate-200 overflow-hidden text-xs font-semibold">
+            <button
+              type="button"
+              className={`px-2.5 py-1.5 transition-colors ${
+                (payment.fundedFrom ?? "cash") === "cash"
+                  ? "bg-slate-700 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+              title={t("orders.paymentFundedCash")}
+              onClick={() => {
+                const newPayments = [...otcPayments];
+                newPayments[index] = { ...newPayments[index], fundedFrom: "cash" };
+                setOtcPayments(newPayments);
+              }}
+            >
+              {t("orders.paymentFundedCashShort")}
+            </button>
+            <button
+              type="button"
+              className={`px-2.5 py-1.5 transition-colors ${
+                (payment.fundedFrom ?? "cash") === "customer_balance"
+                  ? "bg-slate-700 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+              title={t("orders.paymentFundedBalance")}
+              onClick={() => {
+                const newPayments = [...otcPayments];
+                newPayments[index] = {
+                  ...newPayments[index],
+                  fundedFrom: "customer_balance",
+                  accountId: "",
+                };
+                setOtcPayments(newPayments);
+              }}
+            >
+              {t("orders.paymentFundedBalanceShort")}
+            </button>
+          </div>
+          {(payment.fundedFrom ?? "cash") === "customer_balance" && (
+            <OrderLineBalanceField
+              messageKey="orders.lineAdvanceBalance"
+              amount={advanceBalance?.allocatableAdvance ?? 0}
+              currency={otcForm.toCurrency}
+              variant="advance"
+              t={t}
+            />
+          )}
+          {(payment.fundedFrom ?? "cash") === "cash" && (
             <select
-              className="flex-1 rounded-lg border border-slate-200 px-3 py-2"
+              className="min-w-[200px] flex-1 rounded-lg border border-slate-200 px-3 py-2"
               value={payment.accountId}
               onChange={(e) => {
                 const newPayments = [...otcPayments];
@@ -780,14 +920,14 @@ const OtcOrderForm = ({
                   </option>
                 ))}
             </select>
-            <button
-              type="button"
-              onClick={() => setOtcPayments(otcPayments.filter((_, i) => i !== index))}
-              className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg"
-            >
-              {t("orders.remove")}
-            </button>
-          </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setOtcPayments(otcPayments.filter((_, i) => i !== index))}
+            className="shrink-0 rounded-lg px-3 py-2 text-red-600 hover:bg-red-50"
+          >
+            {t("orders.remove")}
+          </button>
         </div>
       ))}
       <div className="text-sm text-slate-600">

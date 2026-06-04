@@ -134,6 +134,12 @@ app.use((err, req, res, _next) => {
         message: "Cannot delete user while they are assigned to existing orders. Please delete or reassign the orders first." 
       });
     }
+    if (req.method === "DELETE" && req.path && /\/orders\/\d+/.test(req.path)) {
+      return res.status(400).json({
+        message:
+          "Cannot delete this order because customer ledger entries still reference it. Try again or contact support.",
+      });
+    }
     // Generic foreign key error
     return res.status(400).json({ 
       message: "Cannot delete this item because it is referenced by other records." 

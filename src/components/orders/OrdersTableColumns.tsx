@@ -11,7 +11,7 @@ interface OrdersTableColumnsProps {
   columnKey: string;
   order: Order;
   accounts: Account[];
-  customers?: Customer[];
+  customers?: import("../../types").CustomerOption[];
   users?: User[];
   currencyByCode: Map<string, Currency>;
   getStatusTone: (status: OrderStatus) => "amber" | "blue" | "emerald" | "rose" | "slate" | "orange";

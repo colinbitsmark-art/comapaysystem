@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import * as XLSX from "xlsx";
@@ -6,10 +7,13 @@ import SectionCard from "../components/common/SectionCard";
 import AlertModal from "../components/common/AlertModal";
 import ConfirmModal from "../components/common/ConfirmModal";
 import {
-  useGetCustomersQuery,
+  useGetCustomerOptionsQuery,
   useGetCurrenciesQuery,
+  useGetAccountsQuery,
   useGetCustomerLedgerEntriesQuery,
   useGetCustomerLedgerSummaryQuery,
+  useGetCustomerFundingBalancesQuery,
+  useGetCustomerTradeProfitLossQuery,
   useCreateLedgerEntryMutation,
   useUpdateLedgerEntryMutation,
   useDeleteLedgerEntryMutation,
@@ -17,7 +21,15 @@ import {
 } from "../services/api";
 import type { CustomerLedgerEntry } from "../types";
 import { useAppSelector } from "../app/hooks";
+import {
+  canCreateLedgerDepositWithdraw,
+  canEditDeleteCustomerLedger,
+  canViewCustomerLedger,
+} from "../utils/customerPermissions";
 import { CustomerAccountStatementPanel } from "../components/customers/CustomerAccountStatementPanel";
+import { CustomerFundingBalancesPanel } from "../components/customers/CustomerFundingBalancesPanel";
+import { CustomerLedgerBalancesPanel } from "../components/customers/CustomerLedgerBalancesPanel";
+import { AccountSelect } from "../components/common/AccountSelect";
 
 const fmt = (n: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -84,11 +96,14 @@ function EntryFormModal({ customerId, initialType = "credit", editing, currencie
   const { t } = useTranslation();
   const [createEntry, { isLoading: isCreating }] = useCreateLedgerEntryMutation();
   const [updateEntry, { isLoading: isUpdating }] = useUpdateLedgerEntryMutation();
+  const { data: accounts = [] } = useGetAccountsQuery();
+  const isManualEntry = !editing || editing.source === "manual" || !editing.source;
 
   const [form, setForm] = useState({
     type: editing?.type ?? initialType,
     amount: editing ? String(editing.amount) : "",
     currencyCode: editing?.currencyCode ?? "",
+    accountId: editing?.accountId ? String(editing.accountId) : "",
     description: editing?.description ?? "",
     entryDate: editing?.entryDate
       ? new Date(editing.entryDate).toISOString().slice(0, 10)
@@ -100,11 +115,17 @@ function EntryFormModal({ customerId, initialType = "credit", editing, currencie
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(form.amount);
+    const accountId = parseInt(form.accountId, 10);
     if (!form.currencyCode) { onError(t("customerLedger.selectCurrency")); return; }
+    if (!accountId) { onError(t("customerLedger.selectAccount")); return; }
     if (!amount || amount <= 0) { onError("Amount must be a positive number."); return; }
 
     try {
       if (editing) {
+        if (!isManualEntry) {
+          onError(t("customerLedger.saveFailed"));
+          return;
+        }
         await updateEntry({
           customerId,
           entryId: editing.id,
@@ -112,6 +133,7 @@ function EntryFormModal({ customerId, initialType = "credit", editing, currencie
             type: form.type,
             amount,
             currencyCode: form.currencyCode,
+            accountId,
             description: form.description || undefined,
             entryDate: form.entryDate || null,
           },
@@ -122,6 +144,7 @@ function EntryFormModal({ customerId, initialType = "credit", editing, currencie
           type: form.type,
           amount,
           currencyCode: form.currencyCode,
+          accountId,
           description: form.description || undefined,
           entryDate: form.entryDate || null,
         }).unwrap();
@@ -162,7 +185,9 @@ function EntryFormModal({ customerId, initialType = "credit", editing, currencie
           {/* Currency */}
           <select
             value={form.currencyCode}
-            onChange={(e) => setForm((p) => ({ ...p, currencyCode: e.target.value }))}
+            onChange={(e) =>
+              setForm((p) => ({ ...p, currencyCode: e.target.value, accountId: "" }))
+            }
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
             required
             disabled={!!editing}
@@ -174,6 +199,19 @@ function EntryFormModal({ customerId, initialType = "credit", editing, currencie
               </option>
             ))}
           </select>
+
+          <AccountSelect
+            value={form.accountId}
+            onChange={(accountId) => setForm((p) => ({ ...p, accountId }))}
+            accounts={accounts}
+            label={t("customerLedger.selectAccount")}
+            placeholder={t("customerLedger.selectAccount")}
+            required
+            disabled={!form.currencyCode || (!isManualEntry && !!editing)}
+            filterByCurrency={form.currencyCode || undefined}
+            showBalance
+            t={t}
+          />
 
           {/* Amount */}
           <input
@@ -242,12 +280,25 @@ export default function CustomerLedgerPage() {
 
   const customerId = parseInt(id ?? "0", 10);
 
-  const canWrite = !!authUser;
+  const canViewLedger = canViewCustomerLedger(authUser);
+  const canDepositWithdraw = canCreateLedgerDepositWithdraw(authUser);
+  const canEditDeleteLedger = canEditDeleteCustomerLedger(authUser);
+  const showEntryActions = canEditDeleteLedger;
 
-  const { data: customersData } = useGetCustomersQuery();
+  useEffect(() => {
+    if (!canViewLedger) {
+      navigate("/customers", { replace: true });
+    }
+  }, [canViewLedger, navigate]);
+
+  const { data: customersData } = useGetCustomerOptionsQuery();
   const customers = customersData?.customers ?? [];
   const { data: currencies = [] } = useGetCurrenciesQuery();
   const { data: summary = [] } = useGetCustomerLedgerSummaryQuery(customerId);
+  const { data: fundingBalances, isLoading: fundingBalancesLoading } =
+    useGetCustomerFundingBalancesQuery(customerId);
+  const { data: tradeProfit, isLoading: tradeProfitLoading } =
+    useGetCustomerTradeProfitLossQuery(customerId);
   const { data: entries = [], isLoading } = useGetCustomerLedgerEntriesQuery({ customerId });
   const [deleteEntry] = useDeleteLedgerEntryMutation();
 
@@ -265,6 +316,7 @@ export default function CustomerLedgerPage() {
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; entryId: number | null }>({
     isOpen: false, entryId: null,
   });
+  const [balanceTab, setBalanceTab] = useState<"funding" | "ledger">("funding");
   const [mainTab, setMainTab] = useState<"currency" | "account">("currency");
 
   // Derive active currency tabs (currencies with entries)
@@ -326,6 +378,10 @@ export default function CustomerLedgerPage() {
     XLSX.writeFile(wb, `statement_${customer?.name ?? customerId}_${selectedCurrency}.xlsx`);
   };
 
+  if (!canViewLedger) {
+    return null;
+  }
+
   if (!customer && customers.length > 0) {
     return (
       <div className="p-8 text-slate-500">Customer not found.</div>
@@ -347,67 +403,85 @@ export default function CustomerLedgerPage() {
         </button>
       </div>
 
-      {/* Balance Summary Card */}
-      <SectionCard
-        title={`${customer?.name ?? "..."} — ${t("customerLedger.balanceSummary")}`}
-        description={customer?.phone || customer?.email || undefined}
-        actions={
-          canWrite ? (
-            <div className="flex gap-2">
-              <button
-                onClick={() => setEntryModal({ open: true, type: "credit", editing: null })}
-                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-700"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                {t("customerLedger.addCredit")}
-              </button>
-              <button
-                onClick={() => setEntryModal({ open: true, type: "debit", editing: null })}
-                className="flex items-center gap-1.5 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-rose-700"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-                </svg>
-                {t("customerLedger.addDebit")}
-              </button>
-            </div>
-          ) : undefined
-        }
-      >
-        {summary.length === 0 ? (
-          <p className="text-sm text-slate-400">{t("customerLedger.noCurrencies")}</p>
-        ) : (
-          <div className="flex flex-wrap gap-3">
-            {summary.map((s) => (
-              <button
-                key={s.currencyCode}
-                onClick={() => setActiveCurrency(s.currencyCode)}
-                className={`rounded-xl border px-4 py-3 text-left transition-all min-w-[140px] ${
-                  selectedCurrency === s.currencyCode
-                    ? "border-blue-400 bg-blue-50 shadow-sm"
-                    : "border-slate-200 bg-white hover:border-slate-300"
-                }`}
-              >
-                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{s.currencyCode}</div>
-                <div
-                  className={`text-lg font-bold mt-0.5 ${
-                    s.balance < 0 ? "text-rose-600" : s.balance > 0 ? "text-emerald-700" : "text-slate-700"
-                  }`}
-                >
-                  {s.balance < 0 ? "-" : ""}{fmt(Math.abs(s.balance))}
-                </div>
-                <div className="text-xs text-slate-400 mt-1">
-                  ↑ {fmt(s.totalCredit)} &nbsp; ↓ -{fmt(s.totalDebit)}
-                </div>
-              </button>
-            ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-900">{customer?.name ?? "..."}</h1>
+          {(customer?.phone || customer?.email) && (
+            <p className="text-sm text-slate-500 mt-0.5">{customer?.phone || customer?.email}</p>
+          )}
+        </div>
+        {canDepositWithdraw ? (
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={() => setEntryModal({ open: true, type: "credit", editing: null })}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-700"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              {t("customerLedger.addCredit")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntryModal({ open: true, type: "debit", editing: null })}
+              className="flex items-center gap-1.5 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-rose-700"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+              </svg>
+              {t("customerLedger.addDebit")}
+            </button>
           </div>
-        )}
-      </SectionCard>
+        ) : null}
+      </div>
 
       <div className="flex gap-1 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setBalanceTab("funding")}
+          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+            balanceTab === "funding"
+              ? "border-blue-500 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          {t("customerLedger.balanceTabFunding")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setBalanceTab("ledger")}
+          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+            balanceTab === "ledger"
+              ? "border-blue-500 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          {t("customerLedger.balanceTabLedger")}
+        </button>
+      </div>
+
+      {balanceTab === "funding" && (
+        <CustomerFundingBalancesPanel
+          data={fundingBalances}
+          isLoading={fundingBalancesLoading}
+        />
+      )}
+
+      {balanceTab === "ledger" && (
+        <CustomerLedgerBalancesPanel
+          summary={summary}
+          tradeProfit={tradeProfit}
+          isLoading={tradeProfitLoading}
+          selectedCurrency={selectedCurrency}
+          onSelectCurrency={(code) => {
+            setActiveCurrency(code);
+            setMainTab("currency");
+          }}
+        />
+      )}
+
+      <div className="flex gap-1 border-b border-slate-200 pt-2">
         <button
           type="button"
           onClick={() => setMainTab("currency")}
@@ -436,7 +510,7 @@ export default function CustomerLedgerPage() {
         <CustomerAccountStatementPanel
           customerId={customerId}
           customerName={customer?.name}
-          canWrite={canWrite}
+          canWrite={canEditDeleteLedger}
           onAlert={(message, type) => setAlertModal({ isOpen: true, message, type: type || "error" })}
         />
       )}
@@ -508,7 +582,7 @@ export default function CustomerLedgerPage() {
                     <th className="py-2 pr-4 text-right w-32 text-emerald-700">{t("customerLedger.credit")}</th>
                     <th className="py-2 pr-4 text-right w-32 text-rose-700">{t("customerLedger.debit")}</th>
                     <th className="py-2 pr-4 text-right w-36 font-semibold">{t("customerLedger.balance")}</th>
-                    {canWrite && <th className="py-2 text-right w-24">{t("customers.actions")}</th>}
+                    {showEntryActions && <th className="py-2 text-right w-24">{t("customers.actions")}</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -523,6 +597,11 @@ export default function CustomerLedgerPage() {
                         </td>
                         <td className="py-2 pr-4 text-slate-700">
                           <div>{entry.description || <span className="text-slate-300">—</span>}</div>
+                          {entry.accountName && (
+                            <div className="text-xs text-slate-500">
+                              {t("customerLedger.account")}: {entry.accountName}
+                            </div>
+                          )}
                           {entry.createdByName && (
                             <div className="text-xs text-slate-400">{entry.createdByName}</div>
                           )}
@@ -540,7 +619,7 @@ export default function CustomerLedgerPage() {
                         >
                           {entry.runningBalance < 0 ? "-" : ""}{fmt(Math.abs(entry.runningBalance))}
                         </td>
-                        {canWrite && (
+                        {showEntryActions && (
                           <td className="py-2 text-right">
                             <div className="flex gap-2 justify-end text-xs font-semibold">
                               <button
@@ -552,12 +631,14 @@ export default function CustomerLedgerPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
                               </button>
-                              <button
-                                className="text-amber-600 hover:text-amber-700"
-                                onClick={() => setEntryModal({ open: true, type: entry.type, editing: entry })}
-                              >
-                                {t("common.edit")}
-                              </button>
+                              {(entry.source === "manual" || !entry.source) && (
+                                <button
+                                  className="text-amber-600 hover:text-amber-700"
+                                  onClick={() => setEntryModal({ open: true, type: entry.type, editing: entry })}
+                                >
+                                  {t("common.edit")}
+                                </button>
+                              )}
                               <button
                                 className="text-rose-600 hover:text-rose-700"
                                 onClick={() => setConfirmModal({ isOpen: true, entryId: entry.id })}
@@ -570,7 +651,7 @@ export default function CustomerLedgerPage() {
                       </tr>
                       {expandedHistory.has(entry.id) && (
                         <tr key={`hist-${entry.id}`} className="bg-slate-50">
-                          <td colSpan={canWrite ? 6 : 5} className="px-4 pb-3">
+                          <td colSpan={showEntryActions ? 6 : 5} className="px-4 pb-3">
                             <EntryChangeHistory entryId={entry.id} />
                           </td>
                         </tr>
@@ -599,7 +680,7 @@ export default function CustomerLedgerPage() {
                         ? `${summaryForSelected.balance < 0 ? "-" : ""}${fmt(Math.abs(summaryForSelected.balance))}`
                         : ""}
                     </td>
-                    {canWrite && <td />}
+                    {showEntryActions && <td />}
                   </tr>
                 </tfoot>
               </table>
@@ -615,7 +696,8 @@ export default function CustomerLedgerPage() {
       )}
 
       {/* Entry form modal */}
-      {entryModal.open && (
+      {entryModal.open &&
+        (canDepositWithdraw || (entryModal.editing && canEditDeleteLedger)) && (
         <EntryFormModal
           customerId={customerId}
           initialType={entryModal.type}
@@ -634,7 +716,7 @@ export default function CustomerLedgerPage() {
       />
 
       <ConfirmModal
-        isOpen={confirmModal.isOpen}
+        isOpen={confirmModal.isOpen && canEditDeleteLedger}
         message={t("customerLedger.confirmDelete")}
         onConfirm={handleDeleteConfirm}
         onCancel={() => setConfirmModal({ isOpen: false, entryId: null })}

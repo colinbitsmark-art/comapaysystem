@@ -2,8 +2,11 @@ import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import type {
   Currency,
   Customer,
+  CustomerOptionsResponse,
   CustomerType,
   CustomerListResponse,
+  CustomerListSortField,
+  CustomerListSortDir,
   User,
   Role,
   Order,
@@ -37,8 +40,15 @@ import type {
   CustomerLedgerEntryInput,
   CustomerLedgerChange,
   CustomerLedgerSummary,
+  CustomerFundingBalances,
+  CustomerFundingBalanceRow,
+  CustomerLedgerBalanceInfo,
+  ReceiptFundedFrom,
   CustomerAccountStatementRow,
+  AccountStatementActivityFilter,
   AllCustomersConvertedBalances,
+  AllCustomersFundingConverted,
+  CustomerTradeProfitLoss,
   CustomerKycSchema,
   CustomerKycResponse,
   CustomerKycProfileDto,
@@ -86,6 +96,21 @@ const baseQuery: typeof rawBaseQuery = async (args, api, extraOptions) => {
   }
   return result;
 };
+
+function customerLedgerTagsForCustomer(customerId: number) {
+  return [
+    { type: "CustomerLedger" as const, id: `LIST-${customerId}` },
+    { type: "CustomerLedger" as const, id: `SUMMARY-${customerId}` },
+    { type: "CustomerLedger" as const, id: `FUNDING-BALANCES-${customerId}` },
+    { type: "CustomerLedger" as const, id: `FUNDING-SUMMARY-${customerId}` },
+    { type: "CustomerLedger" as const, id: `ACCOUNT-STATEMENT-${customerId}` },
+    { type: "CustomerLedger" as const, id: `BALANCE-${customerId}` },
+    { type: "CustomerLedger" as const, id: `TRADE-PROFIT-${customerId}` },
+    { type: "CustomerLedger" as const, id: "CONVERTED-BALANCES" },
+    { type: "CustomerLedger" as const, id: "FUNDING-CONVERTED-BALANCES" },
+    { type: "Customer" as const, id: "LIST" },
+  ];
+}
 
 export const api = createApi({
   reducerPath: "api",
@@ -137,7 +162,16 @@ export const api = createApi({
     }),
     getCustomers: builder.query<
       CustomerListResponse,
-      { page?: number; limit?: number; search?: string } | void
+      | {
+          page?: number;
+          limit?: number;
+          search?: string;
+          sortBy?: CustomerListSortField;
+          sortDir?: CustomerListSortDir;
+          customerType?: "individual" | "corporate";
+          kycStatus?: "none" | "submitted" | "approved" | "rejected";
+        }
+      | void
     >({
       query: (arg) => {
         const params = new URLSearchParams();
@@ -145,6 +179,10 @@ export const api = createApi({
         if (arg && arg.limit != null) params.set("limit", String(arg.limit));
         if (arg && arg.search != null && arg.search.trim() !== "")
           params.set("search", arg.search.trim());
+        if (arg?.sortBy) params.set("sortBy", arg.sortBy);
+        if (arg?.sortDir) params.set("sortDir", arg.sortDir);
+        if (arg?.customerType) params.set("customerType", arg.customerType);
+        if (arg?.kycStatus) params.set("kycStatus", arg.kycStatus);
         const qs = params.toString();
         return qs ? `customers?${qs}` : "customers";
       },
@@ -156,8 +194,44 @@ export const api = createApi({
                 id,
               })),
               { type: "Customer" as const, id: "LIST" },
+              { type: "Customer" as const, id: "PINS" },
             ]
-          : [{ type: "Customer" as const, id: "LIST" }],
+          : [
+              { type: "Customer" as const, id: "LIST" },
+              { type: "Customer" as const, id: "PINS" },
+            ],
+    }),
+    getCustomerOptions: builder.query<CustomerOptionsResponse, void>({
+      query: () => "customers/options",
+      providesTags: [{ type: "Customer", id: "OPTIONS" }],
+    }),
+    getCustomerPins: builder.query<{ customerIds: number[] }, void>({
+      query: () => "customers/pins",
+      providesTags: [{ type: "Customer" as const, id: "PINS" }],
+    }),
+    pinCustomer: builder.mutation<{ success: boolean; customerIds: number[] }, number>({
+      query: (id) => ({ url: `customers/${id}/pin`, method: "POST" }),
+      invalidatesTags: [
+        { type: "Customer", id: "LIST" },
+        { type: "Customer", id: "PINS" },
+      ],
+    }),
+    unpinCustomer: builder.mutation<{ success: boolean; customerIds: number[] }, number>({
+      query: (id) => ({ url: `customers/${id}/pin`, method: "DELETE" }),
+      invalidatesTags: [
+        { type: "Customer", id: "LIST" },
+        { type: "Customer", id: "PINS" },
+      ],
+    }),
+    reorderPinnedCustomers: builder.mutation<
+      { success: boolean; customerIds: number[] },
+      { customerIds: number[] }
+    >({
+      query: (body) => ({ url: "customers/pins/reorder", method: "PUT", body }),
+      invalidatesTags: [
+        { type: "Customer", id: "LIST" },
+        { type: "Customer", id: "PINS" },
+      ],
     }),
     addCustomer: builder.mutation<
       Customer,
@@ -168,7 +242,10 @@ export const api = createApi({
         method: "POST",
         body,
       }),
-      invalidatesTags: [{ type: "Customer", id: "LIST" }],
+      invalidatesTags: [
+        { type: "Customer", id: "LIST" },
+        { type: "Customer", id: "OPTIONS" },
+      ],
     }),
     updateCustomer: builder.mutation<
       Customer,
@@ -182,6 +259,7 @@ export const api = createApi({
       invalidatesTags: (_res, _err, { id }) => [
         { type: "Customer", id },
         { type: "Customer", id: "LIST" },
+        { type: "Customer", id: "OPTIONS" },
         { type: "CustomerKyc", id },
       ],
     }),
@@ -193,6 +271,7 @@ export const api = createApi({
       invalidatesTags: (_res, _err, id) => [
         { type: "Customer", id },
         { type: "Customer", id: "LIST" },
+        { type: "Customer", id: "OPTIONS" },
       ],
     }),
     getCustomerBeneficiaries: builder.query<CustomerBeneficiary[], number>({
@@ -277,6 +356,10 @@ export const api = createApi({
       query: () => "customers/ledger/converted-balances",
       providesTags: [{ type: "CustomerLedger" as const, id: "CONVERTED-BALANCES" }],
     }),
+    getAllCustomersFundingConvertedBalances: builder.query<AllCustomersFundingConverted, void>({
+      query: () => "customers/ledger/funding-converted-balances",
+      providesTags: [{ type: "CustomerLedger" as const, id: "FUNDING-CONVERTED-BALANCES" }],
+    }),
     getCustomerLedgerEntries: builder.query<
       CustomerLedgerEntry[],
       { customerId: number; currencyCode?: string; dateFrom?: string; dateTo?: string; showDeleted?: boolean }
@@ -300,13 +383,44 @@ export const api = createApi({
         { type: "CustomerLedger" as const, id: `SUMMARY-${customerId}` },
       ],
     }),
+    getCustomerTradeProfitLoss: builder.query<CustomerTradeProfitLoss, number>({
+      query: (customerId) => `customers/${customerId}/ledger/trade-profit-loss`,
+      providesTags: (_res, _err, customerId) => [
+        { type: "CustomerLedger" as const, id: `TRADE-PROFIT-${customerId}` },
+        { type: "CustomerLedger" as const, id: "CONVERTED-BALANCES" },
+      ],
+    }),
+    getCustomerFundingBalances: builder.query<CustomerFundingBalances, number>({
+      query: (customerId) => `customers/${customerId}/ledger/funding-balances`,
+      providesTags: (_res, _err, customerId) => [
+        { type: "CustomerLedger" as const, id: `FUNDING-BALANCES-${customerId}` },
+        { type: "CustomerLedger" as const, id: `FUNDING-SUMMARY-${customerId}` },
+      ],
+    }),
+    getCustomerLedgerBalance: builder.query<
+      CustomerLedgerBalanceInfo,
+      { customerId: number; currencyCode: string }
+    >({
+      query: ({ customerId, currencyCode }) =>
+        `customers/${customerId}/ledger/balance/${encodeURIComponent(currencyCode)}`,
+      providesTags: (_res, _err, { customerId, currencyCode }) => [
+        { type: "CustomerLedger" as const, id: `BALANCE-${customerId}-${currencyCode}` },
+      ],
+    }),
     getCustomerAccountStatement: builder.query<
       CustomerAccountStatementRow[],
-      { customerId: number; includeReversals?: boolean }
+      {
+        customerId: number;
+        activity?: AccountStatementActivityFilter;
+        includeReversals?: boolean;
+      }
     >({
-      query: ({ customerId, includeReversals = true }) => {
-        const qs = includeReversals ? "" : "?includeReversals=false";
-        return `customers/${customerId}/ledger/account-statement${qs}`;
+      query: ({ customerId, activity = "all", includeReversals = false }) => {
+        const params = new URLSearchParams();
+        if (activity !== "all") params.set("activity", activity);
+        if (includeReversals) params.set("includeReversals", "true");
+        const qs = params.toString();
+        return `customers/${customerId}/ledger/account-statement${qs ? `?${qs}` : ""}`;
       },
       providesTags: (_res, _err, { customerId }) => [
         { type: "CustomerLedger" as const, id: `ACCOUNT-STATEMENT-${customerId}` },
@@ -320,8 +434,12 @@ export const api = createApi({
       invalidatesTags: (_res, _err, customerId) => [
         { type: "CustomerLedger", id: `LIST-${customerId}` },
         { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `FUNDING-BALANCES-${customerId}` },
+        { type: "CustomerLedger", id: `FUNDING-SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `TRADE-PROFIT-${customerId}` },
         { type: "CustomerLedger", id: `ACCOUNT-STATEMENT-${customerId}` },
         { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
+        { type: "CustomerLedger", id: "FUNDING-CONVERTED-BALANCES" },
       ],
     }),
     createLedgerEntry: builder.mutation<CustomerLedgerEntry, CustomerLedgerEntryInput>({
@@ -333,8 +451,14 @@ export const api = createApi({
       invalidatesTags: (_res, _err, { customerId }) => [
         { type: "CustomerLedger", id: `LIST-${customerId}` },
         { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `FUNDING-BALANCES-${customerId}` },
+        { type: "CustomerLedger", id: `FUNDING-SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `TRADE-PROFIT-${customerId}` },
         { type: "CustomerLedger", id: `ACCOUNT-STATEMENT-${customerId}` },
         { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
+        { type: "CustomerLedger", id: "FUNDING-CONVERTED-BALANCES" },
+        { type: "Account", id: "LIST" },
+        { type: "CustomerLedger", id: `BALANCE-${customerId}` },
       ],
     }),
     updateLedgerEntry: builder.mutation<
@@ -349,9 +473,15 @@ export const api = createApi({
       invalidatesTags: (_res, _err, { customerId, entryId }) => [
         { type: "CustomerLedger", id: `LIST-${customerId}` },
         { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `FUNDING-BALANCES-${customerId}` },
+        { type: "CustomerLedger", id: `FUNDING-SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `TRADE-PROFIT-${customerId}` },
         { type: "CustomerLedger", id: `ACCOUNT-STATEMENT-${customerId}` },
         { type: "CustomerLedger", id: entryId },
         { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
+        { type: "CustomerLedger", id: "FUNDING-CONVERTED-BALANCES" },
+        { type: "Account", id: "LIST" },
+        { type: "CustomerLedger", id: `BALANCE-${customerId}` },
       ],
     }),
     deleteLedgerEntry: builder.mutation<void, { customerId: number; entryId: number }>({
@@ -362,8 +492,14 @@ export const api = createApi({
       invalidatesTags: (_res, _err, { customerId }) => [
         { type: "CustomerLedger", id: `LIST-${customerId}` },
         { type: "CustomerLedger", id: `SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `FUNDING-BALANCES-${customerId}` },
+        { type: "CustomerLedger", id: `FUNDING-SUMMARY-${customerId}` },
+        { type: "CustomerLedger", id: `TRADE-PROFIT-${customerId}` },
         { type: "CustomerLedger", id: `ACCOUNT-STATEMENT-${customerId}` },
         { type: "CustomerLedger", id: "CONVERTED-BALANCES" },
+        { type: "CustomerLedger", id: "FUNDING-CONVERTED-BALANCES" },
+        { type: "Account", id: "LIST" },
+        { type: "CustomerLedger", id: `BALANCE-${customerId}` },
       ],
     }),
     getLedgerEntryChanges: builder.query<CustomerLedgerChange[], number>({
@@ -695,8 +831,8 @@ export const api = createApi({
         handlerId?: number;
         customerId?: number;
         currencyPairs?: string;
-        buyAccountId?: number;
-        sellAccountId?: number;
+        accountId?: number;
+        accountRole?: "any" | "buy" | "sell";
         status?: OrderStatus;
         orderType?: "online" | "otc";
         tagIds?: string;
@@ -711,8 +847,10 @@ export const api = createApi({
         if (params.handlerId !== undefined) queryParams.append("handlerId", params.handlerId.toString());
         if (params.customerId !== undefined) queryParams.append("customerId", params.customerId.toString());
         if (params.currencyPairs) queryParams.append("currencyPairs", params.currencyPairs);
-        if (params.buyAccountId !== undefined) queryParams.append("buyAccountId", params.buyAccountId.toString());
-        if (params.sellAccountId !== undefined) queryParams.append("sellAccountId", params.sellAccountId.toString());
+        if (params.accountId !== undefined) queryParams.append("accountId", params.accountId.toString());
+        if (params.accountRole && params.accountRole !== "any") {
+          queryParams.append("accountRole", params.accountRole);
+        }
         if (params.status) queryParams.append("status", params.status);
         if (params.orderType) queryParams.append("orderType", params.orderType);
         if (params.tagIds) queryParams.append("tagIds", params.tagIds);
@@ -737,8 +875,8 @@ export const api = createApi({
         handlerId?: number;
         customerId?: number;
         currencyPairs?: string;
-        buyAccountId?: number;
-        sellAccountId?: number;
+        accountId?: number;
+        accountRole?: "any" | "buy" | "sell";
         status?: OrderStatus;
         orderType?: "online" | "otc";
         tagIds?: string;
@@ -751,8 +889,10 @@ export const api = createApi({
         if (params.handlerId !== undefined) queryParams.append("handlerId", params.handlerId.toString());
         if (params.customerId !== undefined) queryParams.append("customerId", params.customerId.toString());
         if (params.currencyPairs) queryParams.append("currencyPairs", params.currencyPairs);
-        if (params.buyAccountId !== undefined) queryParams.append("buyAccountId", params.buyAccountId.toString());
-        if (params.sellAccountId !== undefined) queryParams.append("sellAccountId", params.sellAccountId.toString());
+        if (params.accountId !== undefined) queryParams.append("accountId", params.accountId.toString());
+        if (params.accountRole && params.accountRole !== "any") {
+          queryParams.append("accountRole", params.accountRole);
+        }
         if (params.status) queryParams.append("status", params.status);
         if (params.orderType) queryParams.append("orderType", params.orderType);
         if (params.tagIds) queryParams.append("tagIds", params.tagIds);
@@ -804,7 +944,13 @@ export const api = createApi({
         method: "POST",
         body,
       }),
-      invalidatesTags: [{ type: "Order", id: "LIST" }],
+      invalidatesTags: (res) => {
+        const tags: Array<{ type: "Order" | "CustomerLedger"; id: number | string }> = [
+          { type: "Order", id: "LIST" },
+        ];
+        if (res?.customerId) tags.push(...customerLedgerTagsForCustomer(res.customerId));
+        return tags;
+      },
     }),
     updateOrder: builder.mutation<
       Order,
@@ -815,10 +961,14 @@ export const api = createApi({
         method: "PUT",
         body: data,
       }),
-      invalidatesTags: (_res, _err, { id }) => [
-        { type: "Order", id },
-        { type: "Order", id: "LIST" },
-      ],
+      invalidatesTags: (res, _err, { id }) => {
+        const tags: Array<{ type: "Order" | "CustomerLedger"; id: number | string }> = [
+          { type: "Order", id },
+          { type: "Order", id: "LIST" },
+        ];
+        if (res?.customerId) tags.push(...customerLedgerTagsForCustomer(res.customerId));
+        return tags;
+      },
     }),
     updateOrderStatus: builder.mutation<
       Order & { affectedAccountIds?: number[] },
@@ -830,10 +980,11 @@ export const api = createApi({
         body: { status },
       }),
       invalidatesTags: (res, _err, { id }) => {
-        const tags: Array<{ type: "Order" | "Account"; id: number | "LIST" }> = [
+        const tags: Array<{ type: "Order" | "Account" | "CustomerLedger"; id: number | string }> = [
           { type: "Order", id },
           { type: "Order", id: "LIST" },
         ];
+        if (res?.customerId) tags.push(...customerLedgerTagsForCustomer(res.customerId));
         if (res?.affectedAccountIds?.length) {
           tags.push({ type: "Account", id: "LIST" });
           res.affectedAccountIds.forEach((accountId) => {
@@ -916,7 +1067,14 @@ export const api = createApi({
     }),
     addReceipt: builder.mutation<
       OrderReceipt,
-      { id: number; file?: File; imagePath?: string; amount: number; accountId?: number }
+      {
+        id: number;
+        file?: File;
+        imagePath?: string;
+        amount: number;
+        accountId?: number;
+        fundedFrom?: ReceiptFundedFrom;
+      }
     >({
       query: ({ id, file, imagePath, ...body }) => {
         if (file) {
@@ -926,6 +1084,9 @@ export const api = createApi({
           formData.append("amount", String(body.amount));
           if (body.accountId !== undefined) {
             formData.append("accountId", String(body.accountId));
+          }
+          if (body.fundedFrom) {
+            formData.append("fundedFrom", body.fundedFrom);
           }
           return {
             url: `orders/${id}/receipts`,
@@ -977,7 +1138,14 @@ export const api = createApi({
     }),
     addPayment: builder.mutation<
       OrderPayment,
-      { id: number; file?: File; imagePath?: string; amount: number; accountId?: number }
+      {
+        id: number;
+        file?: File;
+        imagePath?: string;
+        amount: number;
+        accountId?: number;
+        fundedFrom?: ReceiptFundedFrom;
+      }
     >({
       query: ({ id, file, imagePath, ...body }) => {
         if (file) {
@@ -987,6 +1155,9 @@ export const api = createApi({
           formData.append("amount", String(body.amount));
           if (body.accountId !== undefined) {
             formData.append("accountId", String(body.accountId));
+          }
+          if (body.fundedFrom) {
+            formData.append("fundedFrom", body.fundedFrom);
           }
           return {
             url: `orders/${id}/payments`,
@@ -2167,6 +2338,11 @@ export const {
   useUpdateCurrencyMutation,
   useDeleteCurrencyMutation,
   useGetCustomersQuery,
+  useGetCustomerOptionsQuery,
+  useGetCustomerPinsQuery,
+  usePinCustomerMutation,
+  useUnpinCustomerMutation,
+  useReorderPinnedCustomersMutation,
   useAddCustomerMutation,
   useGetCustomerBeneficiariesQuery,
   useAddCustomerBeneficiaryMutation,
@@ -2294,8 +2470,12 @@ export const {
   useStopWalletPollingMutation,
   useStartWalletPollingMutation,
   useGetAllCustomersConvertedBalancesQuery,
+  useGetAllCustomersFundingConvertedBalancesQuery,
   useGetCustomerLedgerEntriesQuery,
   useGetCustomerLedgerSummaryQuery,
+  useGetCustomerTradeProfitLossQuery,
+  useGetCustomerFundingBalancesQuery,
+  useGetCustomerLedgerBalanceQuery,
   useGetCustomerAccountStatementQuery,
   useRebuildCustomerLedgerFromOrdersMutation,
   useCreateLedgerEntryMutation,

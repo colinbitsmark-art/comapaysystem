@@ -24,7 +24,7 @@ type OnlineOrderModalProps = {
   setForm: Dispatch<SetStateAction<OrderFormState>>;
   calculatedField: "buy" | "sell" | null;
   setCalculatedField: Dispatch<SetStateAction<"buy" | "sell" | null>>;
-  customers: Customer[];
+  customers: import("../../types").CustomerOption[];
   currencies: Currency[];
   handleNumberInputWheel: (e: React.WheelEvent<HTMLInputElement>) => void;
   onSubmit: (event: FormEvent) => void;

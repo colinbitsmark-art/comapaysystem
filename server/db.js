@@ -12,6 +12,7 @@ fs.mkdirSync(dataDir, { recursive: true });
 const applyPragmas = (instance) => {
   instance.pragma("journal_mode = WAL");
   instance.pragma("foreign_keys = ON");
+  instance.pragma("busy_timeout = 5000");
 };
 
 export const createDbInstance = () => {
@@ -547,6 +548,15 @@ const ensureSchema = () => {
   ).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_order_pins_sort ON order_pins (sortOrder);`).run();
 
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS customer_pins (
+      customerId INTEGER NOT NULL PRIMARY KEY,
+      sortOrder INTEGER NOT NULL,
+      FOREIGN KEY (customerId) REFERENCES customers(id) ON DELETE CASCADE
+    );`,
+  ).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_customer_pins_sort ON customer_pins (sortOrder);`).run();
+
   // Migration: legacy databases pointed order_tag_assignments.tagId to order_tags
   const orderTagFkInfo = db.prepare("PRAGMA foreign_key_list(order_tag_assignments);").all();
   const usesLegacyOrderTags = orderTagFkInfo.some((fk) => fk.table === "order_tags");
@@ -808,6 +818,9 @@ const ensureSchema = () => {
   ).run();
 
   ensureCustomerLedgerOrderColumns();
+  ensureCustomerLedgerAccountColumns();
+  ensureOrderReceiptFundedFromColumn();
+  ensureOrderPaymentFundedFromColumn();
 };
 
 /** Order-linked customer ledger columns (idempotent; safe on every startup and API call). */
@@ -840,11 +853,58 @@ export function ensureCustomerLedgerOrderColumns() {
   if (!columnNames().includes("reversesBatch")) {
     db.prepare("ALTER TABLE customer_ledger_entries ADD COLUMN reversesBatch INTEGER;").run();
   }
+  if (!columnNames().includes("accountId")) {
+    db.prepare(
+      "ALTER TABLE customer_ledger_entries ADD COLUMN accountId INTEGER REFERENCES accounts(id);",
+    ).run();
+  }
 
   db.prepare(
     `CREATE INDEX IF NOT EXISTS idx_ledger_order
      ON customer_ledger_entries(orderId);`,
   ).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_ledger_account
+     ON customer_ledger_entries(accountId);`,
+  ).run();
+}
+
+/** Manual ledger ↔ company account link (idempotent). */
+export function ensureCustomerLedgerAccountColumns() {
+  ensureCustomerLedgerOrderColumns();
+
+  const txCols = db.prepare("PRAGMA table_info(account_transactions);").all().map((c) => c.name);
+  if (!txCols.includes("ledgerEntryId")) {
+    db.prepare(
+      "ALTER TABLE account_transactions ADD COLUMN ledgerEntryId INTEGER REFERENCES customer_ledger_entries(id) ON DELETE SET NULL;",
+    ).run();
+  }
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_account_tx_ledger_entry
+     ON account_transactions(ledgerEntryId);`,
+  ).run();
+}
+
+export function ensureOrderReceiptFundedFromColumn() {
+  const receiptTableInfo = db.prepare("PRAGMA table_info(order_receipts)").all();
+  const receiptColumnNames = receiptTableInfo.map((col) => col.name);
+  if (!receiptColumnNames.includes("fundedFrom")) {
+    db.prepare(
+      "ALTER TABLE order_receipts ADD COLUMN fundedFrom TEXT NOT NULL DEFAULT 'cash';",
+    ).run();
+    db.prepare("UPDATE order_receipts SET fundedFrom = 'cash' WHERE fundedFrom IS NULL;").run();
+  }
+}
+
+export function ensureOrderPaymentFundedFromColumn() {
+  const paymentTableInfo = db.prepare("PRAGMA table_info(order_payments)").all();
+  const paymentColumnNames = paymentTableInfo.map((col) => col.name);
+  if (!paymentColumnNames.includes("fundedFrom")) {
+    db.prepare(
+      "ALTER TABLE order_payments ADD COLUMN fundedFrom TEXT NOT NULL DEFAULT 'cash';",
+    ).run();
+    db.prepare("UPDATE order_payments SET fundedFrom = 'cash' WHERE fundedFrom IS NULL;").run();
+  }
 }
 
 const seedData = () => {
@@ -927,6 +987,17 @@ const seedData = () => {
           sections: SECTIONS,
           actions: {
             createCustomer: true,
+            formatCustomerColors: true,
+            updateCustomer: true,
+            pinCustomers: true,
+            deleteCustomer: true,
+            submitCustomerKyc: true,
+            approveCustomerKyc: true,
+            reopenCustomerKyc: true,
+            manageKycPolicy: true,
+            viewCustomerLedger: true,
+            createLedgerDepositWithdraw: true,
+            editDeleteCustomerLedger: true,
             createUser: true,
             createOrder: true,
             createCurrency: true,
@@ -1140,6 +1211,8 @@ const migrateDatabase = () => {
       // Update all existing records to confirmed
       db.prepare("UPDATE order_receipts SET status = 'confirmed' WHERE status IS NULL").run();
     }
+    ensureOrderReceiptFundedFromColumn();
+    ensureOrderPaymentFundedFromColumn();
 
     // Check order_payments table for status column
     if (!paymentColumnNames.includes("status")) {
@@ -1311,6 +1384,23 @@ const migrateDatabase = () => {
       db.prepare("INSERT INTO _schema_migrations (key) VALUES ('global_order_pins_v1')").run();
     }
 
+    const customerPinsMigrated = db
+      .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
+      .get("customer_pins_v1");
+    if (!customerPinsMigrated) {
+      db.prepare(
+        `CREATE TABLE IF NOT EXISTS customer_pins (
+          customerId INTEGER NOT NULL PRIMARY KEY,
+          sortOrder INTEGER NOT NULL,
+          FOREIGN KEY (customerId) REFERENCES customers(id) ON DELETE CASCADE
+        );`,
+      ).run();
+      db.prepare(
+        `CREATE INDEX IF NOT EXISTS idx_customer_pins_sort ON customer_pins (sortOrder);`,
+      ).run();
+      db.prepare("INSERT INTO _schema_migrations (key) VALUES ('customer_pins_v1')").run();
+    }
+
     const underProcessMigrated = db
       .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
       .get("merge_under_process_to_pending_v1");
@@ -1335,6 +1425,16 @@ const migrateDatabase = () => {
     if (!ledgerOrderColumnsMigration) {
       ensureCustomerLedgerOrderColumns();
       db.prepare("INSERT INTO _schema_migrations (key) VALUES ('customer_ledger_order_columns_v1')").run();
+    }
+
+    const ledgerAccountColumnsMigration = db
+      .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
+      .get("customer_ledger_account_columns_v1");
+    if (!ledgerAccountColumnsMigration) {
+      ensureCustomerLedgerAccountColumns();
+      ensureOrderReceiptFundedFromColumn();
+    ensureOrderPaymentFundedFromColumn();
+      db.prepare("INSERT INTO _schema_migrations (key) VALUES ('customer_ledger_account_columns_v1')").run();
     }
 
     // Migrate existing roles to include "profit" and "wallets" sections if not present
@@ -1445,6 +1545,56 @@ const migrateDatabase = () => {
         }
       });
       db.prepare("INSERT INTO _schema_migrations (key) VALUES ('reference_rates_panel_display_v1')").run();
+    }
+
+    const customerPermissionsMigration = db
+      .prepare("SELECT 1 FROM _schema_migrations WHERE key = ?")
+      .get("customer_permissions_v1");
+    if (!customerPermissionsMigration) {
+      const allCustomerActions = {
+        createCustomer: true,
+        formatCustomerColors: true,
+        updateCustomer: true,
+        pinCustomers: true,
+        deleteCustomer: true,
+        submitCustomerKyc: true,
+        approveCustomerKyc: true,
+        reopenCustomerKyc: true,
+        manageKycPolicy: true,
+        viewCustomerLedger: true,
+        createLedgerDepositWithdraw: true,
+        editDeleteCustomerLedger: true,
+      };
+      const rolesForCustomers = db.prepare("SELECT id, name, permissions FROM roles").all();
+      rolesForCustomers.forEach((role) => {
+        try {
+          const permissions = JSON.parse(role.permissions);
+          if (!permissions.actions) permissions.actions = {};
+          let updated = false;
+          if (role.name === "admin") {
+            Object.entries(allCustomerActions).forEach(([key, value]) => {
+              if (permissions.actions[key] !== value) {
+                permissions.actions[key] = value;
+                updated = true;
+              }
+            });
+          }
+          if (permissions.actions.pinOrders === true && permissions.actions.pinCustomers !== true) {
+            permissions.actions.pinCustomers = true;
+            updated = true;
+          }
+          if (updated) {
+            db.prepare("UPDATE roles SET permissions = @permissions, updatedAt = @updatedAt WHERE id = @id").run({
+              id: role.id,
+              permissions: JSON.stringify(permissions),
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        } catch (error) {
+          console.error(`Error migrating customer permissions for role ${role.id}:`, error);
+        }
+      });
+      db.prepare("INSERT INTO _schema_migrations (key) VALUES ('customer_permissions_v1')").run();
     }
   } catch (error) {
     console.error("Migration error:", error);

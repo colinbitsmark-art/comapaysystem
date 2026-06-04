@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from "react";
-import type { Customer, CustomerType } from "../../types";
+import type { CustomerOption, CustomerType } from "../../types";
 
 interface UseOrdersCustomerParams {
   addCustomer: any;
   setForm: (updater: (prev: any) => any) => void;
   setOtcForm?: (updater: (prev: any) => any) => void; // optional legacy
   setIsCreateCustomerModalOpen: (isOpen: boolean) => void;
-  customers: Customer[];
+  customers: CustomerOption[];
   setAlertModal?: (modal: { isOpen: boolean; message: string; type?: "error" | "warning" | "info" | "success" }) => void;
   t?: (key: string) => string;
 }
